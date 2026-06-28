@@ -119,6 +119,7 @@ let sceneH = 720;
 let photoFlash = 0;
 let dashFlash = 0;
 let endBanner = 0;
+let toast = null;
 const sceneTree = new SceneTree();
 
 const canvas = document.querySelector("#gameCanvas");
@@ -127,10 +128,17 @@ const renderer = ctx || createFallbackContext(canvas);
 
 const els = {
   objectiveLabel: document.querySelector("#objectiveLabel"),
+  chapterLabel: document.querySelector("#chapterLabel"),
+  memoryLabel: document.querySelector("#memoryLabel"),
+  questCountLabel: document.querySelector("#questCountLabel"),
+  questProgressFill: document.querySelector("#questProgressFill"),
   zoneLabel: document.querySelector("#zoneLabel"),
   bondLabel: document.querySelector("#bondLabel"),
   hintLabel: document.querySelector("#hintLabel"),
   promptText: document.querySelector("#promptText"),
+  toastBanner: document.querySelector("#toastBanner"),
+  toastTitle: document.querySelector("#toastTitle"),
+  toastText: document.querySelector("#toastText"),
   interactButton: document.querySelector("#interactButton"),
   dashButton: document.querySelector("#dashButton"),
   photoButton: document.querySelector("#photoButton"),
@@ -328,6 +336,7 @@ function openQuestBeat(text, choices = []) {
 }
 
 function finishQuest({ memory, reward, dialogue, choices, onComplete }) {
+  const quest = CURRENT_QUEST();
   state.bond += 1;
   addMemory(memory);
   state.questIndex = Math.min(state.questIndex + 1, QUESTS.length - 1);
@@ -342,6 +351,7 @@ function finishQuest({ memory, reward, dialogue, choices, onComplete }) {
     state.finalized = true;
     endBanner = 2.6;
   }
+  showToast(quest.title, quest.reward || "进度已推进");
   saveState();
   renderHud();
   openQuestBeat(dialogue, choices);
@@ -516,13 +526,33 @@ function setPrompt(text) {
   els.promptText.textContent = text;
 }
 
+function showToast(title, text, duration = 2.4) {
+  toast = { title, text, time: duration };
+  renderToast();
+}
+
+function renderToast() {
+  const visible = Boolean(toast && toast.time > 0);
+  els.toastBanner.hidden = !visible;
+  if (!visible) return;
+  els.toastTitle.textContent = toast.title;
+  els.toastText.textContent = toast.text;
+}
+
 function renderHud() {
+  renderToast();
   const quest = CURRENT_QUEST();
   state.objective = quest.title;
   state.zone = currentZone();
+  const questProgress = Math.min(state.questIndex + 1, QUESTS.length);
+  const ratio = `${questProgress} / ${QUESTS.length}`;
   const target = currentQuestTarget();
   const ready = Boolean(target && distance(state.player, target) <= target.r + 42 && !state.dialogueOpen);
   els.objectiveLabel.textContent = quest.title;
+  els.chapterLabel.textContent = `旅程 ${ratio}`;
+  els.memoryLabel.textContent = `记忆 ${String(state.memoryLog.length).padStart(2, "0")}`;
+  els.questCountLabel.textContent = `章节 ${ratio}`;
+  els.questProgressFill.style.width = `${(questProgress / QUESTS.length) * 100}%`;
   els.zoneLabel.textContent = state.zone;
   els.bondLabel.textContent = `羁绊 ${state.bond}`;
   els.hintLabel.textContent = state.photoUnlocked ? "WASD / 摇杆移动 / 可拍照" : state.dashUnlocked ? "WASD / 摇杆移动 / 可冲刺" : "WASD / 摇杆移动";
@@ -656,6 +686,10 @@ function updateParticles(dt) {
   photoFlash = Math.max(0, photoFlash - dt * 1.5);
   dashFlash = Math.max(0, dashFlash - dt * 1.4);
   endBanner = Math.max(0, endBanner - dt * 0.4);
+  if (toast) {
+    toast.time = Math.max(0, toast.time - dt);
+    if (toast.time === 0) toast = null;
+  }
 }
 
 function drawFrame() {
@@ -1301,6 +1335,7 @@ function bootstrap() {
     }
   });
   renderHud();
+  renderToast();
   if (state.questPanelOpen) els.questPanel.classList.remove("collapsed");
   els.dialogueSheet.hidden = !state.dialogueOpen;
   els.promptText.textContent = state.prompt;

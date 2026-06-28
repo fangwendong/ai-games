@@ -43,17 +43,23 @@ const [html, css, js, manifest, sw, gdd, gameSpec] = await Promise.all([
 
 assert.match(html, /id="gameCanvas"/, "canvas exists");
 assert.match(html, /id="objectiveLabel"/, "objective label exists");
+assert.match(html, /id="chapterLabel"/, "chapter label exists");
+assert.match(html, /id="memoryLabel"/, "memory label exists");
+assert.match(html, /id="questProgressFill"/, "progress bar fill exists");
 assert.match(html, /id="promptText"/, "prompt text exists");
 assert.match(html, /id="interactButton"/, "interact button exists");
 assert.match(html, /id="dashButton"/, "dash button exists");
 assert.match(html, /id="photoButton"/, "photo button exists");
 assert.match(html, /id="joystick"/, "joystick exists");
 assert.match(html, /id="questPanel"/, "quest panel exists");
+assert.match(html, /id="toastBanner"/, "toast banner exists");
 assert.match(html, /id="dialogueSheet"/, "dialogue sheet exists");
 assert.match(html, /AI女友/, "title exists");
 
 assert.match(css, /\.game-shell/, "game shell exists");
 assert.match(css, /#gameCanvas/, "canvas styles exist");
+assert.match(css, /\.progress-track/, "progress track exists");
+assert.match(css, /\.toast-banner/, "toast banner styles exist");
 assert.match(css, /\.prompt-bar/, "prompt bar exists");
 assert.match(css, /\.dialogue-sheet/, "dialogue sheet styles exist");
 assert.match(css, /\.joystick/, "joystick styles exist");

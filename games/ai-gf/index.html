@@ -15,8 +15,18 @@
       <header class="hud hud-top">
         <div class="brand">
           <p class="eyebrow">2D 探索版</p>
-          <h1>AI女友</h1>
-          <p class="objective" id="objectiveLabel">走到林栖身边</p>
+          <div class="objective-stack">
+            <h1>AI女友</h1>
+            <p class="objective" id="objectiveLabel">走到林栖身边</p>
+            <div class="progress-strip" aria-label="进度">
+              <span id="chapterLabel">旅程 1 / 6</span>
+              <span id="memoryLabel">记忆 1</span>
+              <span id="questCountLabel">章节 1 / 6</span>
+            </div>
+            <div class="progress-track" aria-hidden="true">
+              <span id="questProgressFill"></span>
+            </div>
+          </div>
         </div>
 
         <div class="status-strip" aria-label="状态">
@@ -38,6 +48,11 @@
           <button id="dashButton" type="button" disabled>冲刺</button>
         </div>
       </section>
+
+      <div class="toast-banner" id="toastBanner" hidden aria-live="polite">
+        <p class="toast-title" id="toastTitle"></p>
+        <p class="toast-text" id="toastText"></p>
+      </div>
 
       <section class="dialogue-sheet" id="dialogueSheet" hidden aria-label="剧情对话">
         <p class="dialogue-kicker" id="dialogueKicker">林栖</p>

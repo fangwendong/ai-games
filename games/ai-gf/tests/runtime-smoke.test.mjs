@@ -126,10 +126,17 @@ elements.set("#gameCanvas", canvas);
 
 [
   "#objectiveLabel",
+  "#chapterLabel",
+  "#memoryLabel",
+  "#questCountLabel",
+  "#questProgressFill",
   "#zoneLabel",
   "#bondLabel",
   "#hintLabel",
   "#promptText",
+  "#toastBanner",
+  "#toastTitle",
+  "#toastText",
   "#interactButton",
   "#dashButton",
   "#photoButton",
@@ -213,6 +220,9 @@ await import("../src/app.js");
 const debug = globalThis.window.__aiGfDebug;
 assert.ok(debug, "debug hook should exist");
 assert.equal(elements.get("#objectiveLabel").textContent, "先走到林栖身边");
+assert.equal(elements.get("#chapterLabel").textContent, "旅程 1 / 6");
+assert.equal(elements.get("#memoryLabel").textContent, "记忆 01");
+assert.equal(elements.get("#questCountLabel").textContent, "章节 1 / 6");
 assert.match(elements.get("#promptText").textContent, /房间里等你|说话/);
 assert.ok(canvas.calls.length > 0, "canvas should render on bootstrap");
 
@@ -224,6 +234,7 @@ assert.match(elements.get("#dialogueText").textContent, /出去/);
 elements.get("#dialogueChoices").children[0].click();
 assert.equal(debug.state.questIndex, 1);
 assert.equal(elements.get("#objectiveLabel").textContent, "穿过门廊去街区");
+assert.match(elements.get("#toastTitle").textContent, /先走到林栖身边/);
 debug.closeDialogue();
 
 debug.state.player.x = 980;
