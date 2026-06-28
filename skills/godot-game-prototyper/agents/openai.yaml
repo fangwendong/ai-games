@@ -1,0 +1,4 @@
+interface:
+  display_name: "Godot Game Prototyper"
+  short_description: "Build and iterate Godot 4 playable game prototypes."
+  default_prompt: "Build a playable Godot 4 game prototype with GDScript, a clear core loop, restart flow, tuning constants, and playtest verification."
