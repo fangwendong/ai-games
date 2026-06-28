@@ -7,6 +7,18 @@ This repository is the shared home for AI-assisted game prototypes and reusable 
 - `games/`: one directory per game.
 - `skills/`: reusable skills, prompts, workflow notes, and Godot-specific conventions learned from projects.
 
+## Botmux Workflow
+
+Botmux should use `/home/fwd/work/ai-games` as the base working directory.
+
+For parallel development, start each independent request in a fresh git worktree instead of editing `main` directly:
+
+```bash
+/repo wt ai-games <branch-name>
+```
+
+Botmux creates worktrees next to the main checkout, such as `/home/fwd/work/ai-games-wt-<name>`, on branches named like `wt/<name>`.
+
 ## Game Directory Convention
 
 Each game should live in `games/<game-id>/` and include:
@@ -22,4 +34,3 @@ For Godot games, keep the Godot project root inside the game directory.
 Reusable skills should live in `skills/<skill-id>/`.
 
 When a project creates a reusable workflow, checklist, Godot pattern, tuning method, or playtest rubric, extract it into `skills/` instead of leaving it buried in a single game.
-
