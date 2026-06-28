@@ -1,0 +1,17 @@
+{
+  "name": "AI女友",
+  "short_name": "AI女友",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0c1120",
+  "theme_color": "#1c2333",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "assets/icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

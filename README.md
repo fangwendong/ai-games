@@ -29,6 +29,10 @@ Each game should live in `games/<game-id>/` and include:
 
 For Godot games, keep the Godot project root inside the game directory.
 
+## Games
+
+- `games/ai-gf/`: offline 2D companion exploration prototype with a web/PWA build and Android WebView wrapper.
+
 ## Skill Convention
 
 Reusable skills should live in `skills/<skill-id>/`.

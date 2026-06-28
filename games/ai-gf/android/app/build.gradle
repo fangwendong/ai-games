@@ -1,0 +1,63 @@
+plugins {
+  id 'com.android.application'
+}
+
+def webAssetsDir = file("$buildDir/generated/assets/www")
+
+android {
+  namespace "com.fangwendong.aigf"
+  compileSdk 34
+
+  defaultConfig {
+    applicationId "com.fangwendong.aigf"
+    minSdk 24
+    targetSdk 34
+    versionCode 1
+    versionName "0.1.0"
+  }
+
+  buildTypes {
+    release {
+      minifyEnabled false
+      shrinkResources false
+      signingConfig signingConfigs.debug
+      proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+    }
+    debug {
+      applicationIdSuffix ".debug"
+      versionNameSuffix "-debug"
+    }
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+
+  sourceSets {
+    main {
+      assets.srcDirs += [webAssetsDir]
+    }
+  }
+}
+
+dependencies {
+  implementation "androidx.webkit:webkit:1.12.1"
+}
+
+tasks.register("syncWebAssets", Copy) {
+  into webAssetsDir
+  from("$rootDir/../index.html")
+  from("$rootDir/../manifest.webmanifest")
+  from("$rootDir/../sw.js")
+  from("$rootDir/../assets") {
+    into "assets"
+  }
+  from("$rootDir/../src") {
+    into "src"
+  }
+}
+
+tasks.named("preBuild") {
+  dependsOn("syncWebAssets")
+}

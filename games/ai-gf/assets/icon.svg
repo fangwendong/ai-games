@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="晚安频率">
+  <rect width="512" height="512" rx="96" fill="#f7efe9"/>
+  <path d="M80 344c0-80 64-144 176-144s176 64 176 144v64H80z" fill="#e56d7f"/>
+  <circle cx="256" cy="214" r="92" fill="#ffd9c9"/>
+  <path d="M157 216c0-76 45-132 102-132s96 56 96 132c-32-36-70-52-112-52-33 0-62 17-86 52z" fill="#35272e"/>
+  <circle cx="224" cy="220" r="10" fill="#2b2528"/>
+  <circle cx="288" cy="220" r="10" fill="#2b2528"/>
+  <path d="M230 260c18 18 36 18 54 0" fill="none" stroke="#b74459" stroke-width="10" stroke-linecap="round"/>
+  <circle cx="370" cy="116" r="38" fill="#f7d47f"/>
+  <path d="M128 110h92M128 146h54" stroke="#4a9088" stroke-width="18" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,11 @@
+{
+  "name": "ai-gf",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Offline 2D exploration companion game prototype for Android browsers and macOS browsers.",
+  "type": "module",
+  "scripts": {
+    "start": "python3 -m http.server 4173",
+    "test": "node tests/static.test.mjs && node tests/runtime-smoke.test.mjs"
+  }
+}

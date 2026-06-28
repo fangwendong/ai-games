@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#1c2333">
+    <title>AI女友</title>
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="stylesheet" href="src/styles.css">
+  </head>
+  <body>
+    <main class="game-shell" aria-label="AI女友探索版">
+      <canvas id="gameCanvas" aria-label="AI女友探索地图"></canvas>
+
+      <header class="hud hud-top">
+        <div class="brand">
+          <p class="eyebrow">2D 探索版</p>
+          <h1>AI女友</h1>
+          <p class="objective" id="objectiveLabel">走到林栖身边</p>
+        </div>
+
+        <div class="status-strip" aria-label="状态">
+          <span id="zoneLabel">公寓</span>
+          <span id="bondLabel">羁绊 0</span>
+          <span id="hintLabel">WASD / 拖动摇杆移动</span>
+        </div>
+      </header>
+
+      <div class="hud hud-actions" aria-label="快捷操作">
+        <button id="questButton" type="button">任务</button>
+        <button id="photoButton" type="button" disabled>拍照</button>
+      </div>
+
+      <section class="prompt-bar" aria-label="当前提示">
+        <span class="prompt-text" id="promptText">先向前走，靠近林栖</span>
+        <div class="prompt-actions">
+          <button id="interactButton" type="button">互动</button>
+          <button id="dashButton" type="button" disabled>冲刺</button>
+        </div>
+      </section>
+
+      <section class="dialogue-sheet" id="dialogueSheet" hidden aria-label="剧情对话">
+        <p class="dialogue-kicker" id="dialogueKicker">林栖</p>
+        <p class="dialogue-text" id="dialogueText"></p>
+        <div class="dialogue-choices" id="dialogueChoices"></div>
+        <div class="dialogue-footer">
+          <button id="closeDialogueButton" type="button">继续探索</button>
+        </div>
+      </section>
+
+      <aside class="quest-panel collapsed" id="questPanel" aria-label="任务列表">
+        <div class="quest-panel-head">
+          <h2>任务</h2>
+          <button id="closeQuestButton" type="button">收起</button>
+        </div>
+        <ol id="questList"></ol>
+      </aside>
+
+      <div class="touch-controls" aria-label="触摸控制">
+        <div class="joystick" id="joystick" aria-label="移动摇杆">
+          <span class="joystick-base"></span>
+          <span class="joystick-knob" id="joystickKnob"></span>
+        </div>
+        <div class="touch-actions">
+          <button id="touchInteractButton" type="button">互动</button>
+          <button id="touchDashButton" type="button" disabled>冲刺</button>
+        </div>
+      </div>
+    </main>
+
+    <script src="src/app.js" type="module"></script>
+  </body>
+</html>
