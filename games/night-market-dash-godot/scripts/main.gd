@@ -7,6 +7,8 @@ const DASH_DURATION := 0.14
 const DASH_COOLDOWN := 1.35
 const FIRE_RATE := 0.36
 const BULLET_SPEED := 560.0
+const MAX_HAZARDS := 2
+const HAZARD_BASE_CHANCE := 0.18
 
 var rng := RandomNumberGenerator.new()
 var mode := "ready"
@@ -28,7 +30,7 @@ var chosen_upgrades: Array[String] = []
 var player := {
 	"pos": Vector2(640, 360),
 	"vel": Vector2.ZERO,
-	"radius": 15.0,
+	"radius": 18.0,
 	"hp": 5,
 	"damage": 1,
 }
@@ -109,7 +111,7 @@ func reset() -> void:
 	player = {
 		"pos": Vector2(640, 360),
 		"vel": Vector2.ZERO,
-		"radius": 15.0,
+		"radius": 18.0,
 		"hp": 5,
 		"damage": 1,
 	}
@@ -126,8 +128,8 @@ func start() -> void:
 	begin_wave()
 
 func begin_wave() -> void:
-	wave_spawn_left = 5 + wave * 3
-	spawn_timer = 0.25
+	wave_spawn_left = 4 + wave * 2
+	spawn_timer = 0.45
 	hazards.clear()
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -178,7 +180,7 @@ func try_dash() -> void:
 	dash_time = DASH_DURATION
 	dash_timer = dash_cooldown
 	invuln_timer = max(invuln_timer, 0.22)
-	burst(player.pos, Color("#37f4d0"), 16)
+	burst(player.pos, Color("#37f4d0"), 9)
 
 func input_vector() -> Vector2:
 	var dir := Input.get_vector("move_left", "move_right", "move_up", "move_down")
@@ -212,8 +214,8 @@ func update_game(delta: float) -> void:
 	if wave_spawn_left > 0 and spawn_timer <= 0.0:
 		spawn_enemy()
 		wave_spawn_left -= 1
-		spawn_timer = max(0.34, 1.0 - wave * 0.12)
-	if rng.randf() < delta * (0.42 + wave * 0.12):
+		spawn_timer = max(0.55, 1.2 - wave * 0.11)
+	if hazards.size() < MAX_HAZARDS and rng.randf() < delta * (HAZARD_BASE_CHANCE + wave * 0.05):
 		spawn_hazard()
 
 	fire_nearest()
@@ -257,13 +259,13 @@ func spawn_hazard() -> void:
 	var horizontal := rng.randf() > 0.5
 	hazards.append({
 		"rect": Rect2(
-			room.position.x + 16 if horizontal else rng.randf_range(room.position.x + 48, room.end.x - 48),
-			rng.randf_range(room.position.y + 48, room.end.y - 48) if horizontal else room.position.y + 16,
-			room.size.x - 32 if horizontal else 34,
-			34 if horizontal else room.size.y - 32
+			room.position.x + 22 if horizontal else rng.randf_range(room.position.x + 58, room.end.x - 58),
+			rng.randf_range(room.position.y + 58, room.end.y - 58) if horizontal else room.position.y + 22,
+			room.size.x - 44 if horizontal else 24,
+			24 if horizontal else room.size.y - 44
 		),
-		"warn": 0.78,
-		"active": 0.34,
+		"warn": 0.95,
+		"active": 0.28,
 	})
 
 func fire_nearest() -> void:
@@ -291,8 +293,8 @@ func update_bullets(delta: float) -> void:
 				bullet.life = 0.0
 				enemy.hp -= bullet.damage
 				enemy.hit = 0.12
-				shake = max(shake, 3.0)
-				burst(enemy.pos, Color("#ffd15c"), 5)
+				shake = max(shake, 1.5)
+				burst(enemy.pos, Color("#ffd15c"), 4)
 	bullets = bullets.filter(func(b): return b.life > 0.0 and Rect2(Vector2(-60, -60), WORLD_SIZE + Vector2(120, 120)).has_point(b.pos))
 
 func update_enemies(delta: float) -> void:
@@ -308,8 +310,8 @@ func update_enemies(delta: float) -> void:
 			enemy.shoot_timer -= delta
 			if enemy.shoot_timer <= 0.0:
 				enemy.shoot_timer = rng.randf_range(1.2, 1.65)
-				enemy_bullets.append({"pos": enemy.pos, "vel": dir * 260.0, "life": 2.2, "radius": 7.0})
-				burst(enemy.pos, Color("#ff4e64"), 5)
+				enemy_bullets.append({"pos": enemy.pos, "vel": dir * 240.0, "life": 2.0, "radius": 5.0})
+				burst(enemy.pos, Color("#ff4e64"), 3)
 		else:
 			enemy.pos += dir * enemy.speed * delta
 		for stall in stalls:
@@ -317,12 +319,12 @@ func update_enemies(delta: float) -> void:
 		if enemy.pos.distance_to(player.pos) < enemy.radius + player.radius and invuln_timer <= 0.0:
 			player.hp -= 1
 			invuln_timer = 0.85
-			shake = 12.0
-			burst(player.pos, Color("#ff4e64"), 22)
+			shake = 6.0
+			burst(player.pos, Color("#ff4e64"), 10)
 	for enemy in enemies:
 		if enemy.hp <= 0:
 			drops.append({"pos": enemy.pos, "radius": 7.0})
-			burst(enemy.pos, Color("#37f4d0"), 14)
+			burst(enemy.pos, Color("#37f4d0"), 8)
 	enemies = enemies.filter(func(e): return e.hp > 0)
 
 func update_enemy_bullets(delta: float) -> void:
@@ -333,8 +335,8 @@ func update_enemy_bullets(delta: float) -> void:
 			bullet.life = 0.0
 			player.hp -= 1
 			invuln_timer = 0.75
-			shake = 10.0
-			burst(player.pos, Color("#ff4e64"), 18)
+			shake = 5.0
+			burst(player.pos, Color("#ff4e64"), 9)
 	enemy_bullets = enemy_bullets.filter(func(b): return b.life > 0.0 and Rect2(Vector2(-80, -80), WORLD_SIZE + Vector2(160, 160)).has_point(b.pos))
 
 func update_hazards(delta: float) -> void:
@@ -346,8 +348,8 @@ func update_hazards(delta: float) -> void:
 			if hazard.rect.has_point(player.pos) and invuln_timer <= 0.0:
 				player.hp -= 1
 				invuln_timer = 0.75
-				shake = 11.0
-				burst(player.pos, Color("#ff4e64"), 18)
+				shake = 5.0
+				burst(player.pos, Color("#ff4e64"), 9)
 	hazards = hazards.filter(func(h): return h.active > 0.0)
 
 func update_drops(delta: float) -> void:
@@ -358,7 +360,7 @@ func update_drops(delta: float) -> void:
 		if distance < player.radius + drop.radius + 3.0:
 			drop.dead = true
 			gems += 1
-			burst(drop.pos, Color("#ffd15c"), 10)
+			burst(drop.pos, Color("#ffd15c"), 6)
 	drops = drops.filter(func(g): return not g.has("dead"))
 
 func update_particles(delta: float) -> void:
@@ -376,10 +378,10 @@ func push_circle_out(circle: Dictionary, rect: Rect2) -> void:
 		circle.pos += push_delta.normalized() * (circle.radius + 2.0 - distance)
 
 func burst(pos: Vector2, color: Color, count: int) -> void:
-	for i in count:
+	for i in min(count, 8):
 		var angle := rng.randf_range(0.0, TAU)
-		var speed := rng.randf_range(50.0, 220.0)
-		particles.append({"pos": pos, "vel": Vector2.from_angle(angle) * speed, "life": rng.randf_range(0.22, 0.56), "color": color})
+		var speed := rng.randf_range(34.0, 145.0)
+		particles.append({"pos": pos, "vel": Vector2.from_angle(angle) * speed, "life": rng.randf_range(0.16, 0.34), "color": color})
 
 func _draw() -> void:
 	var offset := Vector2(rng.randf_range(-shake, shake), rng.randf_range(-shake, shake)) * 0.5
@@ -397,22 +399,22 @@ func _draw() -> void:
 
 func draw_market() -> void:
 	draw_rect(Rect2(Vector2.ZERO, WORLD_SIZE), Color("#071114"))
-	for x in range(48, int(WORLD_SIZE.x), 48):
-		draw_line(Vector2(x, 0), Vector2(x, WORLD_SIZE.y), Color(0.22, 0.96, 0.82, 0.09), 1.0)
-	for y in range(48, int(WORLD_SIZE.y), 48):
-		draw_line(Vector2(0, y), Vector2(WORLD_SIZE.x, y), Color(0.22, 0.96, 0.82, 0.09), 1.0)
+	for x in range(96, int(WORLD_SIZE.x), 96):
+		draw_line(Vector2(x, 0), Vector2(x, WORLD_SIZE.y), Color(0.22, 0.96, 0.82, 0.025), 1.0)
+	for y in range(96, int(WORLD_SIZE.y), 96):
+		draw_line(Vector2(0, y), Vector2(WORLD_SIZE.x, y), Color(0.22, 0.96, 0.82, 0.025), 1.0)
 	for room in rooms:
-		draw_rect(room, Color(0.06, 0.22, 0.22, 0.78), true)
-		draw_rect(room, Color(0.22, 0.96, 0.82, 0.22), false, 2.0)
+		draw_rect(room, Color(0.05, 0.16, 0.17, 0.58), true)
+		draw_rect(room, Color(0.22, 0.96, 0.82, 0.08), false, 1.0)
 	for stall in stalls:
-		draw_rect(stall, Color(1.0, 0.82, 0.36, 0.16), true)
-		draw_rect(stall, Color(1.0, 0.82, 0.36, 0.34), false, 2.0)
+		draw_rect(stall, Color(0.56, 0.42, 0.18, 0.18), true)
+		draw_rect(stall, Color(0.95, 0.76, 0.32, 0.11), false, 1.0)
 
 func draw_hazards() -> void:
 	for hazard in hazards:
-		var color := Color(1.0, 0.3, 0.4, 0.16) if hazard.warn > 0.0 else Color(1.0, 0.3, 0.4, 0.55)
+		var color := Color(1.0, 0.3, 0.4, 0.09) if hazard.warn > 0.0 else Color(1.0, 0.3, 0.4, 0.42)
 		draw_rect(hazard.rect, color, true)
-		draw_rect(hazard.rect, Color(1.0, 0.85, 0.85, 0.72), false, 2.0)
+		draw_rect(hazard.rect, Color(1.0, 0.85, 0.85, 0.45), false, 1.5)
 
 func draw_player() -> void:
 	if dash_time > 0.0:
@@ -442,7 +444,7 @@ func draw_bullets() -> void:
 func draw_enemy_bullets() -> void:
 	for bullet in enemy_bullets:
 		draw_circle(bullet.pos, bullet.radius, Color("#ff6d83"))
-		draw_arc(bullet.pos, bullet.radius + 2.0, 0.0, TAU, 12, Color(1.0, 0.85, 0.88, 0.72), 1.5)
+		draw_arc(bullet.pos, bullet.radius + 2.0, 0.0, TAU, 12, Color(1.0, 0.85, 0.88, 0.48), 1.0)
 
 func draw_drops() -> void:
 	for drop in drops:
@@ -450,7 +452,7 @@ func draw_drops() -> void:
 
 func draw_particles() -> void:
 	for particle in particles:
-		var alpha: float = clamp(particle.life / 0.56, 0.0, 1.0)
+		var alpha: float = clamp(particle.life / 0.34, 0.0, 0.72)
 		var color: Color = particle.color
 		color.a = alpha
 		draw_circle(particle.pos, 3.0, color)

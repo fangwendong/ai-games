@@ -8,6 +8,8 @@ Move through a compact night market arena, dash through red warning zones, auto-
 
 This version is intentionally simple, but it must feel like a game rather than a moving dot. The key readability rules are cyan for player/actions, red for danger, gold for rewards, and one-key restart.
 
+After playtest feedback, visual readability takes priority over spectacle. Background detail should stay low contrast, red should only mean real danger, and hit effects should confirm events without filling the screen.
+
 ## Playable Features
 
 - Drifters pressure the player steadily.
@@ -28,8 +30,11 @@ This version is intentionally simple, but it must feel like a game rather than a
 - Base fire rate: `0.36`
 - Bullet speed: `560`
 - Starting HP: `5`
-- Wave size: `5 + wave * 3`
-- Shooter projectile speed: `260`
+- Wave size after readability pass: `4 + wave * 2`
+- Max simultaneous hazards: `2`
+- Hazard warning time: `0.95`
+- Hazard active time: `0.28`
+- Shooter projectile speed: `240`
 
 ## Quality Pass
 
@@ -38,6 +43,11 @@ This version is intentionally simple, but it must feel like a game rather than a
 - Added start, upgrade, win, loss, and restart states.
 - Added a shooter enemy and enemy projectiles so later waves change behavior, not just enemy count.
 - Made upgrades persist and show in the HUD.
+- Reduced background grid contrast and frequency.
+- Reduced room and stall border brightness so gameplay objects stand out.
+- Limited hazard count and lowered hazard spawn rate.
+- Reduced screen shake, particle count, particle lifetime, and enemy projectile size.
+- Increased player radius for better readability.
 
 ## Validation
 
