@@ -1,0 +1,828 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Night Market Dash</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #071114;
+      --panel: rgba(5, 18, 22, 0.78);
+      --line: rgba(128, 241, 218, 0.28);
+      --text: #e8fff8;
+      --muted: #8bb2aa;
+      --cyan: #37f4d0;
+      --gold: #ffd15c;
+      --red: #ff4e64;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: radial-gradient(circle at 30% 20%, #11313a 0, var(--bg) 44%, #030708 100%);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    #game {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      cursor: crosshair;
+      touch-action: none;
+    }
+
+    .hud {
+      position: fixed;
+      inset: 14px 14px auto 14px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      pointer-events: none;
+    }
+
+    .cluster {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      max-width: min(720px, calc(100vw - 28px));
+    }
+
+    .pill {
+      min-height: 34px;
+      padding: 7px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: 0 10px 26px rgba(0, 0, 0, 0.25);
+      backdrop-filter: blur(10px);
+      font-size: 13px;
+      line-height: 18px;
+      white-space: nowrap;
+    }
+
+    .pill strong {
+      color: var(--cyan);
+      font-weight: 800;
+    }
+
+    .right {
+      text-align: right;
+      color: var(--muted);
+    }
+
+    .overlay {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: rgba(0, 0, 0, 0.42);
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 140ms ease;
+    }
+
+    .overlay.visible {
+      opacity: 1;
+    }
+
+    .modal {
+      width: min(520px, 100%);
+      border: 1px solid rgba(128, 241, 218, 0.36);
+      border-radius: 8px;
+      background: rgba(5, 18, 22, 0.92);
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+      padding: 20px;
+      pointer-events: none;
+    }
+
+    .modal h1 {
+      margin: 0 0 8px;
+      font-size: clamp(25px, 4vw, 40px);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    .modal p {
+      margin: 7px 0;
+      color: #bfe8de;
+      font-size: 15px;
+      line-height: 1.55;
+    }
+
+    .modal .hint {
+      margin-top: 14px;
+      color: var(--gold);
+      font-weight: 800;
+    }
+
+    .upgrade-row {
+      display: grid;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .choice {
+      border: 1px solid rgba(255, 209, 92, 0.34);
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: #fff6d8;
+      background: rgba(255, 209, 92, 0.08);
+      font-size: 14px;
+      line-height: 1.35;
+    }
+
+    .touch {
+      position: fixed;
+      inset: auto 14px 14px 14px;
+      display: none;
+      justify-content: space-between;
+      align-items: flex-end;
+      pointer-events: none;
+    }
+
+    .pad,
+    .dash {
+      width: 112px;
+      height: 112px;
+      border: 1px solid rgba(128, 241, 218, 0.34);
+      border-radius: 50%;
+      background: rgba(5, 18, 22, 0.55);
+      backdrop-filter: blur(8px);
+    }
+
+    .dash {
+      width: 82px;
+      height: 82px;
+      display: grid;
+      place-items: center;
+      color: var(--gold);
+      font-weight: 800;
+      font-size: 12px;
+    }
+
+    @media (hover: none) and (pointer: coarse) {
+      .touch {
+        display: flex;
+      }
+
+      .right {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div class="hud">
+    <div class="cluster">
+      <div class="pill">Wave <strong id="wave">1</strong>/3</div>
+      <div class="pill">HP <strong id="hp">5</strong></div>
+      <div class="pill">Gems <strong id="gems">0</strong></div>
+      <div class="pill">Dash <strong id="dash">Ready</strong></div>
+    </div>
+    <div class="pill right">WASD / Arrows move · Space dash · Auto-fire nearest enemy · R restart</div>
+  </div>
+
+  <div id="overlay" class="overlay visible">
+    <div class="modal">
+      <h1 id="title">Night Market Dash</h1>
+      <p id="body">Survive three waves in the lantern maze. Dash through danger lines, collect gold gems, and let the charm bolts clear the room.</p>
+      <div id="choices" class="upgrade-row"></div>
+      <p id="hint" class="hint">Press Enter or Space to start</p>
+    </div>
+  </div>
+
+  <div class="touch">
+    <div class="pad"></div>
+    <div class="dash">DASH</div>
+  </div>
+
+  <script>
+    const canvas = document.querySelector("#game");
+    const ctx = canvas.getContext("2d");
+    const hud = {
+      wave: document.querySelector("#wave"),
+      hp: document.querySelector("#hp"),
+      gems: document.querySelector("#gems"),
+      dash: document.querySelector("#dash"),
+      overlay: document.querySelector("#overlay"),
+      title: document.querySelector("#title"),
+      body: document.querySelector("#body"),
+      choices: document.querySelector("#choices"),
+      hint: document.querySelector("#hint"),
+    };
+
+    const keys = new Set();
+    const pointer = { x: 0, y: 0, down: false };
+    const world = { w: 1280, h: 720 };
+    let dpr = 1;
+    let last = performance.now();
+    let state;
+
+    const rooms = [
+      { x: 92, y: 94, w: 304, h: 212 },
+      { x: 444, y: 84, w: 360, h: 232 },
+      { x: 860, y: 112, w: 300, h: 196 },
+      { x: 124, y: 386, w: 354, h: 210 },
+      { x: 550, y: 364, w: 298, h: 236 },
+      { x: 916, y: 390, w: 250, h: 206 },
+    ];
+
+    const stalls = [
+      { x: 80, y: 330, w: 254, h: 38 }, { x: 370, y: 330, w: 176, h: 38 },
+      { x: 784, y: 330, w: 244, h: 38 }, { x: 1058, y: 330, w: 130, h: 38 },
+      { x: 414, y: 118, w: 24, h: 154 }, { x: 820, y: 136, w: 24, h: 150 },
+      { x: 502, y: 424, w: 24, h: 118 }, { x: 870, y: 424, w: 24, h: 128 },
+    ];
+
+    const upgrades = [
+      { label: "1  Faster charms", apply: () => state.player.fireRate *= 0.78 },
+      { label: "2  Harder hits", apply: () => state.player.damage += 1 },
+      { label: "3  Shorter dash cooldown", apply: () => state.player.dashCooldown *= 0.78 },
+    ];
+
+    function reset() {
+      state = {
+        mode: "ready",
+        time: 0,
+        shake: 0,
+        wave: 1,
+        spawnLeft: 0,
+        waveTimer: 0,
+        gems: 0,
+        flash: 0,
+        player: {
+          x: world.w / 2,
+          y: world.h / 2,
+          r: 14,
+          hp: 5,
+          invuln: 0,
+          speed: 255,
+          fireRate: 0.42,
+          fireTimer: 0,
+          damage: 1,
+          dashCooldown: 1.5,
+          dashTimer: 0,
+          dashTime: 0,
+          vx: 0,
+          vy: 0,
+        },
+        enemies: [],
+        bullets: [],
+        gemsList: [],
+        hazards: [],
+        particles: [],
+      };
+      showIntro();
+      updateHud();
+    }
+
+    function showIntro() {
+      hud.overlay.classList.add("visible");
+      hud.title.textContent = "Night Market Dash";
+      hud.body.textContent = "Survive three waves in the lantern maze. Dash through red danger lines, collect gold gems, and clear each room.";
+      hud.choices.innerHTML = "";
+      hud.hint.textContent = "Press Enter or Space to start";
+    }
+
+    function start() {
+      state.mode = "playing";
+      hud.overlay.classList.remove("visible");
+      beginWave();
+    }
+
+    function beginWave() {
+      state.spawnLeft = 5 + state.wave * 3;
+      state.waveTimer = 0.5;
+      state.hazards.length = 0;
+    }
+
+    function chooseUpgrade(index) {
+      upgrades[index].apply();
+      state.mode = "playing";
+      state.wave += 1;
+      hud.overlay.classList.remove("visible");
+      beginWave();
+    }
+
+    function showUpgrade() {
+      state.mode = "upgrade";
+      hud.overlay.classList.add("visible");
+      hud.title.textContent = "Lantern Blessing";
+      hud.body.textContent = "The market opens a new alley. Pick one upgrade before the next wave.";
+      hud.hint.textContent = "Press 1, 2, or 3";
+      hud.choices.innerHTML = upgrades.map((u) => `<div class="choice">${u.label}</div>`).join("");
+    }
+
+    function finish(win) {
+      state.mode = win ? "won" : "lost";
+      hud.overlay.classList.add("visible");
+      hud.title.textContent = win ? "Exit Opened" : "The Market Took You";
+      hud.body.textContent = win
+        ? `You cleared the night market with ${state.gems} gems.`
+        : `You reached wave ${state.wave} and collected ${state.gems} gems.`;
+      hud.choices.innerHTML = "";
+      hud.hint.textContent = "Press R to restart";
+    }
+
+    function resize() {
+      dpr = Math.min(2, window.devicePixelRatio || 1);
+      canvas.width = Math.floor(innerWidth * dpr);
+      canvas.height = Math.floor(innerHeight * dpr);
+      canvas.style.width = `${innerWidth}px`;
+      canvas.style.height = `${innerHeight}px`;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    function sx(x) {
+      return x * innerWidth / world.w;
+    }
+
+    function sy(y) {
+      return y * innerHeight / world.h;
+    }
+
+    function toWorld(clientX, clientY) {
+      return { x: clientX * world.w / innerWidth, y: clientY * world.h / innerHeight };
+    }
+
+    function rand(min, max) {
+      return min + Math.random() * (max - min);
+    }
+
+    function dist(a, b) {
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    }
+
+    function clamp(v, min, max) {
+      return Math.max(min, Math.min(max, v));
+    }
+
+    function spawnEnemy() {
+      const room = rooms[Math.floor(Math.random() * rooms.length)];
+      const type = Math.random() < 0.22 + state.wave * 0.04 ? "runner" : "drifter";
+      state.enemies.push({
+        type,
+        x: rand(room.x + 28, room.x + room.w - 28),
+        y: rand(room.y + 28, room.y + room.h - 28),
+        r: type === "runner" ? 12 : 16,
+        hp: type === "runner" ? 2 : 3 + state.wave,
+        speed: type === "runner" ? 150 : 82 + state.wave * 14,
+        hit: 0,
+      });
+    }
+
+    function spawnHazard() {
+      const horizontal = Math.random() > 0.5;
+      const room = rooms[Math.floor(Math.random() * rooms.length)];
+      state.hazards.push({
+        x: horizontal ? room.x + 16 : rand(room.x + 50, room.x + room.w - 50),
+        y: horizontal ? rand(room.y + 50, room.y + room.h - 50) : room.y + 16,
+        w: horizontal ? room.w - 32 : 34,
+        h: horizontal ? 34 : room.h - 32,
+        warn: 0.78,
+        active: 0.34,
+        done: false,
+      });
+    }
+
+    function burst(x, y, color, count = 10) {
+      for (let i = 0; i < count; i += 1) {
+        const a = rand(0, Math.PI * 2);
+        const s = rand(45, 210);
+        state.particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rand(0.22, 0.55), max: 0.55, color });
+      }
+    }
+
+    function inputVector() {
+      let x = 0;
+      let y = 0;
+      if (keys.has("arrowleft") || keys.has("a")) x -= 1;
+      if (keys.has("arrowright") || keys.has("d")) x += 1;
+      if (keys.has("arrowup") || keys.has("w")) y -= 1;
+      if (keys.has("arrowdown") || keys.has("s")) y += 1;
+      const len = Math.hypot(x, y) || 1;
+      return { x: x / len, y: y / len };
+    }
+
+    function dash() {
+      const p = state.player;
+      if (p.dashTimer > 0 || state.mode !== "playing") return;
+      const v = inputVector();
+      if (v.x === 0 && v.y === 0) return;
+      p.vx = v.x * 760;
+      p.vy = v.y * 760;
+      p.dashTime = 0.15;
+      p.dashTimer = p.dashCooldown;
+      p.invuln = Math.max(p.invuln, 0.22);
+      burst(p.x, p.y, "#37f4d0", 16);
+    }
+
+    function update(dt) {
+      state.time += dt;
+      state.shake = Math.max(0, state.shake - dt * 18);
+      state.flash = Math.max(0, state.flash - dt * 3);
+
+      if (state.mode !== "playing") {
+        updateParticles(dt);
+        return;
+      }
+
+      const p = state.player;
+      p.invuln = Math.max(0, p.invuln - dt);
+      p.fireTimer -= dt;
+      p.dashTimer = Math.max(0, p.dashTimer - dt);
+      p.dashTime = Math.max(0, p.dashTime - dt);
+
+      const v = inputVector();
+      if (p.dashTime <= 0) {
+        p.vx = v.x * p.speed;
+        p.vy = v.y * p.speed;
+      }
+      p.x = clamp(p.x + p.vx * dt, 36, world.w - 36);
+      p.y = clamp(p.y + p.vy * dt, 44, world.h - 36);
+
+      for (const block of stalls) {
+        pushCircleOut(p, block);
+      }
+
+      state.waveTimer -= dt;
+      if (state.spawnLeft > 0 && state.waveTimer <= 0) {
+        spawnEnemy();
+        state.spawnLeft -= 1;
+        state.waveTimer = Math.max(0.38, 1.1 - state.wave * 0.12);
+      }
+      if (Math.random() < dt * (0.45 + state.wave * 0.13)) spawnHazard();
+
+      fireAtNearest();
+      updateBullets(dt);
+      updateEnemies(dt);
+      updateHazards(dt);
+      updateGems(dt);
+      updateParticles(dt);
+
+      if (p.hp <= 0) finish(false);
+      if (state.spawnLeft === 0 && state.enemies.length === 0) {
+        if (state.wave >= 3) finish(true);
+        else showUpgrade();
+      }
+      updateHud();
+    }
+
+    function pushCircleOut(circle, rect) {
+      const nx = clamp(circle.x, rect.x, rect.x + rect.w);
+      const ny = clamp(circle.y, rect.y, rect.y + rect.h);
+      const dx = circle.x - nx;
+      const dy = circle.y - ny;
+      const d = Math.hypot(dx, dy);
+      if (d > 0 && d < circle.r + 2) {
+        circle.x += dx / d * (circle.r + 2 - d);
+        circle.y += dy / d * (circle.r + 2 - d);
+      }
+    }
+
+    function fireAtNearest() {
+      const p = state.player;
+      if (p.fireTimer > 0 || state.enemies.length === 0) return;
+      let target = state.enemies[0];
+      let best = Infinity;
+      for (const e of state.enemies) {
+        const d = dist(p, e);
+        if (d < best) {
+          best = d;
+          target = e;
+        }
+      }
+      if (best > 430) return;
+      const a = Math.atan2(target.y - p.y, target.x - p.x);
+      state.bullets.push({ x: p.x, y: p.y, vx: Math.cos(a) * 520, vy: Math.sin(a) * 520, r: 5, life: 0.9, damage: p.damage });
+      p.fireTimer = p.fireRate;
+    }
+
+    function updateBullets(dt) {
+      for (const b of state.bullets) {
+        b.x += b.vx * dt;
+        b.y += b.vy * dt;
+        b.life -= dt;
+      }
+      for (const b of state.bullets) {
+        for (const e of state.enemies) {
+          if (b.life > 0 && dist(b, e) < b.r + e.r) {
+            b.life = 0;
+            e.hp -= b.damage;
+            e.hit = 0.12;
+            state.shake = Math.max(state.shake, 3);
+            burst(e.x, e.y, "#ffd15c", 5);
+          }
+        }
+      }
+      state.bullets = state.bullets.filter((b) => b.life > 0 && b.x > -40 && b.x < world.w + 40 && b.y > -40 && b.y < world.h + 40);
+    }
+
+    function updateEnemies(dt) {
+      const p = state.player;
+      for (const e of state.enemies) {
+        e.hit = Math.max(0, e.hit - dt);
+        const a = Math.atan2(p.y - e.y, p.x - e.x);
+        const wobble = Math.sin(state.time * 5 + e.x) * 0.55;
+        e.x += Math.cos(a + wobble) * e.speed * dt;
+        e.y += Math.sin(a + wobble) * e.speed * dt;
+        for (const block of stalls) pushCircleOut(e, block);
+        if (dist(e, p) < e.r + p.r && p.invuln <= 0) {
+          p.hp -= 1;
+          p.invuln = 0.85;
+          state.shake = 12;
+          state.flash = 1;
+          burst(p.x, p.y, "#ff4e64", 20);
+        }
+      }
+      const killed = state.enemies.filter((e) => e.hp <= 0);
+      for (const e of killed) {
+        state.gemsList.push({ x: e.x, y: e.y, r: 7, value: 1 });
+        burst(e.x, e.y, "#37f4d0", 14);
+      }
+      state.enemies = state.enemies.filter((e) => e.hp > 0);
+    }
+
+    function updateHazards(dt) {
+      const p = state.player;
+      for (const h of state.hazards) {
+        if (h.warn > 0) {
+          h.warn -= dt;
+        } else {
+          h.active -= dt;
+          const hit = p.x > h.x && p.x < h.x + h.w && p.y > h.y && p.y < h.y + h.h;
+          if (hit && p.invuln <= 0) {
+            p.hp -= 1;
+            p.invuln = 0.75;
+            state.shake = 11;
+            state.flash = 1;
+            burst(p.x, p.y, "#ff4e64", 18);
+          }
+          if (h.active <= 0) h.done = true;
+        }
+      }
+      state.hazards = state.hazards.filter((h) => !h.done);
+    }
+
+    function updateGems(dt) {
+      const p = state.player;
+      for (const g of state.gemsList) {
+        const d = dist(g, p);
+        if (d < 96) {
+          g.x += (p.x - g.x) * dt * 8;
+          g.y += (p.y - g.y) * dt * 8;
+        }
+        if (d < p.r + g.r + 2) {
+          g.dead = true;
+          state.gems += g.value;
+          burst(g.x, g.y, "#ffd15c", 10);
+        }
+      }
+      state.gemsList = state.gemsList.filter((g) => !g.dead);
+    }
+
+    function updateParticles(dt) {
+      for (const p of state.particles) {
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.vx *= Math.pow(0.02, dt);
+        p.vy *= Math.pow(0.02, dt);
+        p.life -= dt;
+      }
+      state.particles = state.particles.filter((p) => p.life > 0);
+    }
+
+    function draw() {
+      const ox = (Math.random() - 0.5) * state.shake;
+      const oy = (Math.random() - 0.5) * state.shake;
+      ctx.save();
+      ctx.clearRect(0, 0, innerWidth, innerHeight);
+      ctx.translate(ox, oy);
+      ctx.scale(innerWidth / world.w, innerHeight / world.h);
+      drawMarket();
+      drawHazards();
+      drawGems();
+      drawBullets();
+      drawEnemies();
+      drawPlayer();
+      drawParticles();
+      ctx.restore();
+      if (state.flash > 0) {
+        ctx.fillStyle = `rgba(255, 78, 100, ${0.13 * state.flash})`;
+        ctx.fillRect(0, 0, innerWidth, innerHeight);
+      }
+    }
+
+    function drawMarket() {
+      const grd = ctx.createLinearGradient(0, 0, world.w, world.h);
+      grd.addColorStop(0, "#0b2025");
+      grd.addColorStop(0.52, "#10131b");
+      grd.addColorStop(1, "#071012");
+      ctx.fillStyle = grd;
+      ctx.fillRect(0, 0, world.w, world.h);
+
+      ctx.strokeStyle = "rgba(55, 244, 208, 0.12)";
+      ctx.lineWidth = 2;
+      for (let x = 48; x < world.w; x += 48) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, world.h);
+        ctx.stroke();
+      }
+      for (let y = 48; y < world.h; y += 48) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(world.w, y);
+        ctx.stroke();
+      }
+
+      for (const room of rooms) {
+        ctx.fillStyle = "rgba(16, 46, 48, 0.68)";
+        ctx.strokeStyle = "rgba(55, 244, 208, 0.22)";
+        roundRect(room.x, room.y, room.w, room.h, 14, true, true);
+      }
+
+      for (const s of stalls) {
+        ctx.fillStyle = "rgba(255, 209, 92, 0.16)";
+        ctx.strokeStyle = "rgba(255, 209, 92, 0.28)";
+        roundRect(s.x, s.y, s.w, s.h, 8, true, true);
+        ctx.fillStyle = "rgba(255, 78, 100, 0.16)";
+        for (let x = s.x + 8; x < s.x + s.w - 8; x += 28) {
+          ctx.fillRect(x, s.y + 6, 14, 8);
+        }
+      }
+
+      for (let i = 0; i < 34; i += 1) {
+        const x = 60 + (i * 173) % 1160;
+        const y = 44 + (i * 91) % 628;
+        const pulse = 0.45 + Math.sin(state.time * 3 + i) * 0.16;
+        ctx.fillStyle = `rgba(255, 209, 92, ${pulse})`;
+        ctx.beginPath();
+        ctx.arc(x, y, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    function drawHazards() {
+      for (const h of state.hazards) {
+        if (h.warn > 0) {
+          ctx.fillStyle = `rgba(255, 78, 100, ${0.12 + Math.sin(state.time * 24) * 0.04})`;
+          ctx.strokeStyle = "rgba(255, 78, 100, 0.65)";
+        } else {
+          ctx.fillStyle = "rgba(255, 78, 100, 0.48)";
+          ctx.strokeStyle = "rgba(255, 238, 238, 0.85)";
+        }
+        roundRect(h.x, h.y, h.w, h.h, 12, true, true);
+      }
+    }
+
+    function drawPlayer() {
+      const p = state.player;
+      if (p.dashTime > 0) {
+        ctx.strokeStyle = "rgba(55, 244, 208, 0.6)";
+        ctx.lineWidth = 9;
+        ctx.beginPath();
+        ctx.moveTo(p.x - p.vx * 0.04, p.y - p.vy * 0.04);
+        ctx.lineTo(p.x, p.y);
+        ctx.stroke();
+      }
+      ctx.fillStyle = p.invuln > 0 && Math.sin(state.time * 38) > 0 ? "#ffffff" : "#37f4d0";
+      ctx.strokeStyle = "#e8fff8";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#071114";
+      ctx.beginPath();
+      ctx.arc(p.x + 5, p.y - 4, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    function drawEnemies() {
+      for (const e of state.enemies) {
+        ctx.fillStyle = e.hit > 0 ? "#ffffff" : (e.type === "runner" ? "#ff8b4f" : "#ff4e64");
+        ctx.strokeStyle = "rgba(255, 238, 238, 0.65)";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        const sides = e.type === "runner" ? 3 : 6;
+        for (let i = 0; i < sides; i += 1) {
+          const a = state.time * 1.5 + i / sides * Math.PI * 2;
+          const x = e.x + Math.cos(a) * e.r;
+          const y = e.y + Math.sin(a) * e.r;
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+
+    function drawBullets() {
+      ctx.fillStyle = "#b9fff1";
+      ctx.shadowColor = "#37f4d0";
+      ctx.shadowBlur = 16;
+      for (const b of state.bullets) {
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.shadowBlur = 0;
+    }
+
+    function drawGems() {
+      ctx.fillStyle = "#ffd15c";
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
+      for (const g of state.gemsList) {
+        ctx.save();
+        ctx.translate(g.x, g.y);
+        ctx.rotate(state.time * 3);
+        ctx.beginPath();
+        ctx.moveTo(0, -g.r);
+        ctx.lineTo(g.r, 0);
+        ctx.lineTo(0, g.r);
+        ctx.lineTo(-g.r, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    function drawParticles() {
+      for (const p of state.particles) {
+        ctx.globalAlpha = Math.max(0, p.life / p.max);
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    function roundRect(x, y, w, h, r, fill, stroke) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+      if (fill) ctx.fill();
+      if (stroke) ctx.stroke();
+    }
+
+    function updateHud() {
+      hud.wave.textContent = state.wave;
+      hud.hp.textContent = Math.max(0, state.player.hp);
+      hud.gems.textContent = state.gems;
+      hud.dash.textContent = state.player.dashTimer <= 0 ? "Ready" : state.player.dashTimer.toFixed(1);
+    }
+
+    function loop(now) {
+      const dt = Math.min(0.033, (now - last) / 1000);
+      last = now;
+      update(dt);
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    addEventListener("resize", resize);
+    addEventListener("keydown", (event) => {
+      const key = event.key.toLowerCase();
+      keys.add(key);
+      if ((key === "enter" || key === " ") && state.mode === "ready") start();
+      else if (key === " " && state.mode === "playing") dash();
+      else if (key === "r") reset();
+      else if (state.mode === "upgrade" && ["1", "2", "3"].includes(key)) chooseUpgrade(Number(key) - 1);
+    });
+    addEventListener("keyup", (event) => keys.delete(event.key.toLowerCase()));
+    canvas.addEventListener("pointermove", (event) => Object.assign(pointer, toWorld(event.clientX, event.clientY)));
+    canvas.addEventListener("pointerdown", (event) => {
+      pointer.down = true;
+      Object.assign(pointer, toWorld(event.clientX, event.clientY));
+      if (state.mode === "ready") start();
+      else if (state.mode === "playing") dash();
+    });
+    canvas.addEventListener("pointerup", () => { pointer.down = false; });
+
+    resize();
+    reset();
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
