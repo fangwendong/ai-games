@@ -1,0 +1,21 @@
+name: Release APK
+
+on:
+  push:
+    tags:
+      - "star-tide-*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: games/star-tide-orrery/build/android/star-tide-orrery.apk
