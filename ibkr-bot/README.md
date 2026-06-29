@@ -48,3 +48,6 @@ ibkr-bot run-once --symbol SPY
 3. Allow paper orders only after you inspect generated orders.
 4. Keep paper automation running for several weeks before considering small live exposure.
 
+## Headless Server Deployment
+
+Deployment notes for a Debian server without a physical GUI live in `deploy/headless/`. The tested pattern is to install IB Gateway and IBC under `/home/fwd/ibkr`, install only `xvfb` as a system package, and keep the bot connected to `127.0.0.1:4002`.
