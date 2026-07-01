@@ -12,6 +12,14 @@ const HAZARD_BASE_CHANCE := 0.18
 const SPAWN_TELEGRAPH_TIME := 0.62
 const AIM_RANGE := 520.0
 
+const ART_BACKGROUND_PATH := "res://assets/art/arena_background.svg"
+const ART_PLAYER_PATH := "res://assets/art/player.svg"
+const ART_DRIFTER_PATH := "res://assets/art/enemy_drifter.svg"
+const ART_RUNNER_PATH := "res://assets/art/enemy_runner.svg"
+const ART_SHOOTER_PATH := "res://assets/art/enemy_shooter.svg"
+const ART_BRUTE_PATH := "res://assets/art/enemy_brute.svg"
+const ART_GEM_PATH := "res://assets/art/gem.svg"
+
 var rng := RandomNumberGenerator.new()
 var mode := "ready"
 var wave := 1
@@ -28,6 +36,13 @@ var gem_magnet_radius := 112.0
 var shake := 0.0
 var message := "Press Enter or Space to start"
 var chosen_upgrades: Array[String] = []
+var art_background: Texture2D
+var art_player: Texture2D
+var art_drifter: Texture2D
+var art_runner: Texture2D
+var art_shooter: Texture2D
+var art_brute: Texture2D
+var art_gem: Texture2D
 
 var player := {
 	"pos": Vector2(640, 360),
@@ -70,6 +85,7 @@ var stalls := [
 
 func _ready() -> void:
 	rng.randomize()
+	load_art()
 	reset()
 	if has_user_arg("--smoke-test"):
 		run_smoke_test()
@@ -77,6 +93,27 @@ func _ready() -> void:
 	var capture_path := get_capture_path()
 	if capture_path != "":
 		capture_preview(capture_path)
+
+func load_art() -> void:
+	art_background = load_svg_texture(ART_BACKGROUND_PATH)
+	art_player = load_svg_texture(ART_PLAYER_PATH)
+	art_drifter = load_svg_texture(ART_DRIFTER_PATH)
+	art_runner = load_svg_texture(ART_RUNNER_PATH)
+	art_shooter = load_svg_texture(ART_SHOOTER_PATH)
+	art_brute = load_svg_texture(ART_BRUTE_PATH)
+	art_gem = load_svg_texture(ART_GEM_PATH)
+
+func load_svg_texture(path: String) -> Texture2D:
+	var svg := FileAccess.get_file_as_string(path)
+	if svg.is_empty():
+		push_error("Failed to read art asset: " + path)
+		return null
+	var image := Image.new()
+	var err := image.load_svg_from_string(svg)
+	if err != OK:
+		push_error("Failed to load SVG asset: " + path)
+		return null
+	return ImageTexture.create_from_image(image)
 
 func has_user_arg(name: String) -> bool:
 	for arg in OS.get_cmdline_args():
@@ -495,14 +532,10 @@ func _draw() -> void:
 	draw_hud()
 
 func draw_market() -> void:
-	draw_rect(Rect2(Vector2.ZERO, WORLD_SIZE), Color("#071114"))
-	draw_rect(Rect2(64, 92, 1152, 560), Color(0.04, 0.13, 0.14, 0.46), true)
-	draw_rect(Rect2(64, 92, 1152, 560), Color(0.22, 0.96, 0.82, 0.08), false, 2.0)
-	for y in [216, 504]:
-		draw_line(Vector2(112, y), Vector2(1168, y), Color(0.22, 0.96, 0.82, 0.025), 1.0)
-	for stall in stalls:
-		draw_rect(stall, Color(0.22, 0.18, 0.1, 0.42), true)
-		draw_rect(stall, Color(0.95, 0.76, 0.32, 0.10), false, 1.0)
+	if art_background != null:
+		draw_texture_rect(art_background, Rect2(Vector2.ZERO, WORLD_SIZE), false)
+	else:
+		draw_rect(Rect2(Vector2.ZERO, WORLD_SIZE), Color("#183646"))
 
 func draw_hazards() -> void:
 	for hazard in hazards:
@@ -520,72 +553,25 @@ func draw_spawn_telegraphs() -> void:
 func draw_player() -> void:
 	if dash_time > 0.0:
 		draw_line(player.pos - player.vel * 0.04, player.pos, Color(0.22, 0.96, 0.82, 0.72), 10.0)
-	var color := Color.WHITE if invuln_timer > 0.0 and int(Time.get_ticks_msec() / 70) % 2 == 0 else Color("#37f4d0")
-	var p: Vector2 = player.pos
-	draw_circle(p + Vector2(0, 7), 17.0, Color("#071114"))
-	draw_colored_polygon(PackedVector2Array([
-		p + Vector2(0, -23),
-		p + Vector2(18, -2),
-		p + Vector2(13, 22),
-		p + Vector2(-13, 22),
-		p + Vector2(-18, -2),
-	]), color)
-	draw_polyline(PackedVector2Array([
-		p + Vector2(0, -23),
-		p + Vector2(18, -2),
-		p + Vector2(13, 22),
-		p + Vector2(-13, 22),
-		p + Vector2(-18, -2),
-		p + Vector2(0, -23),
-	]), Color("#e8fff8"), 2.0)
-	draw_circle(p + Vector2(0, -4), 8.0, Color("#071114"))
-	draw_circle(p + Vector2(4, -6), 2.4, Color("#e8fff8"))
-	draw_line(p + Vector2(-16, 10), p + Vector2(16, 10), Color("#ffd15c"), 3.0)
+	if invuln_timer > 0.0 and int(Time.get_ticks_msec() / 70) % 2 == 0:
+		draw_texture_centered(art_player, player.pos, Vector2(56, 56), Color(1, 1, 1, 0.62))
+	else:
+		draw_texture_centered(art_player, player.pos, Vector2(56, 56))
 
 func draw_enemies() -> void:
 	for enemy in enemies:
 		draw_enemy(enemy)
 
 func draw_enemy(enemy: Dictionary) -> void:
-	var p: Vector2 = enemy.pos
-	var color := Color.WHITE if enemy.hit > 0.0 else Color("#ff4e64")
+	var modulate := Color.WHITE if enemy.hit > 0.0 else Color(1, 1, 1, 1)
 	if enemy.type == "runner":
-		color = Color.WHITE if enemy.hit > 0.0 else Color("#ff8b4f")
-		draw_circle(p, 17.0, Color("#071114"))
-		draw_colored_polygon(PackedVector2Array([
-			p + Vector2(0, -17),
-			p + Vector2(18, 14),
-			p + Vector2(-18, 14),
-		]), color)
-		draw_polyline(PackedVector2Array([p + Vector2(0, -17), p + Vector2(18, 14), p + Vector2(-18, 14), p + Vector2(0, -17)]), Color("#ffe1ca"), 2.0)
-		draw_circle(p + Vector2(0, 3), 4.0, Color("#071114"))
+		draw_texture_centered(art_runner, enemy.pos, Vector2(46, 46), modulate)
 	elif enemy.type == "shooter":
-		color = Color.WHITE if enemy.hit > 0.0 else Color("#c85cff")
-		draw_circle(p, 20.0, Color("#071114"))
-		draw_colored_polygon(PackedVector2Array([
-			p + Vector2(0, -19),
-			p + Vector2(18, 0),
-			p + Vector2(0, 19),
-			p + Vector2(-18, 0),
-		]), color)
-		draw_polyline(PackedVector2Array([p + Vector2(0, -19), p + Vector2(18, 0), p + Vector2(0, 19), p + Vector2(-18, 0), p + Vector2(0, -19)]), Color("#f1d6ff"), 2.0)
-		draw_circle(p, 6.0, Color("#071114"))
-		draw_circle(p, 2.5, Color("#ff6d83"))
+		draw_texture_centered(art_shooter, enemy.pos, Vector2(52, 52), modulate)
 	elif enemy.type == "brute":
-		color = Color.WHITE if enemy.hit > 0.0 else Color("#e2455d")
-		draw_circle(p, 30.0, Color("#071114"))
-		draw_rect(Rect2(p - Vector2(23, 23), Vector2(46, 46)), color, true)
-		draw_rect(Rect2(p - Vector2(23, 23), Vector2(46, 46)), Color("#ffd0d6"), false, 2.0)
-		draw_circle(p + Vector2(-8, -4), 4.0, Color("#071114"))
-		draw_circle(p + Vector2(8, -4), 4.0, Color("#071114"))
-		draw_line(p + Vector2(-10, 11), p + Vector2(10, 11), Color("#071114"), 4.0)
+		draw_texture_centered(art_brute, enemy.pos, Vector2(66, 66), modulate)
 	else:
-		draw_circle(p, 20.0, Color("#071114"))
-		draw_circle(p, 16.0, color)
-		draw_arc(p, 17.5, 0.0, TAU, 18, Color(1, 0.95, 0.95, 0.62), 2.0)
-		draw_circle(p + Vector2(-5, -4), 3.0, Color("#071114"))
-		draw_circle(p + Vector2(5, -4), 3.0, Color("#071114"))
-		draw_line(p + Vector2(-7, 7), p + Vector2(7, 7), Color("#071114"), 3.0)
+		draw_texture_centered(art_drifter, enemy.pos, Vector2(50, 50), modulate)
 
 func draw_bullets() -> void:
 	for bullet in bullets:
@@ -598,9 +584,11 @@ func draw_enemy_bullets() -> void:
 
 func draw_drops() -> void:
 	for drop in drops:
-		var p: Vector2 = drop.pos
-		draw_colored_polygon(PackedVector2Array([p + Vector2(0, -9), p + Vector2(8, 0), p + Vector2(0, 9), p + Vector2(-8, 0)]), Color("#ffd15c"))
-		draw_polyline(PackedVector2Array([p + Vector2(0, -9), p + Vector2(8, 0), p + Vector2(0, 9), p + Vector2(-8, 0), p + Vector2(0, -9)]), Color("#fff2bf"), 1.5)
+		draw_texture_centered(art_gem, drop.pos, Vector2(24, 24))
+
+func draw_texture_centered(texture: Texture2D, center: Vector2, size: Vector2, modulate: Color = Color.WHITE) -> void:
+	if texture != null:
+		draw_texture_rect(texture, Rect2(center - size * 0.5, size), false, modulate)
 
 func draw_particles() -> void:
 	for particle in particles:

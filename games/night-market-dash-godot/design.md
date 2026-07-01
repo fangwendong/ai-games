@@ -64,6 +64,20 @@ After playtest feedback, visual readability takes priority over spectacle. Backg
 
 The high-star top-down shooter reference uses room-owned enemy managers, wave resources, spawn marks, and separate projectile systems. This pass applies the same design direction without copying code or assets: waves are now explicit data, enemy entry is telegraphed, shooting is a real player action, and the final wave changes enemy behavior instead of only increasing count.
 
+## Art Direction Pass
+
+The prototype now uses original SVG assets instead of primitive circles and rectangles:
+
+- `assets/art/arena_background.svg`: brighter night market floor, stalls, lantern hints, and low-noise play area.
+- `assets/art/player.svg`: readable night-market talisman caster.
+- `assets/art/enemy_drifter.svg`: round mask enemy.
+- `assets/art/enemy_runner.svg`: triangular fast enemy.
+- `assets/art/enemy_shooter.svg`: diamond ranged enemy.
+- `assets/art/enemy_brute.svg`: large square final-wave enemy.
+- `assets/art/gem.svg`: gold pickup.
+
+The goal is clarity first: each gameplay role has a different silhouette, not just a different color.
+
 ## Validation
 
 Passed:

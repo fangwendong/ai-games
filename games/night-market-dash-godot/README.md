@@ -39,11 +39,16 @@ Playable first version with:
 - Data-style wave plan with named waves
 - Enemy spawn telegraphs before enemies appear
 - Four enemy roles: drifter, runner, shooter, and final-wave brute
+- Original SVG art assets for the night market background, player, enemies, and gems
 - Enemy projectiles from shooter masks
 - Red hazard telegraphs
 - Gold gem drops with attraction
 - Between-wave upgrades that change fire rate, damage, magnet range, dash cooldown, and HP
 - Win/loss states and fast restart
+
+## Web Deployment Target
+
+Future web exports should be served from port `80`. Do not hardcode the public IP address in this repository; share concrete deployment URLs outside git.
 
 ## Verified
 
