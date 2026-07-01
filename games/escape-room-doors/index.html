@@ -137,8 +137,7 @@
       display: grid;
       grid-template-columns: 1.15fr 0.85fr;
       gap: 14px;
-      align-items: stretch;
-      min-height: var(--room-h);
+      align-items: start;
     }
 
     .scene, .panel {
@@ -150,11 +149,19 @@
 
     .scene {
       position: relative;
-      min-height: var(--room-h);
+      aspect-ratio: 560 / 480;
       background:
         linear-gradient(180deg, rgba(47, 111, 237, 0.07), transparent 40%),
         linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.12) 100%),
         #d8e1eb;
+    }
+
+    .scene-canvas {
+      position: absolute;
+      inset: 0;
+      width: 560px;
+      height: 480px;
+      transform-origin: top left;
     }
 
     .wall {
@@ -513,17 +520,12 @@
 
       :root {
         --room-w: 100%;
-        --room-h: min(88vw, 480px);
       }
     }
 
     @media (max-width: 640px) {
       body {
         padding: 10px;
-      }
-
-      .scene {
-        min-height: min(96vw, 500px);
       }
     }
   </style>
@@ -551,28 +553,30 @@
 
       <div class="room">
         <div class="scene" id="scene">
-          <div class="wall"></div>
-          <div class="floor"></div>
-          <div id="door" class="door locked"></div>
+          <div id="sceneCanvas" class="scene-canvas">
+            <div class="wall"></div>
+            <div class="floor"></div>
+            <div id="door" class="door locked"></div>
 
-          <button class="hotspot item bookcase" data-clue="bookcase" style="left:28px;top:54px;width:124px;height:230px;">
-            <span class="label">书架</span>
-          </button>
-          <button class="hotspot item desk" data-clue="desk" style="left:176px;bottom:34px;width:150px;height:78px;">
-            <span class="label">桌子</span>
-          </button>
-          <button class="hotspot item lamp" data-clue="lamp" style="left:214px;top:54px;width:70px;height:118px;">
-            <span class="label">灯</span>
-          </button>
-          <button class="hotspot item picture" data-clue="picture" style="right:172px;top:52px;width:118px;height:94px;">
-            <span class="label">画框</span>
-          </button>
-          <button class="hotspot item plant" data-clue="plant" style="left:352px;bottom:56px;width:74px;height:94px;">
-            <span class="label">绿植</span>
-          </button>
-          <button class="hotspot item big" data-clue="panel" style="left:160px;top:196px;width:114px;height:68px;background:linear-gradient(180deg,#eef4ff,#cfdcf8);">
-            <span class="label">面板</span>
-          </button>
+            <button class="hotspot item bookcase" data-clue="bookcase" style="left:28px;top:54px;width:124px;height:230px;">
+              <span class="label">书架</span>
+            </button>
+            <button class="hotspot item desk" data-clue="desk" style="left:176px;bottom:34px;width:150px;height:78px;">
+              <span class="label">桌子</span>
+            </button>
+            <button class="hotspot item lamp" data-clue="lamp" style="left:214px;top:54px;width:70px;height:118px;">
+              <span class="label">灯</span>
+            </button>
+            <button class="hotspot item picture" data-clue="picture" style="right:172px;top:52px;width:118px;height:94px;">
+              <span class="label">画框</span>
+            </button>
+            <button class="hotspot item plant" data-clue="plant" style="left:352px;bottom:56px;width:74px;height:94px;">
+              <span class="label">绿植</span>
+            </button>
+            <button class="hotspot item big" data-clue="panel" style="left:160px;top:196px;width:114px;height:68px;background:linear-gradient(180deg,#eef4ff,#cfdcf8);">
+              <span class="label">面板</span>
+            </button>
+          </div>
         </div>
 
         <div class="panel">
@@ -754,6 +758,7 @@
       clueTotalText: document.querySelector("#clueTotalText"),
       statusText: document.querySelector("#statusText"),
       scene: document.querySelector("#scene"),
+      sceneCanvas: document.querySelector("#sceneCanvas"),
       door: document.querySelector("#door"),
       clueList: document.querySelector("#clueList"),
       answerInput: document.querySelector("#answerInput"),
@@ -893,6 +898,13 @@
       if (!state.splashFrame) {
         state.splashFrame = window.requestAnimationFrame(stepSplash);
       }
+    }
+
+    function resizeScene() {
+      const width = els.scene.clientWidth || 560;
+      const height = els.scene.clientHeight || 480;
+      const scale = Math.min(width / 560, height / 480);
+      els.sceneCanvas.style.transform = `scale(${scale})`;
     }
 
     function stepSplash(timestamp) {
@@ -1038,10 +1050,12 @@
       if (event.target === els.modal) closeResult();
     });
     window.addEventListener("resize", resizeSplash);
+    window.addEventListener("resize", resizeScene);
 
     bindScene();
     renderLevel();
     resizeSplash();
+    resizeScene();
     setSceneMessage("先点房间里的物件，再试着输入密码。");
   </script>
 </body>
