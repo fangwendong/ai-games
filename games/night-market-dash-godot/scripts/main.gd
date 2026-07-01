@@ -98,15 +98,13 @@ func get_capture_path() -> String:
 
 func capture_preview(path: String) -> void:
 	start()
-	var preview_types := ["drifter", "runner", "shooter", "drifter", "runner", "brute"]
+	var preview_types := ["drifter", "runner", "shooter", "brute"]
 	for i in preview_types.size():
-		spawn_enemy(preview_types[i], Vector2(440 + i * 72, 250 + (i % 2) * 170))
-	hazards.append({"rect": Rect2(246, 146, 252, 34), "warn": 0.2, "active": 0.34})
-	hazards.append({"rect": Rect2(786, 420, 34, 142), "warn": 0.0, "active": 0.34})
-	drops.append({"pos": Vector2(705, 365), "radius": 7.0})
-	drops.append({"pos": Vector2(745, 396), "radius": 7.0})
+		spawn_enemy(preview_types[i], Vector2(470 + i * 112, 290 + (i % 2) * 120))
+	hazards.append({"rect": Rect2(790, 430, 26, 132), "warn": 0.0, "active": 0.34})
+	drops.append({"pos": Vector2(710, 365), "radius": 7.0})
 	bullets.append({"pos": Vector2(612, 360), "vel": Vector2(1, -0.2).normalized() * BULLET_SPEED, "life": 0.9, "radius": 5.0, "damage": player.damage})
-	burst(player.pos, Color("#37f4d0"), 16)
+	burst(player.pos, Color("#37f4d0"), 6)
 	await get_tree().process_frame
 	await RenderingServer.frame_post_draw
 	var image := get_viewport().get_texture().get_image()
@@ -498,22 +496,19 @@ func _draw() -> void:
 
 func draw_market() -> void:
 	draw_rect(Rect2(Vector2.ZERO, WORLD_SIZE), Color("#071114"))
-	for x in range(96, int(WORLD_SIZE.x), 96):
-		draw_line(Vector2(x, 0), Vector2(x, WORLD_SIZE.y), Color(0.22, 0.96, 0.82, 0.025), 1.0)
-	for y in range(96, int(WORLD_SIZE.y), 96):
-		draw_line(Vector2(0, y), Vector2(WORLD_SIZE.x, y), Color(0.22, 0.96, 0.82, 0.025), 1.0)
-	for room in rooms:
-		draw_rect(room, Color(0.05, 0.16, 0.17, 0.58), true)
-		draw_rect(room, Color(0.22, 0.96, 0.82, 0.08), false, 1.0)
+	draw_rect(Rect2(64, 92, 1152, 560), Color(0.04, 0.13, 0.14, 0.46), true)
+	draw_rect(Rect2(64, 92, 1152, 560), Color(0.22, 0.96, 0.82, 0.08), false, 2.0)
+	for y in [216, 504]:
+		draw_line(Vector2(112, y), Vector2(1168, y), Color(0.22, 0.96, 0.82, 0.025), 1.0)
 	for stall in stalls:
-		draw_rect(stall, Color(0.56, 0.42, 0.18, 0.18), true)
-		draw_rect(stall, Color(0.95, 0.76, 0.32, 0.11), false, 1.0)
+		draw_rect(stall, Color(0.22, 0.18, 0.1, 0.42), true)
+		draw_rect(stall, Color(0.95, 0.76, 0.32, 0.10), false, 1.0)
 
 func draw_hazards() -> void:
 	for hazard in hazards:
-		var color := Color(1.0, 0.3, 0.4, 0.09) if hazard.warn > 0.0 else Color(1.0, 0.3, 0.4, 0.42)
+		var color := Color(1.0, 0.3, 0.4, 0.06) if hazard.warn > 0.0 else Color(1.0, 0.3, 0.4, 0.34)
 		draw_rect(hazard.rect, color, true)
-		draw_rect(hazard.rect, Color(1.0, 0.85, 0.85, 0.45), false, 1.5)
+		draw_rect(hazard.rect, Color(1.0, 0.85, 0.85, 0.36), false, 1.0)
 
 func draw_spawn_telegraphs() -> void:
 	for spawn in pending_spawns:
@@ -526,26 +521,71 @@ func draw_player() -> void:
 	if dash_time > 0.0:
 		draw_line(player.pos - player.vel * 0.04, player.pos, Color(0.22, 0.96, 0.82, 0.72), 10.0)
 	var color := Color.WHITE if invuln_timer > 0.0 and int(Time.get_ticks_msec() / 70) % 2 == 0 else Color("#37f4d0")
-	draw_circle(player.pos, player.radius, color)
-	draw_arc(player.pos, player.radius + 1.5, 0.0, TAU, 24, Color("#e8fff8"), 2.0)
-	draw_circle(player.pos + Vector2(5, -4), 3.0, Color("#071114"))
+	var p: Vector2 = player.pos
+	draw_circle(p + Vector2(0, 7), 17.0, Color("#071114"))
+	draw_colored_polygon(PackedVector2Array([
+		p + Vector2(0, -23),
+		p + Vector2(18, -2),
+		p + Vector2(13, 22),
+		p + Vector2(-13, 22),
+		p + Vector2(-18, -2),
+	]), color)
+	draw_polyline(PackedVector2Array([
+		p + Vector2(0, -23),
+		p + Vector2(18, -2),
+		p + Vector2(13, 22),
+		p + Vector2(-13, 22),
+		p + Vector2(-18, -2),
+		p + Vector2(0, -23),
+	]), Color("#e8fff8"), 2.0)
+	draw_circle(p + Vector2(0, -4), 8.0, Color("#071114"))
+	draw_circle(p + Vector2(4, -6), 2.4, Color("#e8fff8"))
+	draw_line(p + Vector2(-16, 10), p + Vector2(16, 10), Color("#ffd15c"), 3.0)
 
 func draw_enemies() -> void:
 	for enemy in enemies:
-		var base_color := Color("#ff4e64")
-		if enemy.type == "runner":
-			base_color = Color("#ff8b4f")
-		elif enemy.type == "shooter":
-			base_color = Color("#c85cff")
-		elif enemy.type == "brute":
-			base_color = Color("#e2455d")
-		var color := Color.WHITE if enemy.hit > 0.0 else base_color
-		draw_circle(enemy.pos, enemy.radius, color)
-		draw_arc(enemy.pos, enemy.radius + 1.0, 0.0, TAU, 18, Color(1, 0.95, 0.95, 0.6), 2.0)
-		if enemy.type == "shooter":
-			draw_circle(enemy.pos, 5.0, Color("#071114"))
-		elif enemy.type == "brute":
-			draw_circle(enemy.pos, 8.0, Color("#071114"))
+		draw_enemy(enemy)
+
+func draw_enemy(enemy: Dictionary) -> void:
+	var p: Vector2 = enemy.pos
+	var color := Color.WHITE if enemy.hit > 0.0 else Color("#ff4e64")
+	if enemy.type == "runner":
+		color = Color.WHITE if enemy.hit > 0.0 else Color("#ff8b4f")
+		draw_circle(p, 17.0, Color("#071114"))
+		draw_colored_polygon(PackedVector2Array([
+			p + Vector2(0, -17),
+			p + Vector2(18, 14),
+			p + Vector2(-18, 14),
+		]), color)
+		draw_polyline(PackedVector2Array([p + Vector2(0, -17), p + Vector2(18, 14), p + Vector2(-18, 14), p + Vector2(0, -17)]), Color("#ffe1ca"), 2.0)
+		draw_circle(p + Vector2(0, 3), 4.0, Color("#071114"))
+	elif enemy.type == "shooter":
+		color = Color.WHITE if enemy.hit > 0.0 else Color("#c85cff")
+		draw_circle(p, 20.0, Color("#071114"))
+		draw_colored_polygon(PackedVector2Array([
+			p + Vector2(0, -19),
+			p + Vector2(18, 0),
+			p + Vector2(0, 19),
+			p + Vector2(-18, 0),
+		]), color)
+		draw_polyline(PackedVector2Array([p + Vector2(0, -19), p + Vector2(18, 0), p + Vector2(0, 19), p + Vector2(-18, 0), p + Vector2(0, -19)]), Color("#f1d6ff"), 2.0)
+		draw_circle(p, 6.0, Color("#071114"))
+		draw_circle(p, 2.5, Color("#ff6d83"))
+	elif enemy.type == "brute":
+		color = Color.WHITE if enemy.hit > 0.0 else Color("#e2455d")
+		draw_circle(p, 30.0, Color("#071114"))
+		draw_rect(Rect2(p - Vector2(23, 23), Vector2(46, 46)), color, true)
+		draw_rect(Rect2(p - Vector2(23, 23), Vector2(46, 46)), Color("#ffd0d6"), false, 2.0)
+		draw_circle(p + Vector2(-8, -4), 4.0, Color("#071114"))
+		draw_circle(p + Vector2(8, -4), 4.0, Color("#071114"))
+		draw_line(p + Vector2(-10, 11), p + Vector2(10, 11), Color("#071114"), 4.0)
+	else:
+		draw_circle(p, 20.0, Color("#071114"))
+		draw_circle(p, 16.0, color)
+		draw_arc(p, 17.5, 0.0, TAU, 18, Color(1, 0.95, 0.95, 0.62), 2.0)
+		draw_circle(p + Vector2(-5, -4), 3.0, Color("#071114"))
+		draw_circle(p + Vector2(5, -4), 3.0, Color("#071114"))
+		draw_line(p + Vector2(-7, 7), p + Vector2(7, 7), Color("#071114"), 3.0)
 
 func draw_bullets() -> void:
 	for bullet in bullets:
@@ -558,7 +598,9 @@ func draw_enemy_bullets() -> void:
 
 func draw_drops() -> void:
 	for drop in drops:
-		draw_circle(drop.pos, drop.radius, Color("#ffd15c"))
+		var p: Vector2 = drop.pos
+		draw_colored_polygon(PackedVector2Array([p + Vector2(0, -9), p + Vector2(8, 0), p + Vector2(0, 9), p + Vector2(-8, 0)]), Color("#ffd15c"))
+		draw_polyline(PackedVector2Array([p + Vector2(0, -9), p + Vector2(8, 0), p + Vector2(0, 9), p + Vector2(-8, 0), p + Vector2(0, -9)]), Color("#fff2bf"), 1.5)
 
 func draw_particles() -> void:
 	for particle in particles:
