@@ -12,10 +12,10 @@ python3 -m http.server 4175
 
 然后打开 `http://127.0.0.1:4175/`。
 
-如果用 nginx 代理，建议挂在 `/escape-room/`：
+如果用 nginx 代理，建议直接挂在根路径：
 
 ```bash
-http://127.0.0.1/escape-room/
+http://127.0.0.1/
 ```
 
 这是单文件静态网页，直接打开 `index.html` 通常也能运行。
