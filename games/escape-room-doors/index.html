@@ -211,6 +211,307 @@
       transform-origin: top left;
     }
 
+    .window {
+      position: absolute;
+      left: 28px;
+      top: 26px;
+      width: 154px;
+      height: 116px;
+      border-radius: 12px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.22)),
+        linear-gradient(90deg, rgba(88, 144, 220, 0.82) 0 50%, rgba(88, 144, 220, 0.62) 50% 100%);
+      border: 2px solid rgba(76, 112, 152, 0.28);
+      box-shadow: inset 0 0 0 4px rgba(255, 255, 255, 0.36), 0 12px 24px rgba(0, 0, 0, 0.08);
+    }
+
+    .window::before,
+    .window::after {
+      content: "";
+      position: absolute;
+      background: rgba(255, 255, 255, 0.55);
+    }
+
+    .window::before {
+      left: 50%;
+      top: 0;
+      bottom: 0;
+      width: 3px;
+      transform: translateX(-50%);
+    }
+
+    .window::after {
+      left: 0;
+      right: 0;
+      top: 50%;
+      height: 3px;
+      transform: translateY(-50%);
+    }
+
+    .curtain {
+      position: absolute;
+      top: 20px;
+      width: 22px;
+      height: 126px;
+      border-radius: 12px;
+      background: linear-gradient(180deg, rgba(232, 237, 245, 0.92), rgba(196, 210, 228, 0.92));
+      box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.32);
+    }
+
+    .curtain.left { left: 18px; transform: rotate(4deg); }
+    .curtain.right { left: 186px; transform: rotate(-4deg); }
+
+    .sofa {
+      position: absolute;
+      left: 170px;
+      bottom: 28px;
+      width: 174px;
+      height: 82px;
+      border-radius: 18px 18px 10px 10px;
+      background: linear-gradient(180deg, #8d694d, #6d4f3a);
+      box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.08), 0 10px 22px rgba(0, 0, 0, 0.1);
+    }
+
+    .sofa::before,
+    .sofa::after {
+      content: "";
+      position: absolute;
+      background: linear-gradient(180deg, #8d694d, #6d4f3a);
+      border-radius: 12px;
+    }
+
+    .sofa::before {
+      left: 10px;
+      right: 10px;
+      top: -18px;
+      height: 30px;
+    }
+
+    .sofa::after {
+      left: 16px;
+      right: 16px;
+      bottom: -10px;
+      height: 14px;
+      background: rgba(72, 48, 33, 0.4);
+    }
+
+    .rug {
+      position: absolute;
+      left: 126px;
+      bottom: 18px;
+      width: 246px;
+      height: 104px;
+      border-radius: 28px;
+      background:
+        radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.38), transparent 22%),
+        linear-gradient(180deg, #d9a67c, #b56f47);
+      box-shadow: 0 16px 28px rgba(0, 0, 0, 0.12);
+      opacity: 0.92;
+    }
+
+    .cabinet {
+      position: absolute;
+      right: 198px;
+      top: 202px;
+      width: 96px;
+      height: 108px;
+      border-radius: 14px;
+      background: linear-gradient(180deg, #b6a085, #8a725a);
+      box-shadow: 0 10px 18px rgba(0, 0, 0, 0.12);
+    }
+
+    .cabinet::before,
+    .cabinet::after {
+      content: "";
+      position: absolute;
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .cabinet::before {
+      left: 50%;
+      top: 8px;
+      bottom: 8px;
+      width: 2px;
+      transform: translateX(-50%);
+    }
+
+    .cabinet::after {
+      left: 12px;
+      right: 12px;
+      top: 22px;
+      height: 2px;
+    }
+
+    .clock {
+      position: absolute;
+      right: 56px;
+      top: 36px;
+      width: 66px;
+      height: 66px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 30%, #ffffff, #dce8f0 70%);
+      border: 4px solid rgba(31, 42, 51, 0.12);
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+    }
+
+    .clock::before,
+    .clock::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      bottom: 50%;
+      background: #4a5b69;
+      transform-origin: bottom center;
+      border-radius: 999px;
+    }
+
+    .clock::before {
+      width: 3px;
+      height: 16px;
+      transform: translateX(-50%) rotate(35deg);
+    }
+
+    .clock::after {
+      width: 2px;
+      height: 20px;
+      transform: translateX(-50%) rotate(-20deg);
+    }
+
+    .fridge {
+      left: 420px;
+      top: 130px;
+      width: 92px;
+      height: 184px;
+      border-radius: 14px;
+      background: linear-gradient(180deg, #f8fbff, #dde7f3);
+      box-shadow: inset 0 0 0 2px rgba(31, 42, 51, 0.08), 0 10px 22px rgba(0, 0, 0, 0.14);
+      overflow: hidden;
+      padding: 0;
+    }
+
+    .fridge-back {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, #dce7f4, #c8d7e9);
+    }
+
+    .fridge-door {
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(222, 231, 243, 0.92));
+      border-left: 2px solid rgba(31, 42, 51, 0.08);
+      transform-origin: left center;
+      transition: transform 360ms ease;
+      z-index: 2;
+    }
+
+    .fridge-door::before,
+    .fridge-door::after {
+      content: "";
+      position: absolute;
+      right: 16px;
+      border-radius: 999px;
+      background: rgba(54, 82, 112, 0.56);
+    }
+
+    .fridge-door::before {
+      top: 46px;
+      width: 6px;
+      height: 38px;
+    }
+
+    .fridge-door::after {
+      top: 112px;
+      width: 6px;
+      height: 26px;
+    }
+
+    .fridge-inside {
+      position: absolute;
+      left: 12px;
+      right: 20px;
+      top: 18px;
+      bottom: 14px;
+      border-radius: 10px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(250, 252, 255, 0.7));
+      opacity: 0;
+      transform: scale(0.92);
+      transition: opacity 180ms ease, transform 180ms ease;
+      z-index: 1;
+    }
+
+    .fridge-shelf {
+      position: absolute;
+      left: 10px;
+      right: 28px;
+      height: 4px;
+      border-radius: 999px;
+      background: rgba(98, 126, 158, 0.28);
+    }
+
+    .fridge-shelf.one { top: 52px; }
+    .fridge-shelf.two { top: 104px; }
+
+    .fridge-item {
+      position: absolute;
+      border-radius: 8px;
+      opacity: 0;
+      transform: translateY(6px) scale(0.94);
+      transition: opacity 180ms ease 120ms, transform 180ms ease 120ms;
+      z-index: 1;
+    }
+
+    .fridge-item.milk {
+      left: 16px;
+      top: 28px;
+      width: 18px;
+      height: 22px;
+      background: linear-gradient(180deg, #fff, #dce3f2);
+    }
+
+    .fridge-item.box {
+      left: 38px;
+      top: 28px;
+      width: 24px;
+      height: 18px;
+      background: linear-gradient(180deg, #ffefbe, #d7b95d);
+    }
+
+    .fridge-item.note {
+      left: 20px;
+      top: 82px;
+      width: 34px;
+      height: 22px;
+      background: linear-gradient(180deg, #fff8e9, #f2dca7);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+    }
+
+    .fridge-item.note::after {
+      content: "线索";
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      font-size: 8px;
+      color: #805d1a;
+      font-weight: 800;
+      letter-spacing: 0;
+    }
+
+    .fridge.open .fridge-door {
+      transform: perspective(500px) rotateY(-72deg);
+    }
+
+    .fridge.open .fridge-inside,
+    .fridge.revealed .fridge-inside,
+    .fridge.open .fridge-item,
+    .fridge.revealed .fridge-item {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+
     .wall {
       position: absolute;
       inset: 14px;
@@ -428,6 +729,22 @@
       display: grid;
       place-items: center;
       font-size: 34px;
+    }
+
+    .lamp::after {
+      content: "💡";
+    }
+
+    .picture::after {
+      content: "🖼️";
+    }
+
+    .bookcase::after {
+      content: "📚";
+    }
+
+    .desk::after {
+      content: "🪑";
     }
 
     .panel {
@@ -684,8 +1001,15 @@
 
       <div class="room">
         <div class="scene" id="scene">
-          <div class="scene-guide">房间里 6 个物件都能点，先找最亮的</div>
+          <div class="scene-guide">房间里不止几个按钮，先点最亮的，再试冰箱</div>
           <div id="sceneCanvas" class="scene-canvas">
+            <div class="window"></div>
+            <div class="curtain left"></div>
+            <div class="curtain right"></div>
+            <div class="clock"></div>
+            <div class="cabinet"></div>
+            <div class="rug"></div>
+            <div class="sofa"></div>
             <div class="wall"></div>
             <div class="floor"></div>
             <div id="door" class="door locked"></div>
@@ -707,6 +1031,18 @@
             </button>
             <button class="hotspot item big" data-clue="panel" style="left:160px;top:196px;width:114px;height:68px;background:linear-gradient(180deg,#eef4ff,#cfdcf8);">
               <span class="label">面板</span>
+            </button>
+            <button class="hotspot item fridge" data-clue="fridge" style="left:420px;top:132px;width:92px;height:184px;">
+              <span class="fridge-back" aria-hidden="true"></span>
+              <span class="fridge-inside" aria-hidden="true">
+                <span class="fridge-shelf one"></span>
+                <span class="fridge-shelf two"></span>
+                <span class="fridge-item milk"></span>
+                <span class="fridge-item box"></span>
+                <span class="fridge-item note"></span>
+              </span>
+              <span class="fridge-door" aria-hidden="true"></span>
+              <span class="label">冰箱</span>
             </button>
           </div>
         </div>
@@ -753,7 +1089,7 @@
     const levels = [
       {
         name: "第一关：图书室",
-        clueTotal: 6,
+        clueTotal: 7,
         hint: "书架上最上层有 3 本红书，中层有 2 本蓝书。桌上的纸条写着“3 2 5”。",
         clues: {
           bookcase: "书架上红书 3 本，蓝书 2 本，全部加起来是 5。",
@@ -761,14 +1097,15 @@
           lamp: "灯罩里藏着数字 5。",
           picture: "画框背后有一行字：先看书架，再看桌子。",
           plant: "花盆底部贴着 5。",
-          panel: "门上密码锁需要 3 位数。"
+          panel: "门上密码锁需要 3 位数。",
+          fridge: "冰箱里贴着一张纸条，开门后才能看清 325。"
         },
         answer: "325",
         success: "数字按书架红书、蓝书、灯光顺序组合：325。"
       },
       {
         name: "第二关：实验室",
-        clueTotal: 6,
+        clueTotal: 7,
         hint: "三只试管分别标了 A、B、C。墙上写着“从左到右：绿、黄、红”。",
         clues: {
           bookcase: "实验柜里试剂瓶有三种颜色：绿、黄、红。",
@@ -776,14 +1113,15 @@
           lamp: "灯光照到试管架，左边是绿，中间是黄，右边是红。",
           picture: "图表上 A 对应 2，B 对应 1，C 对应 3。",
           plant: "绿植盆里夹着一张 213。",
-          panel: "需要把颜色顺序转成字母。"
+          panel: "需要把颜色顺序转成字母。",
+          fridge: "冰箱冷藏室贴着颜色标签：绿、黄、红。"
         },
         answer: "GYR",
         success: "颜色顺序是绿、黄、红，输入 GYR。"
       },
       {
         name: "第三关：走廊",
-        clueTotal: 6,
+        clueTotal: 7,
         hint: "三个开关控制三盏灯，门旁边有图示：第一个和第三个需要打开。",
         clues: {
           bookcase: "走廊墙上贴着 1、2、3 三个开关的说明。",
@@ -791,14 +1129,15 @@
           lamp: "灯的颜色变化提示顺序是亮、暗、亮。",
           picture: "画框里画着三个点：● ○ ●。",
           plant: "盆里小卡片写着“101”。",
-          panel: "开锁方式不是数字密码，是开关顺序。"
+          panel: "开锁方式不是数字密码，是开关顺序。",
+          fridge: "冰箱门上贴着开关图示：1、0、1。"
         },
         answer: "101",
         success: "按亮、暗、亮的顺序拨开关。"
       },
       {
         name: "第四关：画室",
-        clueTotal: 6,
+        clueTotal: 7,
         hint: "四张画的背面分别写着春、夏、秋、冬，只有顺序对了才开门。",
         clues: {
           bookcase: "书架上季节书签的顺序是春、夏、秋、冬。",
@@ -806,14 +1145,15 @@
           lamp: "灯光照到画框，顺序是 4132。",
           picture: "画框后写着“先春后冬”。",
           plant: "盆里卡片写着 4132。",
-          panel: "需要输入四位顺序码。"
+          panel: "需要输入四位顺序码。",
+          fridge: "冰箱里塞着四张季节贴纸，顺序一眼能看出。"
         },
         answer: "4132",
         success: "画框编号顺序是 4-1-3-2。"
       },
       {
         name: "第五关：档案室",
-        clueTotal: 6,
+        clueTotal: 7,
         hint: "档案袋按 A1、A2、B1、B2 排列，角落贴了 2 个红点和 1 个蓝点。",
         clues: {
           bookcase: "档案柜上贴着 A、B 两组，每组两个。",
@@ -821,14 +1161,15 @@
           lamp: "灯罩上写的是 2 1 1。",
           picture: "画框背后写着“红点是 2 个”。",
           plant: "绿植旁有三颗小石子，两个红一个蓝。",
-          panel: "密码是颜色计数。"
+          panel: "密码是颜色计数。",
+          fridge: "冰箱门夹层里贴着红点和蓝点的数量。"
         },
         answer: "221",
         success: "先数红点 2 个，再数蓝点 1 个，再数白点 1 个。"
       },
       {
         name: "第六关：密道",
-        clueTotal: 6,
+        clueTotal: 7,
         hint: "地图上箭头指向左、上、右。门锁需要按方向输入。",
         clues: {
           bookcase: "地图边上写着 L、U、R。",
@@ -836,14 +1177,15 @@
           lamp: "灯罩阴影投出方向：左、上、右。",
           picture: "画框里是一条折线，方向依次是左上右。",
           plant: "盆里卡片写着 LUR。",
-          panel: "这个锁要输入方向缩写。"
+          panel: "这个锁要输入方向缩写。",
+          fridge: "冰箱门把手旁写着 LUR。"
         },
         answer: "LUR",
         success: "方向顺序是左、上、右。"
       },
       {
         name: "第七关：冷库",
-        clueTotal: 6,
+        clueTotal: 7,
         hint: "温度表显示 4、1、7，门锁要求把最小数放前面。",
         clues: {
           bookcase: "箱子标签是 7、4、1。",
@@ -851,14 +1193,15 @@
           lamp: "灯光照出 4、1、7 三个数字。",
           picture: "画框背后写着 147。",
           plant: "盆里卡片写着 417。",
-          panel: "按升序输入三位数。"
+          panel: "按升序输入三位数。",
+          fridge: "冰箱上层贴纸标着 4，1，7。"
         },
         answer: "147",
         success: "把数字从小到大排，得到 147。"
       },
       {
         name: "第八关：终门",
-        clueTotal: 6,
+        clueTotal: 7,
         hint: "把前面几关的最终数字串起来，就能开最后的门。",
         clues: {
           bookcase: "书脊写着 3、5、1、4。",
@@ -866,7 +1209,8 @@
           lamp: "灯光把总表中每组的首位数字打亮。",
           picture: "画框里写着“看每组的第一个数字”。",
           plant: "盆底有一行字：3 1 1 4。",
-          panel: "终门需要输入 3114。"
+          panel: "终门需要输入 3114。",
+          fridge: "冰箱里挂着一串数字牌：3、1、1、4。"
         },
         answer: "3114",
         success: "把前面几组最终数字的首位连起来：3、1、1、4。"
@@ -881,7 +1225,10 @@
       solved: false,
       modalAction: null,
       splash: null,
-      splashFrame: 0
+      splashFrame: 0,
+      fridgeOpen: false,
+      fridgeRevealed: false,
+      fridgeTimer: null
     };
 
     const els = {
@@ -933,7 +1280,7 @@
     function renderClues() {
       const level = currentLevel();
       els.clueList.innerHTML = "";
-      const keys = ["bookcase", "desk", "lamp", "picture", "plant", "panel"];
+      const keys = ["bookcase", "desk", "lamp", "picture", "plant", "panel", "fridge"];
       keys.forEach((key) => {
         const div = document.createElement("div");
         div.className = "clue";
@@ -965,6 +1312,12 @@
       state.cluesFound.clear();
       state.input = "";
       state.solved = false;
+      state.fridgeOpen = false;
+      state.fridgeRevealed = false;
+      if (state.fridgeTimer) {
+        clearTimeout(state.fridgeTimer);
+        state.fridgeTimer = null;
+      }
       els.answerInput.value = "";
       els.lockFeedback.textContent = "";
       els.modal.classList.remove("visible");
@@ -978,7 +1331,7 @@
       renderClues();
       setHint(level.hint);
       if (!state.solved) {
-        setSceneMessage(`你进入了${level.name}。场景里有 6 个可点击物件，先点发光的那几个找线索。`);
+        setSceneMessage(`你进入了${level.name}。先点发光物件和冰箱，冰箱要先打开再慢慢看里面。`);
       }
       document.querySelectorAll(".hotspot").forEach((el) => {
         el.classList.remove("active");
@@ -1141,6 +1494,23 @@
         node.addEventListener("click", () => {
           if (state.solved) return;
           const key = node.dataset.clue;
+          if (key === "fridge") {
+            if (!state.fridgeOpen) {
+              state.fridgeOpen = true;
+              node.classList.add("open");
+              setSceneMessage("冰箱门打开了，里面还有牛奶盒和挡板，线索不会一下子跳出来。");
+              state.fridgeTimer = window.setTimeout(() => {
+                state.fridgeRevealed = true;
+                node.classList.add("revealed");
+                setSceneMessage("冰箱里露出一张纸条，再点一次冰箱，把纸条看清楚。");
+              }, 900);
+              return;
+            }
+            if (!state.fridgeRevealed) {
+              setSceneMessage("冰箱里还有东西挡着，等一下再看。");
+              return;
+            }
+          }
           markOpened(key);
           setSceneMessage(currentLevel().clues[key]);
         });
@@ -1188,7 +1558,7 @@
     renderLevel();
     resizeSplash();
     resizeScene();
-    setSceneMessage("先点发光的物件找线索，线索会出现在右侧。");
+    setSceneMessage("先点发光的物件和冰箱，冰箱要先打开再看里面。");
   </script>
 </body>
 </html>
