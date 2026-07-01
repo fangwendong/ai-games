@@ -12,6 +12,12 @@ python3 -m http.server 4175
 
 然后打开 `http://127.0.0.1:4175/`。
 
+如果用 nginx 代理，建议挂在 `/escape-room/`：
+
+```bash
+http://127.0.0.1/escape-room/
+```
+
 这是单文件静态网页，直接打开 `index.html` 通常也能运行。
 
 ## 操作
@@ -34,4 +40,3 @@ python3 -m http.server 4175
 - 每关都有明确的过门条件
 - 通关和失败反馈
 - 适配桌面和移动端
-
