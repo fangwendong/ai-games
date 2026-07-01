@@ -18,7 +18,8 @@ godot --headless --path games/night-market-dash-godot --quit
 
 - `WASD` or arrows: move
 - `Space`: dash
-- Auto-fire targets the nearest enemy
+- Hold left mouse button: manual aim/fire toward cursor
+- Release mouse: auto-fire targets the nearest enemy as a fallback
 - `1`, `2`, `3`: choose an upgrade between waves
 - `R`: restart
 
@@ -28,8 +29,10 @@ Playable first version with:
 
 - Three-wave survival objective
 - Dash movement with invulnerability, trail, and cooldown
-- Auto-fire charm bolts against the nearest enemy
-- Three enemy roles: drifter, runner, and shooter
+- Manual charm-bolt shooting with auto-fire fallback
+- Data-style wave plan with named waves
+- Enemy spawn telegraphs before enemies appear
+- Four enemy roles: drifter, runner, shooter, and final-wave brute
 - Enemy projectiles from shooter masks
 - Red hazard telegraphs
 - Gold gem drops with attraction

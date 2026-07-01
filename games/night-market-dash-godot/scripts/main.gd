@@ -9,6 +9,8 @@ const FIRE_RATE := 0.36
 const BULLET_SPEED := 560.0
 const MAX_HAZARDS := 2
 const HAZARD_BASE_CHANCE := 0.18
+const SPAWN_TELEGRAPH_TIME := 0.62
+const AIM_RANGE := 520.0
 
 var rng := RandomNumberGenerator.new()
 var mode := "ready"
@@ -37,9 +39,15 @@ var player := {
 var enemies: Array[Dictionary] = []
 var bullets: Array[Dictionary] = []
 var enemy_bullets: Array[Dictionary] = []
+var pending_spawns: Array[Dictionary] = []
 var drops: Array[Dictionary] = []
 var hazards: Array[Dictionary] = []
 var particles: Array[Dictionary] = []
+var wave_plan: Array[Dictionary] = [
+	{"name": "Lantern Alley", "count": 6, "types": ["drifter", "drifter", "runner"]},
+	{"name": "Mask Gate", "count": 8, "types": ["drifter", "runner", "runner", "shooter"]},
+	{"name": "Exit Shrine", "count": 7, "types": ["runner", "shooter", "shooter", "brute"]},
+]
 
 var rooms := [
 	Rect2(92, 94, 304, 212),
@@ -78,8 +86,9 @@ func get_capture_path() -> String:
 
 func capture_preview(path: String) -> void:
 	start()
-	for i in 6:
-		spawn_enemy()
+	var preview_types := ["drifter", "runner", "shooter", "drifter", "runner", "brute"]
+	for i in preview_types.size():
+		spawn_enemy(preview_types[i], Vector2(440 + i * 72, 250 + (i % 2) * 170))
 	hazards.append({"rect": Rect2(246, 146, 252, 34), "warn": 0.2, "active": 0.34})
 	hazards.append({"rect": Rect2(786, 420, 34, 142), "warn": 0.0, "active": 0.34})
 	drops.append({"pos": Vector2(705, 365), "radius": 7.0})
@@ -118,6 +127,7 @@ func reset() -> void:
 	enemies.clear()
 	bullets.clear()
 	enemy_bullets.clear()
+	pending_spawns.clear()
 	drops.clear()
 	hazards.clear()
 	particles.clear()
@@ -128,9 +138,13 @@ func start() -> void:
 	begin_wave()
 
 func begin_wave() -> void:
-	wave_spawn_left = 4 + wave * 2
+	var plan := get_wave_plan()
+	wave_spawn_left = plan.count
 	spawn_timer = 0.45
 	hazards.clear()
+
+func get_wave_plan() -> Dictionary:
+	return wave_plan[min(wave - 1, wave_plan.size() - 1)]
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("restart"):
@@ -212,7 +226,7 @@ func update_game(delta: float) -> void:
 
 	spawn_timer -= delta
 	if wave_spawn_left > 0 and spawn_timer <= 0.0:
-		spawn_enemy()
+		queue_enemy_spawn()
 		wave_spawn_left -= 1
 		spawn_timer = max(0.55, 1.2 - wave * 0.11)
 	if hazards.size() < MAX_HAZARDS and rng.randf() < delta * (HAZARD_BASE_CHANCE + wave * 0.05):
@@ -220,6 +234,7 @@ func update_game(delta: float) -> void:
 
 	fire_nearest()
 	update_bullets(delta)
+	update_pending_spawns(delta)
 	update_enemies(delta)
 	update_enemy_bullets(delta)
 	update_hazards(delta)
@@ -236,23 +251,48 @@ func update_game(delta: float) -> void:
 			mode = "upgrade"
 			message = "Choose: 1 faster charms  2 harder hits  3 reset dash"
 
-func spawn_enemy() -> void:
+func queue_enemy_spawn() -> void:
 	var room: Rect2 = rooms[rng.randi_range(0, rooms.size() - 1)]
-	var roll := rng.randf()
-	var enemy_type := "drifter"
-	if wave >= 2 and roll < 0.22:
-		enemy_type = "shooter"
-	elif roll < 0.42:
-		enemy_type = "runner"
+	var plan := get_wave_plan()
+	var types: Array = plan.types
+	var enemy_type: String = types[rng.randi_range(0, types.size() - 1)]
+	var spawn_pos := Vector2(rng.randf_range(room.position.x + 36, room.end.x - 36), rng.randf_range(room.position.y + 36, room.end.y - 36))
+	pending_spawns.append({
+		"pos": spawn_pos,
+		"type": enemy_type,
+		"timer": SPAWN_TELEGRAPH_TIME,
+	})
+
+func spawn_enemy(enemy_type: String, spawn_pos: Vector2) -> void:
+	var radius := 16.0
+	var hp := 3 + wave
+	var speed := 92.0 + wave * 12.0
+	if enemy_type == "runner":
+		radius = 12.0
+		hp = 2
+		speed = 165.0
+	elif enemy_type == "brute":
+		radius = 24.0
+		hp = 10
+		speed = 70.0
 	enemies.append({
-		"pos": Vector2(rng.randf_range(room.position.x + 28, room.end.x - 28), rng.randf_range(room.position.y + 28, room.end.y - 28)),
-		"radius": 12.0 if enemy_type == "runner" else 16.0,
-		"hp": 2 if enemy_type == "runner" else 3 + wave,
-		"speed": 165.0 if enemy_type == "runner" else 92.0 + wave * 12.0,
+		"pos": spawn_pos,
+		"radius": radius,
+		"hp": hp,
+		"speed": speed,
 		"type": enemy_type,
 		"shoot_timer": rng.randf_range(0.35, 1.1),
 		"hit": 0.0,
 	})
+
+func update_pending_spawns(delta: float) -> void:
+	for spawn in pending_spawns:
+		spawn.timer -= delta
+		if spawn.timer <= 0.0:
+			spawn_enemy(spawn.type, spawn.pos)
+			spawn.dead = true
+			burst(spawn.pos, Color("#ffd15c"), 5)
+	pending_spawns = pending_spawns.filter(func(s): return not s.has("dead"))
 
 func spawn_hazard() -> void:
 	var room: Rect2 = rooms[rng.randi_range(0, rooms.size() - 1)]
@@ -269,8 +309,21 @@ func spawn_hazard() -> void:
 	})
 
 func fire_nearest() -> void:
-	if fire_timer > 0.0 or enemies.is_empty():
+	if fire_timer > 0.0:
 		return
+	var direction := get_fire_direction()
+	if direction == Vector2.ZERO:
+		return
+	bullets.append({"pos": player.pos, "vel": direction * BULLET_SPEED, "life": 0.9, "radius": 5.0, "damage": player.damage})
+	fire_timer = fire_cooldown
+
+func get_fire_direction() -> Vector2:
+	if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		var manual_dir: Vector2 = player.pos.direction_to(get_local_mouse_position())
+		if manual_dir.length_squared() > 0.001:
+			return manual_dir
+	if enemies.is_empty():
+		return Vector2.ZERO
 	var best_index := -1
 	var best_dist := 99999.0
 	for i in enemies.size():
@@ -278,11 +331,9 @@ func fire_nearest() -> void:
 		if distance < best_dist:
 			best_dist = distance
 			best_index = i
-	if best_index == -1 or best_dist > 440.0:
-		return
-	var dir: Vector2 = player.pos.direction_to(enemies[best_index].pos)
-	bullets.append({"pos": player.pos, "vel": dir * BULLET_SPEED, "life": 0.9, "radius": 5.0, "damage": player.damage})
-	fire_timer = fire_cooldown
+	if best_index == -1 or best_dist > AIM_RANGE:
+		return Vector2.ZERO
+	return player.pos.direction_to(enemies[best_index].pos)
 
 func update_bullets(delta: float) -> void:
 	for bullet in bullets:
@@ -312,6 +363,14 @@ func update_enemies(delta: float) -> void:
 				enemy.shoot_timer = rng.randf_range(1.2, 1.65)
 				enemy_bullets.append({"pos": enemy.pos, "vel": dir * 240.0, "life": 2.0, "radius": 5.0})
 				burst(enemy.pos, Color("#ff4e64"), 3)
+		elif enemy.type == "brute":
+			enemy.pos += dir * enemy.speed * delta
+			enemy.shoot_timer -= delta
+			if enemy.shoot_timer <= 0.0:
+				enemy.shoot_timer = rng.randf_range(1.8, 2.3)
+				for angle in [-18.0, 0.0, 18.0]:
+					enemy_bullets.append({"pos": enemy.pos, "vel": dir.rotated(deg_to_rad(angle)) * 210.0, "life": 2.2, "radius": 6.0})
+				burst(enemy.pos, Color("#ff4e64"), 5)
 		else:
 			enemy.pos += dir * enemy.speed * delta
 		for stall in stalls:
@@ -388,6 +447,7 @@ func _draw() -> void:
 	draw_set_transform(offset)
 	draw_market()
 	draw_hazards()
+	draw_spawn_telegraphs()
 	draw_drops()
 	draw_bullets()
 	draw_enemy_bullets()
@@ -416,6 +476,13 @@ func draw_hazards() -> void:
 		draw_rect(hazard.rect, color, true)
 		draw_rect(hazard.rect, Color(1.0, 0.85, 0.85, 0.45), false, 1.5)
 
+func draw_spawn_telegraphs() -> void:
+	for spawn in pending_spawns:
+		var ratio: float = clamp(spawn.timer / SPAWN_TELEGRAPH_TIME, 0.0, 1.0)
+		var radius: float = lerp(30.0, 13.0, 1.0 - ratio)
+		draw_arc(spawn.pos, radius, 0.0, TAU, 32, Color(1.0, 0.82, 0.36, 0.7), 2.0)
+		draw_circle(spawn.pos, 4.0, Color(1.0, 0.82, 0.36, 0.5))
+
 func draw_player() -> void:
 	if dash_time > 0.0:
 		draw_line(player.pos - player.vel * 0.04, player.pos, Color(0.22, 0.96, 0.82, 0.72), 10.0)
@@ -431,11 +498,15 @@ func draw_enemies() -> void:
 			base_color = Color("#ff8b4f")
 		elif enemy.type == "shooter":
 			base_color = Color("#c85cff")
+		elif enemy.type == "brute":
+			base_color = Color("#e2455d")
 		var color := Color.WHITE if enemy.hit > 0.0 else base_color
 		draw_circle(enemy.pos, enemy.radius, color)
 		draw_arc(enemy.pos, enemy.radius + 1.0, 0.0, TAU, 18, Color(1, 0.95, 0.95, 0.6), 2.0)
 		if enemy.type == "shooter":
 			draw_circle(enemy.pos, 5.0, Color("#071114"))
+		elif enemy.type == "brute":
+			draw_circle(enemy.pos, 8.0, Color("#071114"))
 
 func draw_bullets() -> void:
 	for bullet in bullets:
@@ -459,9 +530,10 @@ func draw_particles() -> void:
 
 func draw_hud() -> void:
 	var font := ThemeDB.fallback_font
-	var line := "Wave %d/3   HP %d   Gems %d   Damage %d   Dash %s" % [wave, max(0, player.hp), gems, player.damage, "Ready" if dash_timer <= 0.0 else "%.1f" % dash_timer]
+	var plan := get_wave_plan()
+	var line := "%s   Wave %d/3   HP %d   Gems %d   Damage %d   Dash %s" % [plan.name, wave, max(0, player.hp), gems, player.damage, "Ready" if dash_timer <= 0.0 else "%.1f" % dash_timer]
 	draw_string(font, Vector2(24, 34), line, HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color("#e8fff8"))
-	draw_string(font, Vector2(24, 64), "WASD/Arrows move  Space dash  R restart", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("#8bb2aa"))
+	draw_string(font, Vector2(24, 64), "WASD/Arrows move  Mouse hold manual fire  Space dash  R restart", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("#8bb2aa"))
 	if not chosen_upgrades.is_empty():
 		draw_string(font, Vector2(24, 91), "Upgrades: " + ", ".join(chosen_upgrades), HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("#ffd15c"))
 	if mode != "playing":

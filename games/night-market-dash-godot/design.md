@@ -2,7 +2,7 @@
 
 ## Core Loop
 
-Move through a compact night market arena, dash through red warning zones, auto-fire at nearby enemies, collect gold gems, pick a small upgrade between waves, and survive three waves.
+Move through a compact night market arena, dash through red warning zones, aim charm bolts at enemies, collect gold gems, pick a small upgrade between waves, and survive three named waves.
 
 ## Quality Target
 
@@ -15,6 +15,9 @@ After playtest feedback, visual readability takes priority over spectacle. Backg
 - Drifters pressure the player steadily.
 - Runners close distance quickly and force dash timing.
 - Shooters keep range and fire slow red projectiles.
+- A final-wave brute moves slowly, has more HP, and fires a three-shot spread.
+- Holding left mouse button switches to manual cursor aiming; releasing it falls back to nearest-enemy auto-fire.
+- Enemies use a short gold spawn telegraph before entering play.
 - Hazards use a warning phase before becoming dangerous.
 - Upgrade choices are immediate and persistent for the run:
   - Faster charms reduce fire cooldown.
@@ -30,11 +33,15 @@ After playtest feedback, visual readability takes priority over spectacle. Backg
 - Base fire rate: `0.36`
 - Bullet speed: `560`
 - Starting HP: `5`
-- Wave size after readability pass: `4 + wave * 2`
+- Wave plan:
+  - `Lantern Alley`: 6 enemies, drifters and runners
+  - `Mask Gate`: 8 enemies, drifters, runners, shooters
+  - `Exit Shrine`: 7 enemies, runners, shooters, brute
 - Max simultaneous hazards: `2`
 - Hazard warning time: `0.95`
 - Hazard active time: `0.28`
 - Shooter projectile speed: `240`
+- Spawn telegraph time: `0.62`
 
 ## Quality Pass
 
@@ -48,6 +55,14 @@ After playtest feedback, visual readability takes priority over spectacle. Backg
 - Limited hazard count and lowered hazard spawn rate.
 - Reduced screen shake, particle count, particle lifetime, and enemy projectile size.
 - Increased player radius for better readability.
+- Added manual mouse shooting while preserving auto-fire fallback.
+- Replaced formula-only waves with a named wave plan.
+- Added enemy spawn telegraphs so enemies no longer pop in instantly.
+- Added a final-wave brute enemy for a small climax.
+
+## Reference-Inspired Changes
+
+The high-star top-down shooter reference uses room-owned enemy managers, wave resources, spawn marks, and separate projectile systems. This pass applies the same design direction without copying code or assets: waves are now explicit data, enemy entry is telegraphed, shooting is a real player action, and the final wave changes enemy behavior instead of only increasing count.
 
 ## Validation
 
