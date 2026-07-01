@@ -39,7 +39,8 @@ Playable first version with:
 - Data-style wave plan with named waves
 - Enemy spawn telegraphs before enemies appear
 - Four enemy roles: drifter, runner, shooter, and final-wave brute
-- Original SVG art assets for the night market background, player, enemies, and gems
+- Original art assets for the night market background, player, enemies, and gems
+- Generated cartoon character atlas for the player and four monster types
 - Enemy projectiles from shooter masks
 - Red hazard telegraphs
 - Gold gem drops with attraction

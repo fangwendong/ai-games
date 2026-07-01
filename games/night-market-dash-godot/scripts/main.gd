@@ -19,6 +19,7 @@ const ART_RUNNER_PATH := "res://assets/art/enemy_runner.svg"
 const ART_SHOOTER_PATH := "res://assets/art/enemy_shooter.svg"
 const ART_BRUTE_PATH := "res://assets/art/enemy_brute.svg"
 const ART_GEM_PATH := "res://assets/art/gem.svg"
+const ART_CHARACTER_ATLAS_PATH := "res://assets/generated/characters-chroma.png"
 
 var rng := RandomNumberGenerator.new()
 var mode := "ready"
@@ -96,11 +97,11 @@ func _ready() -> void:
 
 func load_art() -> void:
 	art_background = load_svg_texture(ART_BACKGROUND_PATH)
-	art_player = load_svg_texture(ART_PLAYER_PATH)
-	art_drifter = load_svg_texture(ART_DRIFTER_PATH)
-	art_runner = load_svg_texture(ART_RUNNER_PATH)
-	art_shooter = load_svg_texture(ART_SHOOTER_PATH)
-	art_brute = load_svg_texture(ART_BRUTE_PATH)
+	art_player = load_chroma_atlas_texture(Rect2i(45, 175, 365, 450))
+	art_drifter = load_chroma_atlas_texture(Rect2i(460, 205, 300, 430))
+	art_runner = load_chroma_atlas_texture(Rect2i(790, 245, 350, 390))
+	art_shooter = load_chroma_atlas_texture(Rect2i(1180, 230, 340, 430))
+	art_brute = load_chroma_atlas_texture(Rect2i(1490, 150, 455, 510))
 	art_gem = load_svg_texture(ART_GEM_PATH)
 
 func load_svg_texture(path: String) -> Texture2D:
@@ -113,6 +114,25 @@ func load_svg_texture(path: String) -> Texture2D:
 	if err != OK:
 		push_error("Failed to load SVG asset: " + path)
 		return null
+	return ImageTexture.create_from_image(image)
+
+func load_chroma_atlas_texture(region: Rect2i) -> Texture2D:
+	var atlas := Image.new()
+	var err := atlas.load(ART_CHARACTER_ATLAS_PATH)
+	if err != OK:
+		push_error("Failed to load character atlas")
+		return null
+	atlas.convert(Image.FORMAT_RGBA8)
+	var image := Image.create(region.size.x, region.size.y, false, Image.FORMAT_RGBA8)
+	image.blit_rect(atlas, region, Vector2i.ZERO)
+	for y in image.get_height():
+		for x in image.get_width():
+			var pixel := image.get_pixel(x, y)
+			if pixel.g > 0.72 and pixel.r < 0.35 and pixel.b < 0.35:
+				pixel.a = 0.0
+			elif pixel.g > 0.58 and pixel.r < 0.48 and pixel.b < 0.48:
+				pixel.a = min(pixel.a, 0.35)
+			image.set_pixel(x, y, pixel)
 	return ImageTexture.create_from_image(image)
 
 func has_user_arg(name: String) -> bool:
@@ -554,9 +574,9 @@ func draw_player() -> void:
 	if dash_time > 0.0:
 		draw_line(player.pos - player.vel * 0.04, player.pos, Color(0.22, 0.96, 0.82, 0.72), 10.0)
 	if invuln_timer > 0.0 and int(Time.get_ticks_msec() / 70) % 2 == 0:
-		draw_texture_centered(art_player, player.pos, Vector2(56, 56), Color(1, 1, 1, 0.62))
+		draw_texture_centered(art_player, player.pos, Vector2(96, 118), Color(1, 1, 1, 0.62))
 	else:
-		draw_texture_centered(art_player, player.pos, Vector2(56, 56))
+		draw_texture_centered(art_player, player.pos, Vector2(96, 118))
 
 func draw_enemies() -> void:
 	for enemy in enemies:
@@ -565,13 +585,13 @@ func draw_enemies() -> void:
 func draw_enemy(enemy: Dictionary) -> void:
 	var modulate := Color.WHITE if enemy.hit > 0.0 else Color(1, 1, 1, 1)
 	if enemy.type == "runner":
-		draw_texture_centered(art_runner, enemy.pos, Vector2(46, 46), modulate)
+		draw_texture_centered(art_runner, enemy.pos, Vector2(92, 102), modulate)
 	elif enemy.type == "shooter":
-		draw_texture_centered(art_shooter, enemy.pos, Vector2(52, 52), modulate)
+		draw_texture_centered(art_shooter, enemy.pos, Vector2(94, 110), modulate)
 	elif enemy.type == "brute":
-		draw_texture_centered(art_brute, enemy.pos, Vector2(66, 66), modulate)
+		draw_texture_centered(art_brute, enemy.pos, Vector2(126, 138), modulate)
 	else:
-		draw_texture_centered(art_drifter, enemy.pos, Vector2(50, 50), modulate)
+		draw_texture_centered(art_drifter, enemy.pos, Vector2(86, 102), modulate)
 
 func draw_bullets() -> void:
 	for bullet in bullets:

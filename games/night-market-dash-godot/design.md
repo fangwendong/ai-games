@@ -66,7 +66,7 @@ The high-star top-down shooter reference uses room-owned enemy managers, wave re
 
 ## Art Direction Pass
 
-The prototype now uses original SVG assets instead of primitive circles and rectangles:
+The prototype now uses original SVG/background assets and a generated cartoon character atlas instead of primitive circles and rectangles:
 
 - `assets/art/arena_background.svg`: brighter night market floor, stalls, lantern hints, and low-noise play area.
 - `assets/art/player.svg`: readable night-market talisman caster.
@@ -75,6 +75,7 @@ The prototype now uses original SVG assets instead of primitive circles and rect
 - `assets/art/enemy_shooter.svg`: diamond ranged enemy.
 - `assets/art/enemy_brute.svg`: large square final-wave enemy.
 - `assets/art/gem.svg`: gold pickup.
+- `assets/generated/characters-chroma.png`: cartoon player and monster atlas. Godot loads it at runtime, crops the five characters, and removes the green chroma background in code.
 
 The goal is clarity first: each gameplay role has a different silhouette, not just a different color.
 
