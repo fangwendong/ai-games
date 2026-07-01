@@ -1,0 +1,1367 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>种花游戏</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f0e8;
+      --ink: #26302d;
+      --muted: #69736f;
+      --panel: rgba(255, 252, 247, 0.88);
+      --line: rgba(78, 88, 83, 0.18);
+      --shadow: 0 18px 50px rgba(71, 56, 38, 0.14);
+      --soil: #795548;
+      --leaf: #2f8f70;
+      --rose: #d94d62;
+      --gold: #f3b533;
+      --sky: #4a8fd6;
+      --violet: #8b6dd7;
+      --tile-size: min(13.2vw, 64px);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      min-height: 100%;
+      margin: 0;
+      background:
+        linear-gradient(135deg, rgba(47, 143, 112, 0.12), transparent 34%),
+        linear-gradient(315deg, rgba(217, 77, 98, 0.12), transparent 38%),
+        var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    body {
+      display: grid;
+      place-items: start center;
+      padding: 18px;
+    }
+
+    button {
+      font: inherit;
+    }
+
+    .app {
+      width: min(1120px, 100%);
+      display: grid;
+      grid-template-columns: minmax(300px, 1fr) 312px;
+      gap: 18px;
+      align-items: start;
+    }
+
+    .play-area,
+    .side {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(14px);
+    }
+
+    .play-area {
+      min-height: calc(100vh - 36px);
+      padding: clamp(14px, 3vw, 28px);
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 16px;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .mark {
+      width: 44px;
+      height: 44px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      background: #26302d;
+      color: #fff7e6;
+      font-size: 25px;
+      box-shadow: inset 0 -4px 0 rgba(255, 255, 255, 0.12);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(26px, 4vw, 44px);
+      line-height: 1;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.3;
+    }
+
+    .stat-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
+    .stat {
+      min-width: 74px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.56);
+      text-align: center;
+    }
+
+    .stat strong {
+      display: block;
+      font-size: 17px;
+      line-height: 1;
+    }
+
+    .stat span {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+
+    .rule-strip {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+
+    .rule {
+      min-height: 64px;
+      display: grid;
+      place-items: center;
+      padding: 10px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.62);
+      border: 1px solid var(--line);
+      color: #40504b;
+      font-size: 14px;
+      line-height: 1.25;
+      text-align: center;
+      font-weight: 750;
+    }
+
+    .learn-card {
+      display: grid;
+      gap: 10px;
+      padding: 14px;
+      border: 1px solid rgba(47, 143, 112, 0.22);
+      border-radius: 8px;
+      background: rgba(47, 143, 112, 0.08);
+    }
+
+    .learn-title {
+      margin: 0;
+      font-size: 17px;
+      line-height: 1.2;
+    }
+
+    .learn-steps {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .learn-steps li {
+      min-height: 70px;
+      padding: 10px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.68);
+      color: #43504c;
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .learn-steps strong {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--ink);
+      font-size: 14px;
+    }
+
+    .modebar {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .top-mode {
+      width: min(260px, 100%);
+    }
+
+    .mode-btn {
+      min-height: 46px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fffaf2;
+      color: var(--ink);
+      cursor: pointer;
+      font-weight: 850;
+      box-shadow: inset 0 -3px 0 rgba(38, 48, 45, 0.08);
+    }
+
+    .mode-btn.active {
+      background: #26302d;
+      color: #fff7e6;
+      border-color: rgba(38, 48, 45, 0.66);
+    }
+
+    .board-wrap {
+      display: grid;
+      place-items: center;
+      min-height: 420px;
+    }
+
+    .board {
+      display: grid;
+      grid-template-columns: repeat(var(--size), var(--tile-size));
+      grid-template-rows: repeat(var(--size), var(--tile-size));
+      gap: 5px;
+      padding: 8px;
+      border-radius: 8px;
+      background: rgba(50, 42, 34, 0.14);
+      box-shadow: inset 0 0 0 1px rgba(60, 45, 33, 0.12);
+      touch-action: manipulation;
+      user-select: none;
+    }
+
+    .tile {
+      position: relative;
+      width: var(--tile-size);
+      height: var(--tile-size);
+      border: 0;
+      border-radius: 7px;
+      color: var(--ink);
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.48),
+        inset 0 -4px 0 rgba(0, 0, 0, 0.06);
+      transition: transform 120ms ease, filter 120ms ease, box-shadow 120ms ease;
+    }
+
+    .tile:hover {
+      transform: translateY(-1px);
+      filter: saturate(1.08);
+      box-shadow:
+        inset 0 0 0 2px rgba(255, 255, 255, 0.76),
+        inset 0 -4px 0 rgba(0, 0, 0, 0.06),
+        0 8px 18px rgba(55, 48, 39, 0.14);
+    }
+
+    .tile:focus-visible {
+      outline: 3px solid rgba(38, 48, 45, 0.5);
+      outline-offset: 2px;
+    }
+
+    .tile.flower {
+      background-image: radial-gradient(circle at 50% 45%, rgba(255, 255, 255, 0.62), transparent 29%);
+    }
+
+    .tile.soil::before {
+      content: "";
+      width: 52%;
+      height: 7px;
+      border-radius: 99px;
+      background: rgba(75, 54, 41, 0.64);
+      transform: rotate(-34deg);
+    }
+
+    .tile.soil::after {
+      content: "";
+      position: absolute;
+      width: 52%;
+      height: 7px;
+      border-radius: 99px;
+      background: rgba(75, 54, 41, 0.64);
+      transform: rotate(34deg);
+    }
+
+    .tile .flower-icon {
+      font-size: calc(var(--tile-size) * 0.58);
+      filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.08));
+      transform: translateY(-1px);
+    }
+
+    .tile.wrong {
+      animation: shake 230ms ease;
+      box-shadow:
+        inset 0 0 0 3px rgba(190, 33, 47, 0.58),
+        inset 0 -4px 0 rgba(0, 0, 0, 0.08);
+    }
+
+    .tile.hint {
+      animation: pulse 900ms ease 2;
+      box-shadow:
+        inset 0 0 0 3px rgba(243, 181, 51, 0.86),
+        0 0 0 5px rgba(243, 181, 51, 0.18);
+    }
+
+    .message {
+      min-height: 54px;
+      padding: 12px 14px;
+      border-radius: 8px;
+      background: rgba(38, 48, 45, 0.08);
+      color: #3f4c48;
+      line-height: 1.45;
+      font-size: 14px;
+    }
+
+    .side {
+      position: sticky;
+      top: 18px;
+      padding: 16px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .panel-title {
+      margin: 0;
+      font-size: 18px;
+      line-height: 1.2;
+    }
+
+    .actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .btn {
+      min-height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fffaf2;
+      color: var(--ink);
+      cursor: pointer;
+      font-weight: 800;
+      box-shadow: inset 0 -3px 0 rgba(38, 48, 45, 0.08);
+    }
+
+    .btn.primary {
+      background: #26302d;
+      color: #fff7e6;
+    }
+
+    .btn:disabled {
+      cursor: not-allowed;
+      opacity: 0.48;
+    }
+
+    .level-nav {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .level-range {
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+
+    .level-list {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 7px;
+      padding-right: 2px;
+    }
+
+    .level-btn {
+      aspect-ratio: 1;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.66);
+      cursor: pointer;
+      font-weight: 850;
+      color: var(--ink);
+    }
+
+    .level-btn.active {
+      background: var(--leaf);
+      color: #fff;
+    }
+
+    .level-btn.done {
+      background: rgba(47, 143, 112, 0.22);
+      color: #2b6857;
+    }
+
+    .level-btn:disabled {
+      cursor: default;
+    }
+
+    .progress {
+      height: 10px;
+      overflow: hidden;
+      border-radius: 99px;
+      background: rgba(38, 48, 45, 0.1);
+    }
+
+    .progress div {
+      height: 100%;
+      width: var(--progress);
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--leaf), var(--gold), var(--rose));
+      transition: width 180ms ease;
+    }
+
+    .mini {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+      margin: 0;
+    }
+
+    .legend {
+      display: grid;
+      gap: 8px;
+      padding-top: 4px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #495753;
+      font-size: 13px;
+    }
+
+    .swatch {
+      width: 22px;
+      height: 22px;
+      border-radius: 6px;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+    }
+
+    .win-card {
+      display: none;
+      padding: 14px;
+      border-radius: 8px;
+      background: rgba(47, 143, 112, 0.11);
+      border: 1px solid rgba(47, 143, 112, 0.24);
+    }
+
+    .win-card.visible {
+      display: grid;
+      gap: 10px;
+    }
+
+    .guide-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 20;
+      display: none;
+      place-items: center;
+      padding: 18px;
+      background: rgba(38, 48, 45, 0.34);
+    }
+
+    .guide-overlay.visible {
+      display: grid;
+    }
+
+    .guide-modal {
+      width: min(560px, 100%);
+      display: grid;
+      gap: 14px;
+      padding: 18px;
+      border: 1px solid rgba(78, 88, 83, 0.18);
+      border-radius: 8px;
+      background: #fffaf2;
+      box-shadow: 0 28px 80px rgba(71, 56, 38, 0.24);
+    }
+
+    .guide-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .guide-head h2 {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.2;
+    }
+
+    .guide-close {
+      width: 38px;
+      height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      cursor: pointer;
+      font-size: 20px;
+      line-height: 1;
+    }
+
+    .guide-list {
+      display: grid;
+      gap: 10px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .guide-list li {
+      padding: 12px;
+      border-radius: 8px;
+      background: rgba(47, 143, 112, 0.08);
+      color: #43504c;
+      line-height: 1.45;
+    }
+
+    .guide-list strong {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--ink);
+    }
+
+    .result-emoji {
+      display: grid;
+      place-items: center;
+      min-height: 96px;
+      font-size: 72px;
+      line-height: 1;
+      animation: pop 420ms ease;
+    }
+
+    .fx-layer {
+      position: fixed;
+      inset: 0;
+      z-index: 19;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 180ms ease;
+    }
+
+    .fx-layer.visible {
+      opacity: 1;
+    }
+
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-4px); }
+      75% { transform: translateX(4px); }
+    }
+
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.05); }
+    }
+
+    @keyframes pop {
+      0% { transform: scale(0.6); opacity: 0; }
+      60% { transform: scale(1.08); opacity: 1; }
+      100% { transform: scale(1); }
+    }
+
+    @media (max-width: 900px) {
+      body {
+        padding: 10px;
+      }
+
+      .app {
+        grid-template-columns: 1fr;
+      }
+
+      .play-area {
+        min-height: auto;
+      }
+
+      .side {
+        position: static;
+      }
+    }
+
+    @media (max-width: 620px) {
+      :root {
+        --tile-size: min(13.4vw, 54px);
+      }
+
+      .topbar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .stat-row {
+        width: 100%;
+        justify-content: stretch;
+      }
+
+      .top-mode {
+        width: 100%;
+      }
+
+      .stat {
+        flex: 1;
+      }
+
+      .board {
+        gap: 4px;
+        padding: 6px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <section class="play-area" aria-label="种花游戏谜题">
+      <div class="topbar">
+        <div class="brand">
+          <div class="mark" aria-hidden="true">✿</div>
+          <div>
+            <h1>种花游戏</h1>
+            <p class="subtitle">每次只做一个确定判断，把花园慢慢种满。</p>
+          </div>
+        </div>
+        <div class="stat-row">
+          <div class="stat"><strong id="levelText">1</strong><span>关卡</span></div>
+          <div class="stat"><strong id="heartText">♥♥♥</strong><span>生命</span></div>
+          <div class="stat"><strong id="timerText">0:00</strong><span>用时</span></div>
+        </div>
+      </div>
+      <div class="modebar top-mode" role="group" aria-label="点击模式">
+        <button id="flowerModeBtn" class="mode-btn active" type="button">种花 ✿</button>
+        <button id="soilModeBtn" class="mode-btn" type="button">排除 ✕</button>
+      </div>
+
+      <div class="board-wrap">
+        <div id="board" class="board" aria-label="谜题棋盘"></div>
+      </div>
+
+      <div id="message" class="message" role="status">
+        当前是“种花”模式。确定格子有花时直接点击；不确定时切到“排除”做笔记。
+      </div>
+    </section>
+
+    <aside class="side">
+      <div>
+        <h2 class="panel-title">道具</h2>
+        <p class="mini">提示会指出下一步可以怎么想；开花整轮只能用 3 次。</p>
+      </div>
+      <div class="actions">
+        <button id="guideBtn" class="btn">玩法</button>
+        <button id="hintBtn" class="btn">提示 · H</button>
+        <button id="bloomBtn" class="btn">开花 3/3 · B</button>
+        <button id="restartBtn" class="btn">重开本段 · R</button>
+        <button id="nextBtn" class="btn primary" disabled>下一关 · N</button>
+      </div>
+
+      <div>
+        <h2 class="panel-title">关卡</h2>
+        <div class="level-nav">
+          <div id="levelRange" class="level-range">第 1 段 1-10 | 3/3 条命</div>
+        </div>
+        <div id="levelList" class="level-list"></div>
+      </div>
+
+      <div>
+        <h2 class="panel-title">花园进度</h2>
+        <div class="progress" aria-label="谜题进度"><div id="progressFill"></div></div>
+        <p id="progressText" class="mini">已种 0 / 5 朵花。</p>
+      </div>
+
+      <div class="legend">
+        <div class="legend-item"><span class="swatch" style="background:#f4c6ba"></span>每个彩色花圃只能有 1 朵花</div>
+        <div class="legend-item"><span class="swatch" style="background:#b9ddc6"></span>排除标记只是你的笔记</div>
+        <div class="legend-item"><span class="swatch" style="background:#f3d36b"></span>整轮共 3 次错误机会</div>
+      </div>
+
+      <div id="winCard" class="win-card">
+        <strong>种花完成。</strong>
+        <p class="mini">这就是核心循环：看颜色、做排除、最后把每朵花放到确定的位置。</p>
+      </div>
+    </aside>
+  </main>
+
+  <div id="guideOverlay" class="guide-overlay" role="dialog" aria-modal="true" aria-labelledby="guideTitle">
+    <div class="guide-modal">
+      <div class="guide-head">
+        <h2 id="guideTitle">玩法说明</h2>
+        <button id="guideCloseBtn" class="guide-close" type="button" aria-label="关闭玩法说明">×</button>
+      </div>
+      <ul class="guide-list">
+        <li><strong>目标</strong>把花种到棋盘上，让每个彩色花圃、每一行、每一列都正好只有 1 朵花。</li>
+        <li><strong>限制</strong>花不能贴着花，斜对角也不行。</li>
+        <li><strong>排除</strong>先选“排除”，点击你确定不可能有花的格子，这只是笔记，不会扣生命。</li>
+        <li><strong>通关</strong>一口气连续通过 30 关才算通关。第 1-10、10-20、20-30 是三个连续段，中途失败只会回到本段起点。</li>
+        <li><strong>种花</strong>确定答案后选“种花”，再点击格子。1-10 段给 3 条命，10-20 段给 6 条命，20-30 段给 9 条命。</li>
+        <li><strong>卡住</strong>点“提示”看下一步，或点“开花”自动种一朵正确的花。开花整轮最多 3 次。</li>
+      </ul>
+    </div>
+  </div>
+
+  <div id="resultOverlay" class="guide-overlay" role="dialog" aria-modal="true" aria-labelledby="resultTitle">
+    <div class="guide-modal">
+      <div id="resultEmoji" class="result-emoji" aria-hidden="true">🙂</div>
+      <div class="guide-head">
+        <h2 id="resultTitle">过关</h2>
+      </div>
+      <p id="resultBody" class="mini">继续挑战下一关。</p>
+      <div class="actions">
+        <button id="resultPrimaryBtn" class="btn primary" type="button">继续</button>
+        <button id="resultSecondaryBtn" class="btn" type="button">留在本关</button>
+      </div>
+    </div>
+  </div>
+
+  <canvas id="fireworks" class="fx-layer" aria-hidden="true"></canvas>
+
+  <script>
+    const colors = [
+      "#f4c6ba", "#b9ddc6", "#f3d36b", "#b9d7ee", "#d6c2ef",
+      "#f0b8cf", "#cddc8a", "#f0c7a0", "#abc8bd"
+    ];
+
+    const levelNames = ["晨露", "花径", "浅草", "暖阳", "石桥", "月门", "风铃", "青苔", "灯影", "小丘"];
+    const segmentLength = 10;
+    const challengeLength = 30;
+    const segmentRules = [
+      { start: 0, end: 10, lives: 3 },
+      { start: 10, end: 20, lives: 6 },
+      { start: 20, end: 30, lives: 9 },
+    ];
+
+    function createRandom(seed) {
+      let value = seed >>> 0;
+      return () => {
+        value = (value * 1664525 + 1013904223) >>> 0;
+        return value / 4294967296;
+      };
+    }
+
+    function shuffled(size, random) {
+      const items = Array.from({ length: size }, (_, index) => index);
+      for (let index = items.length - 1; index > 0; index -= 1) {
+        const swapIndex = Math.floor(random() * (index + 1));
+        [items[index], items[swapIndex]] = [items[swapIndex], items[index]];
+      }
+      return items;
+    }
+
+    function createSolution(size, seed) {
+      const random = createRandom(seed);
+      const usedCols = new Set();
+      const solution = [];
+
+      function search(row) {
+        if (row === size) return true;
+        const cols = shuffled(size, random);
+        for (const col of cols) {
+          if (usedCols.has(col)) continue;
+          if (row > 0 && Math.abs(solution[row - 1][1] - col) <= 1) continue;
+          usedCols.add(col);
+          solution.push([row, col]);
+          if (search(row + 1)) return true;
+          solution.pop();
+          usedCols.delete(col);
+        }
+        return false;
+      }
+
+      if (!search(0)) {
+        return createSolution(size, seed + 97);
+      }
+      return solution;
+    }
+
+    function createLevels(count) {
+      return Array.from({ length: count }, (_, index) => {
+        const number = index + 1;
+        const size = number <= 10 ? 5 : number <= 20 ? 6 : number <= 30 ? 7 : number <= 75 ? 7 : 8;
+        const seed = 7301 + number * 7919;
+        return {
+          name: `${levelNames[index % levelNames.length]} ${number}`,
+          size,
+          solution: createSolution(size, seed)
+        };
+      });
+    }
+
+    const levels = createLevels(100);
+
+    function createRegions(size, solution) {
+      return Array.from({ length: size }, (_, row) => (
+        Array.from({ length: size }, (_, col) => {
+          let bestIndex = 0;
+          let bestScore = Infinity;
+          solution.forEach(([seedRow, seedCol], index) => {
+            const distance = Math.abs(seedRow - row) + Math.abs(seedCol - col);
+            const bias = ((index * 3 + row * 2 + col) % 7) * 0.07;
+            const score = distance + bias;
+            if (score < bestScore) {
+              bestScore = score;
+              bestIndex = index;
+            }
+          });
+          return bestIndex;
+        })
+      ));
+    }
+
+    function segmentRuleFor(levelIndexValue) {
+      if (levelIndexValue < 10) return segmentRules[0];
+      if (levelIndexValue < 20) return segmentRules[1];
+      return segmentRules[2];
+    }
+
+    levels.forEach((level) => {
+      level.regions = createRegions(level.size, level.solution);
+    });
+
+    const boardEl = document.querySelector("#board");
+    const levelText = document.querySelector("#levelText");
+    const heartText = document.querySelector("#heartText");
+    const timerText = document.querySelector("#timerText");
+    const messageEl = document.querySelector("#message");
+    const guideOverlay = document.querySelector("#guideOverlay");
+    const guideBtn = document.querySelector("#guideBtn");
+    const guideCloseBtn = document.querySelector("#guideCloseBtn");
+    const resultOverlay = document.querySelector("#resultOverlay");
+    const resultEmoji = document.querySelector("#resultEmoji");
+    const resultTitle = document.querySelector("#resultTitle");
+    const resultBody = document.querySelector("#resultBody");
+    const resultPrimaryBtn = document.querySelector("#resultPrimaryBtn");
+    const resultSecondaryBtn = document.querySelector("#resultSecondaryBtn");
+    const soilModeBtn = document.querySelector("#soilModeBtn");
+    const flowerModeBtn = document.querySelector("#flowerModeBtn");
+    const hintBtn = document.querySelector("#hintBtn");
+    const bloomBtn = document.querySelector("#bloomBtn");
+    const restartBtn = document.querySelector("#restartBtn");
+    const nextBtn = document.querySelector("#nextBtn");
+    const levelRange = document.querySelector("#levelRange");
+    const levelList = document.querySelector("#levelList");
+    const progressFill = document.querySelector("#progressFill");
+    const progressText = document.querySelector("#progressText");
+    const winCard = document.querySelector("#winCard");
+    const fireworksCanvas = document.querySelector("#fireworks");
+    const fireworksCtx = fireworksCanvas.getContext("2d");
+
+    let levelIndex = 0;
+    let marks = [];
+    let flowers = [];
+    let maxMistakes = 3;
+    const maxBlooms = 3;
+    let mistakes = 0;
+    let bloomsUsed = 0;
+    let startedAt = Date.now();
+    let won = false;
+    let hintCell = null;
+    let inputMode = "flower";
+    let runCleared = false;
+    let runFailed = false;
+    let resultAction = null;
+    let fireworksState = null;
+    let fireworksFrame = 0;
+
+    function setupLevel(index) {
+      levelIndex = index;
+      const level = levels[levelIndex];
+      const rule = segmentRuleFor(levelIndex);
+      marks = Array.from({ length: level.size }, () => Array(level.size).fill(false));
+      flowers = Array.from({ length: level.size }, () => Array(level.size).fill(false));
+      startedAt = Date.now();
+      won = false;
+      runCleared = false;
+      runFailed = false;
+      hintCell = null;
+      if (levelIndex === rule.start) {
+        maxMistakes = rule.lives;
+        mistakes = 0;
+      }
+      boardEl.style.setProperty("--size", level.size);
+      buildLevelButtons();
+      render();
+      setMessage(`${level.name}：当前是“种花”模式。确定格子有花时直接点；需要做笔记时切到“排除”。`);
+    }
+
+    function buildLevelButtons() {
+      levelList.innerHTML = "";
+      const rule = segmentRuleFor(levelIndex);
+      levelRange.textContent = `第 ${segmentIndex(levelIndex) + 1} 段 ${segmentLabel(levelIndex)} | ${maxMistakes - mistakes}/${rule.lives} 条命`;
+      levels.slice(0, challengeLength).forEach((level, index) => {
+        const btn = document.createElement("button");
+        btn.className = "level-btn";
+        if (index < levelIndex) btn.classList.add("done");
+        if (index === levelIndex) btn.classList.add("active");
+        btn.type = "button";
+        btn.textContent = index + 1;
+        btn.title = level.name;
+        btn.disabled = true;
+        levelList.appendChild(btn);
+      });
+    }
+
+    function openGuide() {
+      guideOverlay.classList.add("visible");
+    }
+
+    function closeGuide() {
+      guideOverlay.classList.remove("visible");
+    }
+
+    function render() {
+      const level = levels[levelIndex];
+      const rule = segmentRuleFor(levelIndex);
+      boardEl.innerHTML = "";
+      levelText.textContent = `${levelIndex + 1}`;
+      const livesLeft = maxMistakes - mistakes;
+      heartText.textContent = "♥".repeat(livesLeft) + "♡".repeat(mistakes);
+      nextBtn.disabled = !won;
+      nextBtn.textContent = runCleared ? "再来一轮" : "下一关 · N";
+      hintBtn.disabled = won || runFailed;
+      bloomBtn.disabled = won || runFailed || bloomsUsed >= maxBlooms;
+      bloomBtn.textContent = `开花 ${maxBlooms - bloomsUsed}/${maxBlooms} · B`;
+      winCard.classList.toggle("visible", won);
+
+      for (let row = 0; row < level.size; row += 1) {
+        for (let col = 0; col < level.size; col += 1) {
+          const tile = document.createElement("button");
+          tile.type = "button";
+          tile.className = "tile";
+          tile.style.backgroundColor = colors[level.regions[row][col] % colors.length];
+          tile.dataset.row = row;
+          tile.dataset.col = col;
+          tile.setAttribute("aria-label", `第 ${row + 1} 行，第 ${col + 1} 列`);
+          if (marks[row][col]) tile.classList.add("soil");
+          if (flowers[row][col]) {
+            tile.classList.add("flower");
+            tile.innerHTML = '<span class="flower-icon" aria-hidden="true">✿</span>';
+          }
+          if (hintCell && hintCell[0] === row && hintCell[1] === col) {
+            tile.classList.add("hint");
+          }
+          tile.addEventListener("click", () => handleTileTap(row, col));
+          tile.addEventListener("dblclick", (event) => {
+            event.preventDefault();
+            plant(row, col);
+          });
+          boardEl.appendChild(tile);
+        }
+      }
+
+      updateProgress();
+      updateModeButtons();
+      resizeFireworks();
+      levelRange.textContent = `第 ${segmentIndex(levelIndex) + 1} 段 ${segmentLabel(levelIndex)} | ${maxMistakes - mistakes}/${rule.lives} 条命`;
+    }
+
+    function setMode(mode) {
+      inputMode = mode;
+      updateModeButtons();
+      setMessage(mode === "flower"
+        ? "种花模式：只有在你确定这里必须有花时，才点击格子。"
+        : "排除模式：点击不可能有花的格子。排除标记不会扣生命。");
+    }
+
+    function updateModeButtons() {
+      soilModeBtn.classList.toggle("active", inputMode === "soil");
+      flowerModeBtn.classList.toggle("active", inputMode === "flower");
+      soilModeBtn.setAttribute("aria-pressed", inputMode === "soil" ? "true" : "false");
+      flowerModeBtn.setAttribute("aria-pressed", inputMode === "flower" ? "true" : "false");
+    }
+
+    function handleTileTap(row, col) {
+      if (runFailed) return;
+      if (inputMode === "flower") {
+        plant(row, col);
+        return;
+      }
+      markSoil(row, col);
+    }
+
+    function markSoil(row, col) {
+      if (won || flowers[row][col]) return;
+      marks[row][col] = !marks[row][col];
+      hintCell = null;
+      render();
+    }
+
+    function plant(row, col) {
+      if (won || runFailed) return;
+      if (flowers[row][col]) {
+        flowers[row][col] = false;
+        render();
+        setMessage("花已经拿起。继续保持每行、每列、每个花圃都只有 1 朵花。");
+        return;
+      }
+
+      const level = levels[levelIndex];
+      const correct = level.solution.some(([r, c]) => r === row && c === col);
+      if (!correct) {
+        countMistake(row, col, "这个位置不符合答案。");
+        return;
+      }
+
+      if (violatesVisibleRules(row, col)) {
+        countMistake(row, col, "这朵花虽然在答案里，但现在和已有花冲突。先移走冲突的花。");
+        return;
+      }
+
+      flowers[row][col] = true;
+      marks[row][col] = false;
+      hintCell = null;
+      if (isSolved()) {
+        won = true;
+        if (levelIndex + 1 >= challengeLength) {
+          runCleared = true;
+          setMessage("通关！你一口气连续通过了 30 关。点击“再来一轮”可以重新挑战。");
+          showResult(
+            "30 关通关",
+            "你完成了一口气通过 30 关的挑战。再来一轮会从第 1 关重新开始，错误机会和开花次数都会恢复。",
+            "再来一轮",
+            restartRun,
+            "留在这里",
+            "🎆"
+          );
+          startFireworks(2400, 14);
+        } else {
+          const nextRange = segmentLabel(levelIndex + 1);
+          const nextRule = segmentRuleFor(levelIndex + 1);
+          const body = `第 ${levelIndex + 1} 关完成。当前段落进入 ${nextRange}，这一段给 ${nextRule.lives} 条命。${levelTip(levelIndex + 1)}`;
+          setMessage(`第 ${levelIndex + 1} 关完成！当前段落进入 ${nextRange}。`);
+          if ((levelIndex + 1) % segmentLength === 0) {
+            showResult(`第 ${segmentIndex(levelIndex) + 1} 段完成`, body, "继续下一段", nextLevel, "先看一下", "🎉");
+          } else {
+            showResult("单关通过", body, "继续下一关", nextLevel, "先看一下", "😄");
+          }
+          if ((levelIndex + 1) % segmentLength === 0) {
+            startFireworks(1400, 6);
+          }
+        }
+      } else {
+        setMessage(nextNudge(row, col));
+      }
+      render();
+    }
+
+    function violatesVisibleRules(row, col) {
+      const level = levels[levelIndex];
+      const region = level.regions[row][col];
+      for (let r = 0; r < level.size; r += 1) {
+        for (let c = 0; c < level.size; c += 1) {
+          if (!flowers[r][c]) continue;
+          if (r === row || c === col) return true;
+          if (level.regions[r][c] === region) return true;
+          if (Math.abs(r - row) <= 1 && Math.abs(c - col) <= 1) return true;
+        }
+      }
+      return false;
+    }
+
+    function flashWrong(row, col) {
+      window.requestAnimationFrame(() => {
+        const tile = boardEl.querySelector(`[data-row="${row}"][data-col="${col}"]`);
+        if (!tile) return;
+        tile.classList.add("wrong");
+        window.setTimeout(() => tile.classList.remove("wrong"), 260);
+      });
+    }
+
+    function countMistake(row, col, reason) {
+      mistakes += 1;
+      flashWrong(row, col);
+      if (mistakes >= maxMistakes) {
+        runFailed = true;
+        render();
+        setMessage("本段命用完了。看完提示后点击“重新挑战本段”从当前段起点开始。");
+        showResult(
+          "本段失败",
+          `${reason} 你已经用完本段的全部生命。本段需要从起点重新开始。建议先用“排除”把同一行、同一列、相邻格都标掉，不要急着猜花的位置。`,
+          "重新挑战本段",
+          restartSegment,
+          "先看棋盘",
+          "😞"
+        );
+        startFireworks(900, 4, true);
+        return;
+      }
+      render();
+      setMessage(`${reason} 还剩 ${maxMistakes - mistakes} 次错误机会。`);
+    }
+
+    function restartRun() {
+      mistakes = 0;
+      bloomsUsed = 0;
+      closeResult();
+      maxMistakes = segmentRuleFor(0).lives;
+      setupLevel(0);
+    }
+
+    function restartSegment() {
+      mistakes = 0;
+      closeResult();
+      setupLevel(segmentRuleFor(levelIndex).start);
+    }
+
+    function segmentIndex(levelIndexValue) {
+      return Math.floor(levelIndexValue / segmentLength);
+    }
+
+    function segmentLabel(levelIndexValue) {
+      const segment = segmentIndex(levelIndexValue);
+      const start = segment === 0 ? 1 : segment * segmentLength;
+      const end = (segment + 1) * segmentLength;
+      return `${start}-${end}`;
+    }
+
+    function segmentProgress(levelIndexValue) {
+      return (levelIndexValue % segmentLength) + 1;
+    }
+
+    function showResult(title, body, primaryLabel, action, secondaryLabel, emoji) {
+      resultEmoji.textContent = emoji || "🙂";
+      resultTitle.textContent = title;
+      resultBody.textContent = body;
+      resultPrimaryBtn.textContent = primaryLabel;
+      resultSecondaryBtn.textContent = secondaryLabel;
+      resultAction = action;
+      resultOverlay.classList.add("visible");
+    }
+
+    function closeResult() {
+      resultEmoji.textContent = "🙂";
+      resultOverlay.classList.remove("visible");
+    }
+
+    function resizeFireworks() {
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      const ratio = window.devicePixelRatio || 1;
+      fireworksCanvas.width = Math.floor(width * ratio);
+      fireworksCanvas.height = Math.floor(height * ratio);
+      fireworksCanvas.style.width = `${width}px`;
+      fireworksCanvas.style.height = `${height}px`;
+      fireworksCtx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    }
+
+    function startFireworks(duration, burstCount, lowKey = false) {
+      resizeFireworks();
+      fireworksCanvas.classList.add("visible");
+      const now = performance.now();
+      fireworksState = {
+        start: now,
+        duration,
+        lowKey,
+        particles: [],
+        bursts: Array.from({ length: burstCount }, (_, index) => ({
+          at: now + index * (duration / Math.max(1, burstCount)),
+          x: window.innerWidth * (0.2 + Math.random() * 0.6),
+          y: window.innerHeight * (0.18 + Math.random() * 0.4),
+          hue: lowKey ? 30 + Math.random() * 20 : Math.random() * 360
+        }))
+      };
+      if (!fireworksFrame) {
+        fireworksFrame = window.requestAnimationFrame(stepFireworks);
+      }
+    }
+
+    function stepFireworks(timestamp) {
+      if (!fireworksState) {
+        fireworksFrame = 0;
+        fireworksCtx.clearRect(0, 0, fireworksCanvas.width, fireworksCanvas.height);
+        fireworksCanvas.classList.remove("visible");
+        return;
+      }
+
+      const { start, duration, bursts, particles, lowKey } = fireworksState;
+      fireworksCtx.clearRect(0, 0, fireworksCanvas.width, fireworksCanvas.height);
+
+      while (bursts.length && bursts[0].at <= timestamp) {
+        const burst = bursts.shift();
+        const count = lowKey ? 18 : 34;
+        for (let index = 0; index < count; index += 1) {
+          const angle = (Math.PI * 2 * index) / count;
+          const speed = (lowKey ? 1.7 : 3.4) + Math.random() * (lowKey ? 1.2 : 2.5);
+          particles.push({
+            x: burst.x,
+            y: burst.y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            gravity: lowKey ? 0.04 : 0.07,
+            life: lowKey ? 42 : 58,
+            hue: burst.hue + (Math.random() * 18 - 9),
+            size: lowKey ? 2 : 2.6
+          });
+        }
+      }
+
+      for (let index = particles.length - 1; index >= 0; index -= 1) {
+        const particle = particles[index];
+        particle.x += particle.vx;
+        particle.y += particle.vy;
+        particle.vy += particle.gravity;
+        particle.life -= 1;
+        fireworksCtx.fillStyle = `hsla(${particle.hue}, 90%, 62%, ${Math.max(0, particle.life / 60)})`;
+        fireworksCtx.beginPath();
+        fireworksCtx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
+        fireworksCtx.fill();
+        if (particle.life <= 0) particles.splice(index, 1);
+      }
+
+      if (timestamp - start > duration && particles.length === 0 && bursts.length === 0) {
+        fireworksState = null;
+        fireworksCanvas.classList.remove("visible");
+      } else {
+        fireworksFrame = window.requestAnimationFrame(stepFireworks);
+      }
+    }
+
+    function levelTip(nextLevelNumber) {
+      const tips = [
+        "提示：优先看形状最窄的彩色花圃，它通常候选格更少。",
+        "提示：种下一朵花后，马上排除同一行、同一列和周围 8 个方向。",
+        "提示：不要只盯颜色，也要看行列；一行只能留一个可能位置。",
+        "提示：如果两个候选格互相相邻，它们不可能同时成立，可以顺着这个冲突继续排除。"
+      ];
+      return tips[nextLevelNumber % tips.length];
+    }
+
+    function isSolved() {
+      const level = levels[levelIndex];
+      return level.solution.every(([row, col]) => flowers[row][col]);
+    }
+
+    function updateProgress() {
+      const level = levels[levelIndex];
+      const planted = flowers.flat().filter(Boolean).length;
+      const total = level.size;
+      progressFill.parentElement.style.setProperty("--progress", `${Math.round((planted / total) * 100)}%`);
+      progressText.textContent = `已种 ${planted} / ${total} 朵花。`;
+    }
+
+    function setMessage(text) {
+      messageEl.textContent = text;
+    }
+
+    function showHint() {
+      if (won) return;
+      const level = levels[levelIndex];
+      const target = level.solution.find(([row, col]) => !flowers[row][col]);
+      if (!target) return;
+      hintCell = target;
+      const [row, col] = target;
+      const region = level.regions[row][col] + 1;
+      setMode("flower");
+      setMessage(`提示：已经切到“种花”模式。点击高亮格子：第 ${row + 1} 行第 ${col + 1} 列，这是第 ${region} 个彩色花圃的花。`);
+      render();
+    }
+
+    function bloomOne() {
+      if (won || runFailed) return;
+      if (bloomsUsed >= maxBlooms) {
+        setMessage("本轮开花次数已经用完。接下来只能靠排除和提示继续推理。");
+        render();
+        return;
+      }
+      const target = levels[levelIndex].solution.find(([row, col]) => !flowers[row][col]);
+      if (!target) return;
+      bloomsUsed += 1;
+      plant(target[0], target[1]);
+      if (!won && !runFailed) {
+        setMessage(`已使用 1 次开花，剩余 ${maxBlooms - bloomsUsed} 次。本轮通过单关不会恢复开花次数。`);
+      }
+    }
+
+    function nextNudge(row, col) {
+      const level = levels[levelIndex];
+      const region = level.regions[row][col] + 1;
+      return `第 ${region} 个花圃种对了。现在可以把同一行、同一列和周围相邻格子标记为“不可能”。`;
+    }
+
+    function nextLevel() {
+      if (!won) return;
+      if (runCleared) {
+        restartRun();
+        return;
+      }
+      setupLevel(levelIndex + 1);
+    }
+
+    function updateTimer() {
+      const seconds = Math.floor((Date.now() - startedAt) / 1000);
+      const minutes = Math.floor(seconds / 60);
+      timerText.textContent = `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
+      window.requestAnimationFrame(updateTimer);
+    }
+
+    guideBtn.addEventListener("click", openGuide);
+    guideCloseBtn.addEventListener("click", closeGuide);
+    guideOverlay.addEventListener("click", (event) => {
+      if (event.target === guideOverlay) closeGuide();
+    });
+    resultPrimaryBtn.addEventListener("click", () => {
+      const action = resultAction;
+      closeResult();
+      if (action) action();
+    });
+    resultSecondaryBtn.addEventListener("click", closeResult);
+    soilModeBtn.addEventListener("click", () => setMode("soil"));
+    flowerModeBtn.addEventListener("click", () => setMode("flower"));
+    hintBtn.addEventListener("click", showHint);
+    bloomBtn.addEventListener("click", bloomOne);
+    restartBtn.addEventListener("click", () => {
+      if (runFailed) {
+        restartSegment();
+        return;
+      }
+      restartSegment();
+    });
+    nextBtn.addEventListener("click", nextLevel);
+
+    window.addEventListener("keydown", (event) => {
+      const key = event.key.toLowerCase();
+      if (key === "escape") {
+        closeGuide();
+        closeResult();
+      }
+      if (key === "h") showHint();
+      if (key === "b") bloomOne();
+      if (key === "r") {
+        if (runFailed) restartSegment();
+        else restartSegment();
+      }
+      if (key === "n") nextLevel();
+      if (key === "1") setMode("soil");
+      if (key === "2") setMode("flower");
+    });
+
+    setupLevel(0);
+    resizeFireworks();
+    updateTimer();
+    window.addEventListener("resize", resizeFireworks);
+  </script>
+</body>
+</html>
