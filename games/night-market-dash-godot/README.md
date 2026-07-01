@@ -14,6 +14,12 @@ Headless validation:
 godot --headless --path games/night-market-dash-godot --quit
 ```
 
+Automated headless smoke playtest:
+
+```bash
+godot --headless --path games/night-market-dash-godot -- --smoke-test
+```
+
 ## Controls
 
 - `WASD` or arrows: move
@@ -43,4 +49,5 @@ Playable first version with:
 
 ```bash
 godot --headless --path games/night-market-dash-godot --quit
+godot --headless --path games/night-market-dash-godot -- --smoke-test
 ```

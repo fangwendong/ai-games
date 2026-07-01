@@ -71,9 +71,21 @@ var stalls := [
 func _ready() -> void:
 	rng.randomize()
 	reset()
+	if has_user_arg("--smoke-test"):
+		run_smoke_test()
+		return
 	var capture_path := get_capture_path()
 	if capture_path != "":
 		capture_preview(capture_path)
+
+func has_user_arg(name: String) -> bool:
+	for arg in OS.get_cmdline_args():
+		if arg == name:
+			return true
+	for arg in OS.get_cmdline_user_args():
+		if arg == name:
+			return true
+	return false
 
 func get_capture_path() -> String:
 	for arg in OS.get_cmdline_args():
@@ -100,6 +112,33 @@ func capture_preview(path: String) -> void:
 	var image := get_viewport().get_texture().get_image()
 	image.save_png(path)
 	get_tree().quit()
+
+func run_smoke_test() -> void:
+	start()
+	var advanced_waves := 0
+	var frames := 0
+	while frames < 3600:
+		frames += 1
+		if mode == "upgrade":
+			if advanced_waves == 0:
+				upgrade_fire_rate()
+			elif advanced_waves == 1:
+				upgrade_damage()
+			else:
+				upgrade_dash()
+			advanced_waves += 1
+		if mode in ["won", "lost"]:
+			break
+		if frames % 40 == 0:
+			var angle := float(frames) * 0.043
+			player.pos = Vector2(640, 360) + Vector2(cos(angle), sin(angle)) * 120.0
+		update_game(1.0 / 60.0)
+	if wave < 1 or player.hp < 0:
+		push_error("Smoke test ended with invalid state")
+		get_tree().quit(1)
+		return
+	print("Night Market Dash smoke test: mode=%s wave=%d gems=%d enemies=%d bullets=%d spawns=%d" % [mode, wave, gems, enemies.size(), bullets.size(), pending_spawns.size()])
+	get_tree().quit(0)
 
 func reset() -> void:
 	mode = "ready"
