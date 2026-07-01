@@ -211,6 +211,19 @@
       transform-origin: top left;
     }
 
+    .scene::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(115deg, transparent 0 42%, rgba(255, 255, 255, 0.16) 48%, transparent 54%) 0 0 / 240% 240%,
+        radial-gradient(circle at 78% 16%, rgba(255, 239, 175, 0.22), transparent 22%);
+      animation: roomSweep 10s linear infinite;
+      pointer-events: none;
+      z-index: 1;
+      mix-blend-mode: screen;
+    }
+
     .window {
       position: absolute;
       left: 28px;
@@ -258,8 +271,8 @@
       box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.32);
     }
 
-    .curtain.left { left: 18px; transform: rotate(4deg); }
-    .curtain.right { left: 186px; transform: rotate(-4deg); }
+    .curtain.left { left: 18px; transform: rotate(4deg); transform-origin: top center; animation: swayLeft 5.4s ease-in-out infinite; }
+    .curtain.right { left: 186px; transform: rotate(-4deg); transform-origin: top center; animation: swayRight 5.8s ease-in-out infinite; }
 
     .sofa {
       position: absolute;
@@ -369,12 +382,14 @@
       width: 3px;
       height: 16px;
       transform: translateX(-50%) rotate(35deg);
+      animation: tickHour 8s steps(8) infinite;
     }
 
     .clock::after {
       width: 2px;
       height: 20px;
       transform: translateX(-50%) rotate(-20deg);
+      animation: tickMinute 60s linear infinite;
     }
 
     .fridge {
@@ -512,6 +527,18 @@
       transform: translateY(0) scale(1);
     }
 
+    .fridge.stage-1 {
+      transform: translateX(2px) translateY(-2px);
+    }
+
+    .fridge.stage-2 {
+      transform: translateX(3px) translateY(-1px);
+    }
+
+    .fridge.revealed {
+      box-shadow: inset 0 0 0 2px rgba(31, 42, 51, 0.08), 0 12px 26px rgba(0, 0, 0, 0.16);
+    }
+
     .wall {
       position: absolute;
       inset: 14px;
@@ -588,6 +615,8 @@
       color: inherit;
       cursor: pointer;
       overflow: visible;
+      transform-origin: center center;
+      will-change: transform, filter;
     }
 
     .hotspot::before {
@@ -627,6 +656,29 @@
       box-shadow: 0 0 0 2px rgba(47, 111, 237, 0.34);
     }
 
+    .hotspot.stage-1,
+    .hotspot.stage-2 {
+      filter: saturate(1.05) brightness(1.03);
+    }
+
+    .hotspot.stage-1 {
+      animation: nudge 260ms ease;
+    }
+
+    .hotspot.stage-2 {
+      animation: revealPop 320ms ease;
+    }
+
+    .hotspot.stage-1::before {
+      content: "再点";
+      color: #0f9d7a;
+    }
+
+    .hotspot.stage-2::before {
+      content: "找到";
+      color: #1f2a33;
+    }
+
     .label {
       position: absolute;
       left: 0;
@@ -649,6 +701,7 @@
       box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16);
       color: #20303d;
       user-select: none;
+      animation: bob 3.8s ease-in-out infinite;
     }
 
     .item::after {
@@ -669,12 +722,30 @@
         linear-gradient(90deg, #8e9fb0 0 10px, #c4d0db 10px 114px, #8e9fb0 114px 124px);
     }
 
+    .bookcase.stage-1 {
+      transform: translateX(4px) scale(1.01);
+    }
+
+    .bookcase.stage-2 {
+      transform: translateX(2px) scale(1.02);
+      box-shadow: 0 16px 28px rgba(0, 0, 0, 0.2);
+    }
+
     .desk {
       left: 176px;
       bottom: 34px;
       width: 150px;
       height: 78px;
       background: linear-gradient(180deg, #a06c48, #7a4c30);
+    }
+
+    .desk.stage-1 {
+      transform: translateY(-4px) scale(1.01);
+    }
+
+    .desk.stage-2 {
+      transform: translateY(-2px) scale(1.02);
+      box-shadow: 0 14px 26px rgba(0, 0, 0, 0.22);
     }
 
     .lamp {
@@ -694,6 +765,15 @@
       place-items: center;
       font-size: 34px;
       filter: drop-shadow(0 4px 10px rgba(255, 214, 74, 0.48));
+      animation: lampGlow 1.9s ease-in-out infinite;
+    }
+
+    .lamp.stage-1 {
+      transform: translateY(-3px) rotate(-1deg);
+    }
+
+    .lamp.stage-2 {
+      transform: translateY(-2px) rotate(1deg) scale(1.02);
     }
 
     .picture {
@@ -713,6 +793,14 @@
       font-size: 32px;
     }
 
+    .picture.stage-1 {
+      transform: rotate(-2deg) translateY(-2px);
+    }
+
+    .picture.stage-2 {
+      transform: rotate(2deg) translateY(-1px);
+    }
+
     .plant {
       left: 352px;
       bottom: 56px;
@@ -729,6 +817,15 @@
       display: grid;
       place-items: center;
       font-size: 34px;
+      animation: leafWiggle 2.6s ease-in-out infinite;
+    }
+
+    .plant.stage-1 {
+      transform: translateY(-4px) rotate(1deg);
+    }
+
+    .plant.stage-2 {
+      transform: translateY(-1px) rotate(-1deg) scale(1.02);
     }
 
     .lamp::after {
@@ -887,6 +984,58 @@
     @keyframes pop {
       0% { transform: scale(0.6); opacity: 0; }
       60% { transform: scale(1.08); opacity: 1; }
+      100% { transform: scale(1); }
+    }
+
+    @keyframes roomSweep {
+      0% { background-position: -160% 0, 0 0; }
+      100% { background-position: 160% 0, 0 0; }
+    }
+
+    @keyframes swayLeft {
+      0%, 100% { transform: rotate(4deg) translateY(0); }
+      50% { transform: rotate(2deg) translateY(2px); }
+    }
+
+    @keyframes swayRight {
+      0%, 100% { transform: rotate(-4deg) translateY(0); }
+      50% { transform: rotate(-2deg) translateY(2px); }
+    }
+
+    @keyframes tickHour {
+      0% { transform: translateX(-50%) rotate(35deg); }
+      100% { transform: translateX(-50%) rotate(395deg); }
+    }
+
+    @keyframes tickMinute {
+      0% { transform: translateX(-50%) rotate(-20deg); }
+      100% { transform: translateX(-50%) rotate(340deg); }
+    }
+
+    @keyframes bob {
+      0%, 100% { transform: translateY(0) scale(1); }
+      50% { transform: translateY(-3px) scale(1.01); }
+    }
+
+    @keyframes lampGlow {
+      0%, 100% { filter: drop-shadow(0 4px 10px rgba(255, 214, 74, 0.48)) brightness(1); }
+      50% { filter: drop-shadow(0 8px 16px rgba(255, 214, 74, 0.72)) brightness(1.12); }
+    }
+
+    @keyframes leafWiggle {
+      0%, 100% { transform: rotate(0deg) scale(1); }
+      50% { transform: rotate(-3deg) scale(1.03); }
+    }
+
+    @keyframes nudge {
+      0% { transform: translateY(0) scale(1); }
+      45% { transform: translateY(-5px) scale(1.02); }
+      100% { transform: translateY(0) scale(1); }
+    }
+
+    @keyframes revealPop {
+      0% { transform: scale(0.96); }
+      60% { transform: scale(1.05); }
       100% { transform: scale(1); }
     }
 
@@ -1228,7 +1377,8 @@
       splashFrame: 0,
       fridgeOpen: false,
       fridgeRevealed: false,
-      fridgeTimer: null
+      fridgeTimer: null,
+      objectStages: {}
     };
 
     const els = {
@@ -1314,6 +1464,7 @@
       state.solved = false;
       state.fridgeOpen = false;
       state.fridgeRevealed = false;
+      state.objectStages = {};
       if (state.fridgeTimer) {
         clearTimeout(state.fridgeTimer);
         state.fridgeTimer = null;
@@ -1331,10 +1482,10 @@
       renderClues();
       setHint(level.hint);
       if (!state.solved) {
-        setSceneMessage(`你进入了${level.name}。先点发光物件和冰箱，冰箱要先打开再慢慢看里面。`);
+        setSceneMessage(`你进入了${level.name}。先点房间里会动的东西，有些要先打开再看。`);
       }
       document.querySelectorAll(".hotspot").forEach((el) => {
-        el.classList.remove("active");
+        el.classList.remove("active", "stage-1", "stage-2", "open", "revealed");
       });
       els.answerInput.placeholder = state.levelIndex === 7 ? "输入密码或开门方式" : "输入密码或开锁方式";
       els.nextBtn.textContent = state.levelIndex === levels.length - 1 ? "通关" : "下一关";
@@ -1447,6 +1598,71 @@
       renderClues();
     }
 
+    function setStage(node, key, stage) {
+      node.classList.remove("stage-1", "stage-2", "open", "revealed");
+      if (stage === 1) node.classList.add("stage-1");
+      if (stage >= 2) node.classList.add("stage-2");
+      state.objectStages[key] = stage;
+    }
+
+    function getStage(key) {
+      return state.objectStages[key] || 0;
+    }
+
+    function revealObject(key, node) {
+      const level = currentLevel();
+      if (state.cluesFound.has(key)) {
+        setSceneMessage(level.clues[key]);
+        return;
+      }
+      markOpened(key);
+      setStage(node, key, 2);
+      setSceneMessage(level.clues[key]);
+    }
+
+    function inspectObject(node, key) {
+      const stage = getStage(key);
+      const level = currentLevel();
+
+      if (key === "fridge") {
+        if (stage === 0) {
+          setStage(node, key, 1);
+          state.fridgeOpen = true;
+          node.classList.add("open");
+          setSceneMessage("冰箱门被拉开了，里面还有牛奶盒和隔板，线索暂时没完全露出来。");
+          state.fridgeTimer = window.setTimeout(() => {
+            state.fridgeRevealed = true;
+            node.classList.add("revealed");
+            setStage(node, key, 2);
+            setSceneMessage("冰箱里面的东西挪开了一点，再点一次，把藏着的纸条拿出来。");
+          }, 900);
+          return;
+        }
+        if (stage === 1 && !state.fridgeRevealed) {
+          setSceneMessage("冰箱还没完全露开，等里面的东西让一让。");
+          return;
+        }
+        revealObject(key, node);
+        return;
+      }
+
+      if (stage === 0) {
+        setStage(node, key, 1);
+        const prompts = {
+          bookcase: "你把书架里一本书往外拉，像是有夹层。",
+          desk: "你拉开桌子抽屉，里面还有东西。",
+          lamp: "你拨了下灯罩，光线换了个角度。",
+          picture: "你把画框掀起来一点，后面像是藏着字。",
+          plant: "你把花盆挪开，底下有痕迹。",
+          panel: "面板亮了一下，像是还能再按一次。"
+        };
+        setSceneMessage(prompts[key] || "你试着碰了一下，感觉这里还能继续看。");
+        return;
+      }
+
+      revealObject(key, node);
+    }
+
     function progressLevel() {
       const current = state.levelIndex;
       if (current === levels.length - 1) {
@@ -1493,26 +1709,7 @@
       document.querySelectorAll(".hotspot").forEach((node) => {
         node.addEventListener("click", () => {
           if (state.solved) return;
-          const key = node.dataset.clue;
-          if (key === "fridge") {
-            if (!state.fridgeOpen) {
-              state.fridgeOpen = true;
-              node.classList.add("open");
-              setSceneMessage("冰箱门打开了，里面还有牛奶盒和挡板，线索不会一下子跳出来。");
-              state.fridgeTimer = window.setTimeout(() => {
-                state.fridgeRevealed = true;
-                node.classList.add("revealed");
-                setSceneMessage("冰箱里露出一张纸条，再点一次冰箱，把纸条看清楚。");
-              }, 900);
-              return;
-            }
-            if (!state.fridgeRevealed) {
-              setSceneMessage("冰箱里还有东西挡着，等一下再看。");
-              return;
-            }
-          }
-          markOpened(key);
-          setSceneMessage(currentLevel().clues[key]);
+          inspectObject(node, node.dataset.clue);
         });
       });
     }
@@ -1558,7 +1755,7 @@
     renderLevel();
     resizeSplash();
     resizeScene();
-    setSceneMessage("先点发光的物件和冰箱，冰箱要先打开再看里面。");
+    setSceneMessage("先点房间里会动的东西，有些要先打开再看。");
   </script>
 </body>
 </html>
