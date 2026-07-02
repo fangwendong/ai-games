@@ -1060,7 +1060,16 @@
         <div class="scene" id="scene">
           <div class="scene-guide">先找会发光的边框，再试冰箱和门锁</div>
           <div id="sceneCanvas" class="scene-canvas">
-            <img class="scene-bg" src="assets/room-lite.jpg" alt="" aria-hidden="true">
+            <img class="scene-bg" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" data-src="assets/room-lite.jpg" alt="" aria-hidden="true">
+            <div class="wall" aria-hidden="true"></div>
+            <div class="floor" aria-hidden="true"></div>
+            <div class="window" aria-hidden="true"></div>
+            <div class="curtain left" aria-hidden="true"></div>
+            <div class="curtain right" aria-hidden="true"></div>
+            <div class="clock" aria-hidden="true"></div>
+            <div class="cabinet" aria-hidden="true"></div>
+            <div class="rug" aria-hidden="true"></div>
+            <div class="sofa" aria-hidden="true"></div>
             <div class="scene-haze" aria-hidden="true"></div>
             <div id="door" class="door locked" aria-hidden="true"></div>
 
@@ -1444,6 +1453,17 @@
       els.sceneCanvas.style.transform = `scale(${scale})`;
     }
 
+    function maybeLoadSceneImage() {
+      const bg = document.querySelector(".scene-bg");
+      if (!bg) return;
+      const shouldLoad = window.innerWidth >= 900 && window.devicePixelRatio <= 2.5;
+      if (!shouldLoad) return;
+      const src = bg.dataset.src;
+      if (!src) return;
+      bg.addEventListener("load", () => bg.classList.add("loaded"), { once: true });
+      bg.src = src;
+    }
+
     function stepSplash(timestamp) {
       if (!state.splash) {
         state.splashFrame = 0;
@@ -1656,6 +1676,7 @@
     renderLevel();
     resizeSplash();
     resizeScene();
+    maybeLoadSceneImage();
     setSceneMessage("先找会发光的边框，再试冰箱和门锁。");
   </script>
 </body>
