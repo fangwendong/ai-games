@@ -182,9 +182,7 @@
     .scene {
       position: relative;
       aspect-ratio: 1672 / 941;
-      background:
-        linear-gradient(180deg, rgba(24, 31, 38, 0.16), rgba(24, 31, 38, 0.02)),
-        #0f1318;
+      background: #0f1318;
       overflow: hidden;
     }
 
@@ -219,32 +217,15 @@
       object-fit: cover;
       user-select: none;
       pointer-events: none;
-      filter: saturate(1.02) contrast(1.04);
+      filter: none;
     }
 
     .scene-haze {
-      position: absolute;
-      inset: 0;
-      background:
-        radial-gradient(circle at 22% 16%, rgba(255, 214, 143, 0.12), transparent 18%),
-        radial-gradient(circle at 82% 30%, rgba(93, 133, 220, 0.12), transparent 22%),
-        linear-gradient(120deg, transparent 0 35%, rgba(255, 255, 255, 0.06) 47%, transparent 60%);
-      mix-blend-mode: screen;
-      animation: roomSweep 12s linear infinite;
-      pointer-events: none;
+      display: none;
     }
 
     .scene::after {
-      content: "";
-      position: absolute;
-      inset: 0;
-      background:
-        linear-gradient(115deg, transparent 0 42%, rgba(255, 255, 255, 0.16) 48%, transparent 54%) 0 0 / 240% 240%,
-        radial-gradient(circle at 78% 16%, rgba(255, 239, 175, 0.22), transparent 22%);
-      animation: roomSweep 10s linear infinite;
-      pointer-events: none;
-      z-index: 1;
-      mix-blend-mode: screen;
+      display: none;
     }
 
     .window {
@@ -294,8 +275,8 @@
       box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.32);
     }
 
-    .curtain.left { left: 18px; transform: rotate(4deg); transform-origin: top center; animation: swayLeft 5.4s ease-in-out infinite; }
-    .curtain.right { left: 186px; transform: rotate(-4deg); transform-origin: top center; animation: swayRight 5.8s ease-in-out infinite; }
+    .curtain.left { left: 18px; transform: rotate(4deg); transform-origin: top center; }
+    .curtain.right { left: 186px; transform: rotate(-4deg); transform-origin: top center; }
 
     .sofa {
       position: absolute;
@@ -405,14 +386,12 @@
       width: 3px;
       height: 16px;
       transform: translateX(-50%) rotate(35deg);
-      animation: tickHour 8s steps(8) infinite;
     }
 
     .clock::after {
       width: 2px;
       height: 20px;
       transform: translateX(-50%) rotate(-20deg);
-      animation: tickMinute 60s linear infinite;
     }
 
     .fridge {
@@ -673,8 +652,7 @@
       border-radius: 16px;
       transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease, border-color 120ms ease;
       border: 1px solid rgba(255, 255, 255, 0.08);
-      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 0 0 0 rgba(255, 214, 74, 0);
-      animation: cluePulse 2.4s ease-in-out infinite;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
     }
 
     .hotspot:hover::after {
@@ -690,19 +668,6 @@
     .hotspot.active::after {
       background: rgba(255, 214, 74, 0.12);
       box-shadow: 0 0 0 2px rgba(255, 214, 74, 0.38), 0 0 30px rgba(255, 214, 74, 0.18);
-    }
-
-    .hotspot.stage-1,
-    .hotspot.stage-2 {
-      filter: saturate(1.06) brightness(1.03);
-    }
-
-    .hotspot.stage-1 {
-      animation: nudge 260ms ease;
-    }
-
-    .hotspot.stage-2 {
-      animation: revealPop 320ms ease;
     }
 
     .hotspot.stage-1::before {
@@ -770,20 +735,12 @@
       box-shadow: none;
     }
 
-    .lamp::after {
-      content: "";
-    }
-
     .picture {
       left: 650px;
       top: 365px;
       width: 180px;
       height: 170px;
       background: transparent;
-    }
-
-    .picture::after {
-      content: "";
     }
 
     .plant {
@@ -793,10 +750,6 @@
       height: 170px;
       background: transparent;
       box-shadow: none;
-    }
-
-    .plant::after {
-      content: "";
     }
 
     .panel {
@@ -1107,7 +1060,7 @@
         <div class="scene" id="scene">
           <div class="scene-guide">先找会发光的边框，再试冰箱和门锁</div>
           <div id="sceneCanvas" class="scene-canvas">
-            <img class="scene-bg" src="assets/room.jpg" alt="" aria-hidden="true">
+            <img class="scene-bg" src="assets/room-lite.jpg" alt="" aria-hidden="true">
             <div class="scene-haze" aria-hidden="true"></div>
             <div id="door" class="door locked" aria-hidden="true"></div>
 
