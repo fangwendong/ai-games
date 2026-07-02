@@ -181,11 +181,11 @@
 
     .scene {
       position: relative;
-      aspect-ratio: 560 / 480;
+      aspect-ratio: 1672 / 941;
       background:
-        linear-gradient(180deg, rgba(47, 111, 237, 0.07), transparent 40%),
-        linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.12) 100%),
-        #d8e1eb;
+        linear-gradient(180deg, rgba(24, 31, 38, 0.16), rgba(24, 31, 38, 0.02)),
+        #0f1318;
+      overflow: hidden;
     }
 
     .scene-guide {
@@ -206,9 +206,32 @@
     .scene-canvas {
       position: absolute;
       inset: 0;
-      width: 560px;
-      height: 480px;
+      width: 1672px;
+      height: 941px;
       transform-origin: top left;
+    }
+
+    .scene-bg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      user-select: none;
+      pointer-events: none;
+      filter: saturate(1.02) contrast(1.04);
+    }
+
+    .scene-haze {
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(circle at 22% 16%, rgba(255, 214, 143, 0.12), transparent 18%),
+        radial-gradient(circle at 82% 30%, rgba(93, 133, 220, 0.12), transparent 22%),
+        linear-gradient(120deg, transparent 0 35%, rgba(255, 255, 255, 0.06) 47%, transparent 60%);
+      mix-blend-mode: screen;
+      animation: roomSweep 12s linear infinite;
+      pointer-events: none;
     }
 
     .scene::after {
@@ -393,13 +416,13 @@
     }
 
     .fridge {
-      left: 420px;
-      top: 130px;
-      width: 92px;
-      height: 184px;
+      left: 920px;
+      top: 320px;
+      width: 180px;
+      height: 340px;
       border-radius: 14px;
-      background: linear-gradient(180deg, #f8fbff, #dde7f3);
-      box-shadow: inset 0 0 0 2px rgba(31, 42, 51, 0.08), 0 10px 22px rgba(0, 0, 0, 0.14);
+      background: transparent;
+      box-shadow: none;
       overflow: hidden;
       padding: 0;
     }
@@ -407,18 +430,20 @@
     .fridge-back {
       position: absolute;
       inset: 0;
-      background: linear-gradient(180deg, #dce7f4, #c8d7e9);
+      background: transparent;
     }
 
     .fridge-door {
       position: absolute;
       inset: 0;
       background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(222, 231, 243, 0.92));
-      border-left: 2px solid rgba(31, 42, 51, 0.08);
+        linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(222, 231, 243, 0.1));
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-left: 2px solid rgba(255, 255, 255, 0.16);
       transform-origin: left center;
       transition: transform 360ms ease;
       z-index: 2;
+      backdrop-filter: blur(1px);
     }
 
     .fridge-door::before,
@@ -431,13 +456,13 @@
     }
 
     .fridge-door::before {
-      top: 46px;
+      top: 88px;
       width: 6px;
       height: 38px;
     }
 
     .fridge-door::after {
-      top: 112px;
+      top: 186px;
       width: 6px;
       height: 26px;
     }
@@ -467,7 +492,7 @@
     }
 
     .fridge-shelf.one { top: 52px; }
-    .fridge-shelf.two { top: 104px; }
+    .fridge-shelf.two { top: 146px; }
 
     .fridge-item {
       position: absolute;
@@ -479,24 +504,24 @@
     }
 
     .fridge-item.milk {
-      left: 16px;
-      top: 28px;
+      left: 22px;
+      top: 32px;
       width: 18px;
       height: 22px;
       background: linear-gradient(180deg, #fff, #dce3f2);
     }
 
     .fridge-item.box {
-      left: 38px;
-      top: 28px;
+      left: 56px;
+      top: 30px;
       width: 24px;
       height: 18px;
       background: linear-gradient(180deg, #ffefbe, #d7b95d);
     }
 
     .fridge-item.note {
-      left: 20px;
-      top: 82px;
+      left: 24px;
+      top: 128px;
       width: 34px;
       height: 22px;
       background: linear-gradient(180deg, #fff8e9, #f2dca7);
@@ -564,42 +589,44 @@
 
     .door {
       position: absolute;
-      right: 26px;
-      top: 72px;
-      width: 120px;
-      height: 230px;
+      left: 1360px;
+      top: 286px;
+      width: 208px;
+      height: 408px;
       border-radius: 18px 18px 12px 12px;
-      background: linear-gradient(180deg, #7d6147 0%, #654c37 100%);
-      box-shadow: inset 0 0 0 8px rgba(0, 0, 0, 0.06);
+      background: transparent;
+      box-shadow: none;
+      border: 2px solid rgba(255, 214, 74, 0.06);
     }
 
     .door.locked::after {
       content: "锁";
       position: absolute;
       left: 50%;
-      top: 96px;
+      top: 166px;
       transform: translateX(-50%);
       width: 54px;
       height: 54px;
       border-radius: 50%;
       display: grid;
       place-items: center;
-      background: #f5dd96;
+      background: rgba(245, 221, 150, 0.92);
       color: #5b4300;
       font-weight: 900;
       font-size: 20px;
-      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+      box-shadow: 0 10px 26px rgba(0, 0, 0, 0.18);
     }
 
     .door.open {
-      background: linear-gradient(180deg, #9bc7ae 0%, #6da786 100%);
+      background: transparent;
+      border-color: rgba(156, 214, 175, 0.32);
     }
 
     .door.open::after {
       content: "门开了";
       position: absolute;
       left: 50%;
-      top: 98px;
+      top: 170px;
       transform: translateX(-50%);
       color: #fff;
       font-weight: 900;
@@ -620,45 +647,54 @@
     }
 
     .hotspot::before {
-      content: "可点";
+      content: "查看";
       position: absolute;
-      right: 6px;
-      top: 6px;
-      padding: 2px 6px;
+      left: 10px;
+      top: 10px;
+      padding: 3px 8px;
       border-radius: 999px;
-      background: rgba(255, 255, 255, 0.84);
-      color: #2f6fed;
-      font-size: 10px;
+      background: rgba(12, 16, 20, 0.74);
+      color: #f4f7fa;
+      font-size: 11px;
       font-weight: 800;
       letter-spacing: 0;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.16);
       z-index: 2;
       pointer-events: none;
+      opacity: 0;
+      transform: translateY(4px) scale(0.96);
+      transition: opacity 120ms ease, transform 120ms ease;
     }
 
     .hotspot::after {
       content: "";
       position: absolute;
       inset: 0;
-      border-radius: 8px;
-      transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
-      box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.16) inset;
-      animation: cluePulse 1.8s ease-in-out infinite;
+      border-radius: 16px;
+      transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease, border-color 120ms ease;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 0 0 0 rgba(255, 214, 74, 0);
+      animation: cluePulse 2.4s ease-in-out infinite;
     }
 
     .hotspot:hover::after {
       transform: translateY(-1px);
-      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.14);
+      box-shadow: 0 0 0 2px rgba(255, 214, 74, 0.18), 0 16px 34px rgba(0, 0, 0, 0.18);
+    }
+
+    .hotspot:hover::before {
+      opacity: 1;
+      transform: translateY(0) scale(1);
     }
 
     .hotspot.active::after {
-      background: rgba(47, 111, 237, 0.16);
-      box-shadow: 0 0 0 2px rgba(47, 111, 237, 0.34);
+      background: rgba(255, 214, 74, 0.12);
+      box-shadow: 0 0 0 2px rgba(255, 214, 74, 0.38), 0 0 30px rgba(255, 214, 74, 0.18);
     }
 
     .hotspot.stage-1,
     .hotspot.stage-2 {
-      filter: saturate(1.05) brightness(1.03);
+      filter: saturate(1.06) brightness(1.03);
     }
 
     .hotspot.stage-1 {
@@ -670,13 +706,15 @@
     }
 
     .hotspot.stage-1::before {
-      content: "再点";
-      color: #0f9d7a;
+      content: "再看";
+      opacity: 1;
+      transform: translateY(0) scale(1);
     }
 
     .hotspot.stage-2::before {
       content: "找到";
-      color: #1f2a33;
+      opacity: 1;
+      transform: translateY(0) scale(1);
     }
 
     .label {
@@ -696,152 +734,69 @@
       display: grid;
       place-items: center;
       border-radius: 8px;
-      border: 1px solid rgba(31, 42, 51, 0.14);
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.76));
-      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16);
-      color: #20303d;
+      border: 0;
+      background: transparent;
+      box-shadow: none;
+      color: transparent;
       user-select: none;
-      animation: bob 3.8s ease-in-out infinite;
     }
 
     .item::after {
-      content: attr(data-emoji);
-      font-size: 28px;
-      text-shadow: 0 2px 0 rgba(255, 255, 255, 0.4);
+      content: "";
     }
-
-    .item.big::after { font-size: 30px; }
 
     .bookcase {
-      left: 28px;
-      top: 54px;
-      width: 124px;
-      height: 230px;
-      background:
-        linear-gradient(180deg, #a7b7c8 0 2px, transparent 2px 25%, #a7b7c8 25% 27%, transparent 27% 50%, #a7b7c8 50% 52%, transparent 52% 75%, #a7b7c8 75% 77%, transparent 77% 100%),
-        linear-gradient(90deg, #8e9fb0 0 10px, #c4d0db 10px 114px, #8e9fb0 114px 124px);
-    }
-
-    .bookcase.stage-1 {
-      transform: translateX(4px) scale(1.01);
-    }
-
-    .bookcase.stage-2 {
-      transform: translateX(2px) scale(1.02);
-      box-shadow: 0 16px 28px rgba(0, 0, 0, 0.2);
+      left: 405px;
+      top: 230px;
+      width: 190px;
+      height: 520px;
+      background: transparent;
     }
 
     .desk {
-      left: 176px;
-      bottom: 34px;
-      width: 150px;
-      height: 78px;
-      background: linear-gradient(180deg, #a06c48, #7a4c30);
-    }
-
-    .desk.stage-1 {
-      transform: translateY(-4px) scale(1.01);
-    }
-
-    .desk.stage-2 {
-      transform: translateY(-2px) scale(1.02);
-      box-shadow: 0 14px 26px rgba(0, 0, 0, 0.22);
+      left: 90px;
+      top: 580px;
+      width: 420px;
+      height: 220px;
+      background: transparent;
     }
 
     .lamp {
-      left: 214px;
-      top: 54px;
-      width: 70px;
-      height: 118px;
+      left: 120px;
+      top: 520px;
+      width: 130px;
+      height: 170px;
       background: transparent;
       box-shadow: none;
     }
 
     .lamp::after {
-      content: "💡";
-      position: absolute;
-      inset: 0;
-      display: grid;
-      place-items: center;
-      font-size: 34px;
-      filter: drop-shadow(0 4px 10px rgba(255, 214, 74, 0.48));
-      animation: lampGlow 1.9s ease-in-out infinite;
-    }
-
-    .lamp.stage-1 {
-      transform: translateY(-3px) rotate(-1deg);
-    }
-
-    .lamp.stage-2 {
-      transform: translateY(-2px) rotate(1deg) scale(1.02);
+      content: "";
     }
 
     .picture {
-      right: 172px;
-      top: 52px;
-      width: 118px;
-      height: 94px;
-      background: linear-gradient(180deg, #ffe9c2, #d8a36c);
+      left: 650px;
+      top: 365px;
+      width: 180px;
+      height: 170px;
+      background: transparent;
     }
 
     .picture::after {
-      content: "🖼️";
-      position: absolute;
-      inset: 0;
-      display: grid;
-      place-items: center;
-      font-size: 32px;
-    }
-
-    .picture.stage-1 {
-      transform: rotate(-2deg) translateY(-2px);
-    }
-
-    .picture.stage-2 {
-      transform: rotate(2deg) translateY(-1px);
+      content: "";
     }
 
     .plant {
-      left: 352px;
-      bottom: 56px;
-      width: 74px;
-      height: 94px;
+      left: 830px;
+      top: 540px;
+      width: 130px;
+      height: 170px;
       background: transparent;
       box-shadow: none;
     }
 
     .plant::after {
-      content: "🪴";
-      position: absolute;
-      inset: 0;
-      display: grid;
-      place-items: center;
-      font-size: 34px;
-      animation: leafWiggle 2.6s ease-in-out infinite;
-    }
-
-    .plant.stage-1 {
-      transform: translateY(-4px) rotate(1deg);
-    }
-
-    .plant.stage-2 {
-      transform: translateY(-1px) rotate(-1deg) scale(1.02);
-    }
-
-    .lamp::after {
-      content: "💡";
-    }
-
-    .picture::after {
-      content: "🖼️";
-    }
-
-    .bookcase::after {
-      content: "📚";
-    }
-
-    .desk::after {
-      content: "🪑";
+      content: "";
     }
 
     .panel {
@@ -1143,45 +1098,38 @@
       </div>
 
       <div class="guide" aria-label="操作指引">
-        <div class="guide-step"><strong>1</strong>点发光物件</div>
+        <div class="guide-step"><strong>1</strong>点发亮边框</div>
         <div class="guide-step"><strong>2</strong>把线索记下来</div>
         <div class="guide-step"><strong>3</strong>输入门锁密码</div>
       </div>
 
       <div class="room">
         <div class="scene" id="scene">
-          <div class="scene-guide">房间里不止几个按钮，先点最亮的，再试冰箱</div>
+          <div class="scene-guide">先找会发光的边框，再试冰箱和门锁</div>
           <div id="sceneCanvas" class="scene-canvas">
-            <div class="window"></div>
-            <div class="curtain left"></div>
-            <div class="curtain right"></div>
-            <div class="clock"></div>
-            <div class="cabinet"></div>
-            <div class="rug"></div>
-            <div class="sofa"></div>
-            <div class="wall"></div>
-            <div class="floor"></div>
-            <div id="door" class="door locked"></div>
+            <img class="scene-bg" src="assets/room.png" alt="" aria-hidden="true">
+            <div class="scene-haze" aria-hidden="true"></div>
+            <div id="door" class="door locked" aria-hidden="true"></div>
 
-            <button class="hotspot item bookcase" data-clue="bookcase" style="left:28px;top:54px;width:124px;height:230px;">
+            <button class="hotspot item bookcase" data-clue="bookcase" style="left:395px;top:225px;width:210px;height:530px;">
               <span class="label">书架</span>
             </button>
-            <button class="hotspot item desk" data-clue="desk" style="left:176px;bottom:34px;width:150px;height:78px;">
-              <span class="label">桌子</span>
+            <button class="hotspot item desk" data-clue="desk" style="left:66px;top:540px;width:430px;height:250px;">
+              <span class="label">书桌</span>
             </button>
-            <button class="hotspot item lamp" data-clue="lamp" style="left:214px;top:54px;width:70px;height:118px;">
-              <span class="label">灯</span>
+            <button class="hotspot item lamp" data-clue="lamp" style="left:95px;top:505px;width:170px;height:205px;">
+              <span class="label">台灯</span>
             </button>
-            <button class="hotspot item picture" data-clue="picture" style="right:172px;top:52px;width:118px;height:94px;">
+            <button class="hotspot item picture" data-clue="picture" style="left:640px;top:330px;width:210px;height:220px;">
               <span class="label">画框</span>
             </button>
-            <button class="hotspot item plant" data-clue="plant" style="left:352px;bottom:56px;width:74px;height:94px;">
+            <button class="hotspot item plant" data-clue="plant" style="left:780px;top:530px;width:180px;height:210px;">
               <span class="label">绿植</span>
             </button>
-            <button class="hotspot item big" data-clue="panel" style="left:160px;top:196px;width:114px;height:68px;background:linear-gradient(180deg,#eef4ff,#cfdcf8);">
+            <button class="hotspot item big" data-clue="panel" style="left:1100px;top:350px;width:150px;height:220px;background:transparent;">
               <span class="label">面板</span>
             </button>
-            <button class="hotspot item fridge" data-clue="fridge" style="left:420px;top:132px;width:92px;height:184px;">
+            <button class="hotspot item fridge" data-clue="fridge" style="left:920px;top:300px;width:210px;height:350px;">
               <span class="fridge-back" aria-hidden="true"></span>
               <span class="fridge-inside" aria-hidden="true">
                 <span class="fridge-shelf one"></span>
@@ -1482,7 +1430,7 @@
       renderClues();
       setHint(level.hint);
       if (!state.solved) {
-        setSceneMessage(`你进入了${level.name}。先点房间里会动的东西，有些要先打开再看。`);
+        setSceneMessage(`你进入了${level.name}。先找边框发亮的物件，有些要先点一下再翻开。`);
       }
       document.querySelectorAll(".hotspot").forEach((el) => {
         el.classList.remove("active", "stage-1", "stage-2", "open", "revealed");
@@ -1537,9 +1485,9 @@
     }
 
     function resizeScene() {
-      const width = els.scene.clientWidth || 560;
-      const height = els.scene.clientHeight || 480;
-      const scale = Math.min(width / 560, height / 480);
+      const width = els.scene.clientWidth || 1672;
+      const height = els.scene.clientHeight || 941;
+      const scale = Math.min(width / 1672, height / 941);
       els.sceneCanvas.style.transform = `scale(${scale})`;
     }
 
@@ -1755,7 +1703,7 @@
     renderLevel();
     resizeSplash();
     resizeScene();
-    setSceneMessage("先点房间里会动的东西，有些要先打开再看。");
+    setSceneMessage("先找会发光的边框，再试冰箱和门锁。");
   </script>
 </body>
 </html>
