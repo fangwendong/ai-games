@@ -321,7 +321,6 @@
 
     .level-summary-main {
       display: grid;
-      gap: 2px;
       min-width: 0;
     }
 
@@ -336,12 +335,6 @@
     .level-summary-main strong {
       font-size: 15px;
       line-height: 1.15;
-    }
-
-    .level-summary-main span {
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 750;
     }
 
     .level-summary-toggle {
@@ -674,14 +667,14 @@
       <details class="level-drawer">
         <summary>
           <span class="level-summary-main">
-            <strong id="levelRange">第 1 关 · 第 1 段 1-10</strong>
-            <span id="progressText">已种 0 / 5 朵花</span>
+            <strong id="levelRange">1/10</strong>
           </span>
           <span class="level-summary-toggle" aria-hidden="true"></span>
         </summary>
         <div class="level-status" aria-label="关卡进度">
           <div id="levelList" class="level-list"></div>
           <div class="progress" aria-label="种花进度"><div id="progressFill"></div></div>
+          <p id="progressText" class="mini">已种 0 / 5 朵花。</p>
         </div>
       </details>
       <div class="board-wrap">
@@ -902,7 +895,7 @@
     function buildLevelButtons() {
       levelList.innerHTML = "";
       const rule = segmentRuleFor(levelIndex);
-      levelRange.textContent = `第 ${levelIndex + 1} 关 · 第 ${segmentIndex(levelIndex) + 1} 段 ${segmentLabel(levelIndex)} | ${maxMistakes - mistakes}/${rule.lives} 条命`;
+      levelRange.textContent = `${segmentProgress(levelIndex)}/10`;
       const segment = segmentIndex(levelIndex);
       const segmentStart = segment * segmentLength;
       const segmentEnd = Math.min(segmentStart + segmentLength, challengeLength);
@@ -964,7 +957,7 @@
 
       updateProgress();
       resizeFireworks();
-      levelRange.textContent = `第 ${levelIndex + 1} 关 · 第 ${segmentIndex(levelIndex) + 1} 段 ${segmentLabel(levelIndex)} | ${maxMistakes - mistakes}/${rule.lives} 条命`;
+      levelRange.textContent = `${segmentProgress(levelIndex)}/10`;
     }
 
     function plant(row, col) {
