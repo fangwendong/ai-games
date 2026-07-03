@@ -293,6 +293,72 @@
       font-size: 14px;
     }
 
+    .level-drawer {
+      display: grid;
+      gap: 10px;
+    }
+
+    .level-drawer summary {
+      min-height: 42px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      padding: 0 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.62);
+      color: var(--ink);
+      cursor: pointer;
+      font-weight: 850;
+      box-shadow: inset 0 -3px 0 rgba(38, 48, 45, 0.08);
+      list-style: none;
+    }
+
+    .level-drawer summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .level-summary-main {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .level-summary-main strong,
+    .level-summary-main span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .level-summary-main strong {
+      font-size: 15px;
+      line-height: 1.15;
+    }
+
+    .level-summary-main span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .level-summary-toggle {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+      white-space: nowrap;
+    }
+
+    .level-drawer[open] .level-summary-toggle::before {
+      content: "收起";
+    }
+
+    .level-drawer:not([open]) .level-summary-toggle::before {
+      content: "展开";
+    }
+
     .level-status {
       display: grid;
       gap: 10px;
@@ -605,14 +671,19 @@
         <div class="stat"><strong id="heartText">♥♥♥</strong><span>生命</span></div>
         <div class="stat"><strong id="timerText">0:00</strong><span>用时</span></div>
       </div>
-      <div class="level-status" aria-label="关卡进度">
-        <div class="level-status-head">
-          <strong id="levelRange">第 1 段 1-10</strong>
-          <span id="progressText">已种 0 / 5 朵花</span>
+      <details class="level-drawer">
+        <summary>
+          <span class="level-summary-main">
+            <strong id="levelRange">第 1 关 · 第 1 段 1-10</strong>
+            <span id="progressText">已种 0 / 5 朵花</span>
+          </span>
+          <span class="level-summary-toggle" aria-hidden="true"></span>
+        </summary>
+        <div class="level-status" aria-label="关卡进度">
+          <div id="levelList" class="level-list"></div>
+          <div class="progress" aria-label="种花进度"><div id="progressFill"></div></div>
         </div>
-        <div id="levelList" class="level-list"></div>
-        <div class="progress" aria-label="种花进度"><div id="progressFill"></div></div>
-      </div>
+      </details>
       <div class="board-wrap">
         <div id="board" class="board" aria-label="谜题棋盘"></div>
       </div>
@@ -831,7 +902,7 @@
     function buildLevelButtons() {
       levelList.innerHTML = "";
       const rule = segmentRuleFor(levelIndex);
-      levelRange.textContent = `第 ${segmentIndex(levelIndex) + 1} 段 ${segmentLabel(levelIndex)} | ${maxMistakes - mistakes}/${rule.lives} 条命`;
+      levelRange.textContent = `第 ${levelIndex + 1} 关 · 第 ${segmentIndex(levelIndex) + 1} 段 ${segmentLabel(levelIndex)} | ${maxMistakes - mistakes}/${rule.lives} 条命`;
       const segment = segmentIndex(levelIndex);
       const segmentStart = segment * segmentLength;
       const segmentEnd = Math.min(segmentStart + segmentLength, challengeLength);
@@ -893,7 +964,7 @@
 
       updateProgress();
       resizeFireworks();
-      levelRange.textContent = `第 ${segmentIndex(levelIndex) + 1} 段 ${segmentLabel(levelIndex)} | ${maxMistakes - mistakes}/${rule.lives} 条命`;
+      levelRange.textContent = `第 ${levelIndex + 1} 关 · 第 ${segmentIndex(levelIndex) + 1} 段 ${segmentLabel(levelIndex)} | ${maxMistakes - mistakes}/${rule.lives} 条命`;
     }
 
     function plant(row, col) {
