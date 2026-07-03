@@ -22,6 +22,7 @@ Observed installed size:
 Under `/home/fwd/ibkr`:
 
 - `gateway/`: IB Gateway stable standalone
+- `ibgateway/1045`: compatibility symlink to `gateway/` for IBC's expected layout
 - `ibc/`: IBC 3.24.0
 - `config/ibc-paper.ini`: Paper Trading IBC config template
 - `start-gateway-paper.sh`: start script for Xvfb + IBC + IB Gateway
@@ -73,6 +74,10 @@ wget -O IBCLinux-3.24.0.zip \
 rm -rf /home/fwd/ibkr/ibc
 mkdir -p /home/fwd/ibkr/ibc
 unzip -q IBCLinux-3.24.0.zip -d /home/fwd/ibkr/ibc
+chmod u+x /home/fwd/ibkr/ibc/*.sh /home/fwd/ibkr/ibc/scripts/*.sh
+
+mkdir -p /home/fwd/ibkr/ibgateway
+ln -sfn /home/fwd/ibkr/gateway /home/fwd/ibkr/ibgateway/1045
 ```
 
 IBC itself is small, about 424 KB in the tested install.
@@ -105,8 +110,29 @@ The script uses:
 - `TRADING_MODE=paper`
 - `OverrideTwsApiPort=4002`
 - settings dir `/home/fwd/ibkr/settings-paper`
+- IBC launch args equivalent to:
+  `ibcstart.sh 1045 --gateway --tws-path=/home/fwd/ibkr --tws-settings-path=/home/fwd/ibkr/settings-paper --ibc-path=/home/fwd/ibkr/ibc --ibc-ini=/home/fwd/ibkr/config/ibc-paper.ini --mode=paper --on2fatimeout=exit`
 
 First login still requires IBKR credentials and second-factor authentication.
+
+On the verified host, the first successful launch reached the Paper Trading login dialog on
+`DISPLAY=:99` with log lines like:
+
+```text
+IBC: version: 3.24.0
+IBC: Login dialog WINDOW_OPENED: LoginState is LOGGED_OUT
+IBC: Setting Trading mode = paper
+```
+
+Before login, `127.0.0.1:4002` is not expected to listen yet. The API port opens only after
+Gateway login and API initialization complete.
+
+The repo start script includes two compatibility fixes found during installation:
+
+- IBC 3.24.0 does not accept the old `-inline` argument; call `ibcstart.sh` with explicit
+  version, Gateway, path, mode, and 2FA timeout arguments.
+- The standalone Gateway installer writes to `/home/fwd/ibkr/gateway`, but IBC looks under
+  `/home/fwd/ibkr/ibgateway/1045`; create that symlink during install.
 
 ## Bot Connection
 
@@ -143,4 +169,3 @@ It is technically possible to download Debian packages and unpack `xvfb` plus sh
 
 - system package: `xvfb`
 - user directory: IB Gateway, IBC, settings, logs, bot code
-
