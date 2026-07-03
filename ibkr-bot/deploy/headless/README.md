@@ -49,6 +49,56 @@ sudo apt-get install -y x11vnc
 
 Bind VNC to localhost and access it through an SSH tunnel. Do not expose VNC or IBKR API ports to the public internet.
 
+## Recommended Install Flow
+
+From the repository checkout on the target server:
+
+```bash
+cd /home/fwd/work/ai-games-wt-codex-ibkr/ibkr-bot
+
+# Installs IB Gateway, IBC, config templates, executable permissions,
+# and the IBC Gateway compatibility symlink under /home/fwd/ibkr.
+./deploy/headless/install-userland.sh
+```
+
+The script installs only user-owned files. It does not install system packages and does not
+store IBKR credentials.
+
+Install the required virtual display package separately:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y xvfb
+```
+
+Start Paper Gateway:
+
+```bash
+/home/fwd/ibkr/start-gateway-paper.sh
+```
+
+For a long-running shell session, use `nohup`, `setsid`, `tmux`, `screen`, or a systemd user
+service. The command starts `Xvfb` on `DISPLAY=:99` and then starts IBC + IB Gateway.
+
+Expected first-launch state:
+
+- `Xvfb :99` is running.
+- A Java process running `ibcalpha.ibc.IbcGateway` is running.
+- Logs show the Paper Trading login dialog opened.
+- `127.0.0.1:4002` is not open until after a successful Gateway login.
+
+Useful checks:
+
+```bash
+ps -ef | grep -E 'Xvfb|ibcalpha|IBGateway|ibgateway' | grep -v grep
+tail -120 /home/fwd/ibkr/logs/start-gateway-paper.out
+ss -ltnp | grep -E ':(4002|4001|7496|7497)\b' || true
+```
+
+If you need to interact with the first login window, install and run a localhost-only VNC
+server or another X11 viewing method against `DISPLAY=:99`, then complete IBKR Paper login
+and second-factor authentication manually.
+
 ## Install IB Gateway
 
 ```bash
