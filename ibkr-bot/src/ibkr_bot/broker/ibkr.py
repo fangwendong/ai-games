@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
+import math
 from typing import Any
 
 from ibkr_bot.config import Settings
-from ibkr_bot.models import ContractSpec, OrderIntent, PositionSnapshot
+from ibkr_bot.models import ContractSpec, OrderIntent, PositionSnapshot, QuoteSnapshot
 from ibkr_bot.strategy.base import Bar
 
 
@@ -79,6 +80,42 @@ class IbkrBroker(AbstractContextManager["IbkrBroker"]):
             for row in dataframe.itertuples(index=False)
         ]
 
+    def quote(self, contract: ContractSpec) -> QuoteSnapshot:
+        from ib_insync import Stock
+
+        self._require_connection()
+        ib_contract = Stock(contract.symbol, contract.exchange, contract.currency)
+        ticker = self.ib.reqTickers(ib_contract)[0]
+
+        bid = _clean_number(getattr(ticker, "bid", None))
+        ask = _clean_number(getattr(ticker, "ask", None))
+        last = _clean_number(getattr(ticker, "last", None))
+        close = _clean_number(getattr(ticker, "close", None))
+        market_price = _clean_number(ticker.marketPrice())
+        volume_raw = getattr(ticker, "volume", None)
+        volume = int(volume_raw) if isinstance(volume_raw, (int, float)) and volume_raw == volume_raw else None
+        timestamp = str(getattr(ticker, "time", None) or "") or None
+
+        source = "live"
+        if market_price is None:
+            if close is not None:
+                market_price = close
+                source = "historical-close"
+            else:
+                source = "unavailable"
+
+        return QuoteSnapshot(
+            symbol=contract.symbol,
+            source=source,
+            bid=bid,
+            ask=ask,
+            last=last,
+            close=close,
+            market_price=market_price,
+            volume=volume,
+            timestamp=timestamp,
+        )
+
     def place_order(self, intent: OrderIntent) -> str:
         from ib_insync import LimitOrder, MarketOrder, Stock
 
@@ -95,3 +132,14 @@ class IbkrBroker(AbstractContextManager["IbkrBroker"]):
         if not self.ib or not self.ib.isConnected():
             raise RuntimeError("IBKR broker is not connected")
 
+
+def _clean_number(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(number):
+        return None
+    return number

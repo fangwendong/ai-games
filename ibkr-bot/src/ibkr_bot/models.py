@@ -71,6 +71,19 @@ class PositionSnapshot:
 
 
 @dataclass(frozen=True)
+class QuoteSnapshot:
+    symbol: str
+    source: str
+    bid: float | None
+    ask: float | None
+    last: float | None
+    close: float | None
+    market_price: float | None
+    volume: int | None
+    timestamp: str | None
+
+
+@dataclass(frozen=True)
 class RiskState:
     positions: dict[str, PositionSnapshot]
     orders_today: int
@@ -81,4 +94,3 @@ class RiskState:
 class RiskDecision:
     accepted: bool
     reasons: tuple[str, ...]
-

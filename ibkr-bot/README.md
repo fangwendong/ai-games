@@ -11,7 +11,7 @@ It is not investment advice and it does not include a profitable strategy. The g
 - Strategy interface plus a small moving-average crossover example
 - Risk manager for notional limits, position limits, order frequency, daily loss, and market-order blocking
 - SQLite audit log for signals, orders, fills, and risk events
-- CLI commands for DB initialization, connection checks, and one dry-run strategy pass
+- CLI commands for DB initialization, connection checks, live quotes, strategy scans, and one dry-run strategy pass
 - Unit tests for the risk layer and strategy behavior
 
 ## Setup
@@ -36,10 +36,15 @@ Configure IB Gateway or TWS:
 ```bash
 ibkr-bot init-db
 ibkr-bot check-connection
+ibkr-bot quote --symbol SPY
+ibkr-bot scan
+ibkr-bot trade-once --symbol SPY
 ibkr-bot run-once --symbol SPY
 ```
 
-`run-once` stays in dry-run mode unless `IBKR_DRY_RUN=false`. Live trading is also blocked unless `IBKR_ALLOW_LIVE=true`, and the default `.env.example` does not allow it.
+`quote` fetches the current snapshot for one symbol. `scan` walks the configured symbol list, records the signal history, and prints the current strategy verdict for each symbol. `trade-once` runs one strategy evaluation, applies risk checks, and optionally submits an order.
+
+`run-once` stays as a compatibility alias for `trade-once`. It remains in dry-run mode unless `IBKR_DRY_RUN=false`. Live trading is also blocked unless `IBKR_ALLOW_LIVE=true`, and the default `.env.example` does not allow it.
 
 ## Suggested Rollout
 
