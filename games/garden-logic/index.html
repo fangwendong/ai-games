@@ -57,8 +57,7 @@
       position: relative;
     }
 
-    .play-area,
-    .side {
+    .play-area {
       background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -123,25 +122,6 @@
 
     .play-area > .stat-row {
       justify-content: flex-start;
-    }
-
-    .top-actions {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-shrink: 0;
-    }
-
-    .icon-btn {
-      min-height: 42px;
-      padding: 0 14px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #fffaf2;
-      color: var(--ink);
-      cursor: pointer;
-      font-weight: 850;
-      box-shadow: inset 0 -3px 0 rgba(38, 48, 45, 0.08);
     }
 
     .stat {
@@ -313,6 +293,30 @@
       font-size: 14px;
     }
 
+    .level-status {
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.52);
+    }
+
+    .level-status-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.3;
+    }
+
+    .level-status-head strong {
+      color: var(--ink);
+      font-size: 16px;
+    }
+
     .action-drawer {
       display: grid;
       gap: 10px;
@@ -354,36 +358,6 @@
       padding-top: 0;
     }
 
-    .side {
-      position: fixed;
-      top: 18px;
-      right: 18px;
-      width: min(320px, calc(100vw - 36px));
-      max-height: calc(100dvh - 36px);
-      overflow: auto;
-      padding: 16px;
-      display: grid;
-      gap: 14px;
-      overscroll-behavior: contain;
-      transform: translateX(calc(100% + 24px));
-      opacity: 0;
-      pointer-events: none;
-      transition: transform 180ms ease, opacity 180ms ease;
-      z-index: 22;
-    }
-
-    .side.open {
-      transform: translateX(0);
-      opacity: 1;
-      pointer-events: auto;
-    }
-
-    .panel-title {
-      margin: 0;
-      font-size: 18px;
-      line-height: 1.2;
-    }
-
     .actions {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -409,20 +383,6 @@
     .btn:disabled {
       cursor: not-allowed;
       opacity: 0.48;
-    }
-
-    .level-nav {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 8px;
-      align-items: center;
-      margin-bottom: 8px;
-    }
-
-    .level-range {
-      color: var(--muted);
-      font-size: 13px;
-      text-align: center;
     }
 
     .level-list {
@@ -476,52 +436,6 @@
       font-size: 13px;
       line-height: 1.45;
       margin: 0;
-    }
-
-    .legend {
-      display: grid;
-      gap: 8px;
-      padding-top: 4px;
-    }
-
-    .legend-item {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      color: #495753;
-      font-size: 13px;
-    }
-
-    .swatch {
-      width: 22px;
-      height: 22px;
-      border-radius: 6px;
-      border: 1px solid rgba(0, 0, 0, 0.08);
-    }
-
-    .win-card {
-      display: none;
-      padding: 14px;
-      border-radius: 8px;
-      background: rgba(47, 143, 112, 0.11);
-      border: 1px solid rgba(47, 143, 112, 0.24);
-    }
-
-    .win-card.visible {
-      display: grid;
-      gap: 10px;
-    }
-
-    .side-backdrop {
-      position: fixed;
-      inset: 0;
-      z-index: 21;
-      display: none;
-      background: rgba(38, 48, 45, 0.16);
-    }
-
-    .side-backdrop.visible {
-      display: block;
     }
 
     .guide-overlay {
@@ -647,26 +561,6 @@
         min-height: auto;
       }
 
-      .side {
-        top: 10px;
-        right: 10px;
-        width: calc(100vw - 20px);
-        max-height: calc(100dvh - 20px);
-        padding: 12px;
-        gap: 10px;
-      }
-
-      .legend {
-        gap: 6px;
-      }
-
-      .legend-item {
-        font-size: 12px;
-      }
-
-      .win-card {
-        padding: 12px;
-      }
     }
 
     @media (max-width: 620px) {
@@ -677,11 +571,6 @@
       .topbar {
         align-items: flex-start;
         flex-direction: column;
-      }
-
-      .top-actions {
-        width: 100%;
-        justify-content: stretch;
       }
 
       .top-mode {
@@ -695,10 +584,6 @@
       .board {
         gap: 4px;
         padding: 6px;
-      }
-
-      .side {
-        max-height: calc(100dvh - 16px);
       }
     }
   </style>
@@ -714,14 +599,19 @@
             <p class="subtitle">每次只做一个确定判断，把花园慢慢种满。</p>
           </div>
         </div>
-        <div class="top-actions">
-          <button id="panelToggleBtn" class="icon-btn" type="button" aria-expanded="false" aria-controls="sidePanel">信息</button>
-        </div>
       </div>
       <div class="stat-row" aria-label="当前状态">
         <div class="stat"><strong id="levelText">1</strong><span>关卡</span></div>
         <div class="stat"><strong id="heartText">♥♥♥</strong><span>生命</span></div>
         <div class="stat"><strong id="timerText">0:00</strong><span>用时</span></div>
+      </div>
+      <div class="level-status" aria-label="关卡进度">
+        <div class="level-status-head">
+          <strong id="levelRange">第 1 段 1-10</strong>
+          <span id="progressText">已种 0 / 5 朵花</span>
+        </div>
+        <div id="levelList" class="level-list"></div>
+        <div class="progress" aria-label="种花进度"><div id="progressFill"></div></div>
       </div>
       <div class="board-wrap">
         <div id="board" class="board" aria-label="谜题棋盘"></div>
@@ -742,42 +632,7 @@
       </details>
     </section>
 
-    <aside id="sidePanel" class="side" aria-hidden="true" inert>
-      <div class="topbar">
-        <div>
-          <h2 class="panel-title">关卡信息</h2>
-          <p class="mini">只保留进度、关卡和规则摘要。</p>
-        </div>
-        <button id="sideCloseBtn" class="icon-btn" type="button">收起</button>
-      </div>
-
-      <div>
-        <h2 class="panel-title">关卡</h2>
-        <div class="level-nav">
-          <div id="levelRange" class="level-range">第 1 段 1-10 | 3/3 条命</div>
-        </div>
-        <div id="levelList" class="level-list"></div>
-      </div>
-
-      <div>
-        <h2 class="panel-title">花园进度</h2>
-        <div class="progress" aria-label="谜题进度"><div id="progressFill"></div></div>
-        <p id="progressText" class="mini">已种 0 / 5 朵花。</p>
-      </div>
-
-      <div class="legend">
-        <div class="legend-item"><span class="swatch" style="background:#f4c6ba"></span>每个彩色花圃只能有 1 朵花</div>
-        <div class="legend-item"><span class="swatch" style="background:#f3d36b"></span>整轮共 3 次错误机会</div>
-      </div>
-
-      <div id="winCard" class="win-card">
-        <strong>种花完成。</strong>
-        <p class="mini">这就是核心循环：看颜色、判断位置、把每朵花放到正确的格子里。</p>
-      </div>
-    </aside>
   </main>
-
-  <div id="sideBackdrop" class="side-backdrop" aria-hidden="true"></div>
 
   <div id="guideOverlay" class="guide-overlay" role="dialog" aria-modal="true" aria-labelledby="guideTitle">
     <div class="guide-modal">
@@ -914,10 +769,6 @@
     });
 
     const boardEl = document.querySelector("#board");
-    const panelToggleBtn = document.querySelector("#panelToggleBtn");
-    const sidePanel = document.querySelector("#sidePanel");
-    const sideBackdrop = document.querySelector("#sideBackdrop");
-    const sideCloseBtn = document.querySelector("#sideCloseBtn");
     const levelText = document.querySelector("#levelText");
     const heartText = document.querySelector("#heartText");
     const timerText = document.querySelector("#timerText");
@@ -939,7 +790,6 @@
     const levelList = document.querySelector("#levelList");
     const progressFill = document.querySelector("#progressFill");
     const progressText = document.querySelector("#progressText");
-    const winCard = document.querySelector("#winCard");
     const fireworksCanvas = document.querySelector("#fireworks");
     const fireworksCtx = fireworksCanvas.getContext("2d");
 
@@ -1007,29 +857,6 @@
       guideOverlay.classList.remove("visible");
     }
 
-    function openPanel() {
-      sidePanel.classList.add("open");
-      sideBackdrop.classList.add("visible");
-      sidePanel.setAttribute("aria-hidden", "false");
-      sidePanel.inert = false;
-      panelToggleBtn.setAttribute("aria-expanded", "true");
-      panelToggleBtn.textContent = "收起";
-    }
-
-    function closePanel() {
-      sidePanel.classList.remove("open");
-      sideBackdrop.classList.remove("visible");
-      sidePanel.setAttribute("aria-hidden", "true");
-      sidePanel.inert = true;
-      panelToggleBtn.setAttribute("aria-expanded", "false");
-      panelToggleBtn.textContent = "信息";
-    }
-
-    function togglePanel() {
-      if (sidePanel.classList.contains("open")) closePanel();
-      else openPanel();
-    }
-
     function render() {
       const level = levels[levelIndex];
       const rule = segmentRuleFor(levelIndex);
@@ -1042,7 +869,6 @@
       hintBtn.disabled = won || runFailed;
       bloomBtn.disabled = won || runFailed || bloomsUsed >= maxBlooms;
       bloomBtn.textContent = `开花 ${maxBlooms - bloomsUsed}/${maxBlooms} · B`;
-      winCard.classList.toggle("visible", won);
 
       for (let row = 0; row < level.size; row += 1) {
         for (let col = 0; col < level.size; col += 1) {
@@ -1371,9 +1197,6 @@
 
     guideBtn.addEventListener("click", openGuide);
     guideCloseBtn.addEventListener("click", closeGuide);
-    panelToggleBtn.addEventListener("click", togglePanel);
-    sideCloseBtn.addEventListener("click", closePanel);
-    sideBackdrop.addEventListener("click", closePanel);
     guideOverlay.addEventListener("click", (event) => {
       if (event.target === guideOverlay) closeGuide();
     });
@@ -1399,7 +1222,6 @@
       if (key === "escape") {
         closeGuide();
         closeResult();
-        closePanel();
       }
       if (key === "h") showHint();
       if (key === "b") bloomOne();
@@ -1410,11 +1232,9 @@
       if (key === "n") nextLevel();
     });
 
-    closePanel();
     setupLevel(0);
     resizeFireworks();
     updateTimer();
-    window.addEventListener("pageshow", closePanel);
     window.addEventListener("resize", resizeFireworks);
   </script>
 </body>
