@@ -486,7 +486,7 @@
     .guide-overlay {
       position: fixed;
       inset: 0;
-      z-index: 20;
+      z-index: 30;
       display: none;
       place-items: center;
       padding: 18px;
@@ -748,8 +748,8 @@
       <ul class="guide-list">
         <li><strong>目标</strong>把花种到棋盘上，让每个彩色花圃、每一行、每一列都正好只有 1 朵花。</li>
         <li><strong>限制</strong>花不能贴着花，斜对角也不行。</li>
-        <li><strong>通关</strong>一口气连续通过 30 关才算通关。第 1-10、10-20、20-30 是三个连续段，中途失败只会回到本段起点。</li>
-        <li><strong>操作</strong>直接点击格子就能种花。1-10 段给 3 条命，10-20 段给 6 条命，20-30 段给 9 条命。</li>
+        <li><strong>通关</strong>一口气连续通过 30 关才算通关。第 1-10、11-20、21-30 是三个连续段，中途失败只会回到本段起点。</li>
+        <li><strong>操作</strong>直接点击格子就能种花。1-10 段给 3 条命，11-20 段给 6 条命，21-30 段给 9 条命。</li>
         <li><strong>卡住</strong>点“提示”看下一步，或点“开花”自动种一朵正确的花。开花整轮最多 3 次。</li>
       </ul>
     </div>
@@ -1063,8 +1063,8 @@
         } else {
           const nextRange = segmentLabel(levelIndex + 1);
           const nextRule = segmentRuleFor(levelIndex + 1);
-          const body = `第 ${levelIndex + 1} 关完成。当前段落进入 ${nextRange}，这一段给 ${nextRule.lives} 条命。${levelTip(levelIndex + 1)}`;
-          setMessage(`第 ${levelIndex + 1} 关完成！当前段落进入 ${nextRange}。`);
+          const body = `第 ${levelIndex + 1} 关完成。下一关属于 ${nextRange} 段，这一段给 ${nextRule.lives} 条命。${levelTip(levelIndex + 1)}`;
+          setMessage(`第 ${levelIndex + 1} 关完成！下一关属于 ${nextRange} 段。`);
           if ((levelIndex + 1) % segmentLength === 0) {
             showResult(`第 ${segmentIndex(levelIndex) + 1} 段完成`, body, "继续下一段", nextLevel, "先看一下", "🎉");
           } else {
@@ -1145,7 +1145,7 @@
 
     function segmentLabel(levelIndexValue) {
       const segment = segmentIndex(levelIndexValue);
-      const start = segment === 0 ? 1 : segment * segmentLength;
+      const start = segment * segmentLength + 1;
       const end = (segment + 1) * segmentLength;
       return `${start}-${end}`;
     }
