@@ -121,6 +121,10 @@
       justify-content: flex-end;
     }
 
+    .play-area > .stat-row {
+      justify-content: flex-start;
+    }
+
     .top-actions {
       display: flex;
       align-items: center;
@@ -226,34 +230,6 @@
       font-size: 14px;
     }
 
-    .modebar {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-    }
-
-    .top-mode {
-      width: min(170px, 100%);
-      justify-self: start;
-    }
-
-    .mode-btn {
-      min-height: 46px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #fffaf2;
-      color: var(--ink);
-      cursor: pointer;
-      font-weight: 850;
-      box-shadow: inset 0 -3px 0 rgba(38, 48, 45, 0.08);
-    }
-
-    .mode-btn.active {
-      background: #26302d;
-      color: #fff7e6;
-      border-color: rgba(38, 48, 45, 0.66);
-    }
-
     .board-wrap {
       display: grid;
       place-items: center;
@@ -305,25 +281,6 @@
 
     .tile.flower {
       background-image: radial-gradient(circle at 50% 45%, rgba(255, 255, 255, 0.62), transparent 29%);
-    }
-
-    .tile.soil::before {
-      content: "";
-      width: 52%;
-      height: 7px;
-      border-radius: 99px;
-      background: rgba(75, 54, 41, 0.64);
-      transform: rotate(-34deg);
-    }
-
-    .tile.soil::after {
-      content: "";
-      position: absolute;
-      width: 52%;
-      height: 7px;
-      border-radius: 99px;
-      background: rgba(75, 54, 41, 0.64);
-      transform: rotate(34deg);
     }
 
     .tile .flower-icon {
@@ -720,16 +677,17 @@
           <button id="panelToggleBtn" class="icon-btn" type="button" aria-expanded="false" aria-controls="sidePanel">更多</button>
         </div>
       </div>
-      <div class="modebar top-mode" role="group" aria-label="点击模式">
-        <button id="flowerModeBtn" class="mode-btn active" type="button">种花 ✿</button>
+      <div class="stat-row" aria-label="当前状态">
+        <div class="stat"><strong id="levelText">1</strong><span>关卡</span></div>
+        <div class="stat"><strong id="heartText">♥♥♥</strong><span>生命</span></div>
+        <div class="stat"><strong id="timerText">0:00</strong><span>用时</span></div>
       </div>
-
       <div class="board-wrap">
         <div id="board" class="board" aria-label="谜题棋盘"></div>
       </div>
 
       <div id="message" class="message" role="status">
-        当前是“种花”模式。确定格子有花时直接点击；不确定时切到“排除”做笔记。
+        直接点击格子种花，目标是把每个彩色花圃、每一行、每一列都填对。
       </div>
     </section>
 
@@ -741,17 +699,11 @@
         </div>
         <button id="sideCloseBtn" class="icon-btn" type="button">收起</button>
       </div>
-      <div class="stat-row">
-        <div class="stat"><strong id="levelText">1</strong><span>关卡</span></div>
-        <div class="stat"><strong id="heartText">♥♥♥</strong><span>生命</span></div>
-        <div class="stat"><strong id="timerText">0:00</strong><span>用时</span></div>
-      </div>
       <div>
         <h2 class="panel-title">操作</h2>
-        <p class="mini">主界面只保留“种花”。需要做笔记时，用这里切到排除模式。</p>
+        <p class="mini">主界面只保留花园本身。直接点击格子就能种花。</p>
       </div>
       <div class="actions">
-        <button id="soilModeBtn" class="btn" type="button">排除 ✕</button>
         <button id="guideBtn" class="btn">玩法</button>
         <button id="hintBtn" class="btn">提示 · H</button>
         <button id="bloomBtn" class="btn">开花 3/3 · B</button>
@@ -775,13 +727,12 @@
 
       <div class="legend">
         <div class="legend-item"><span class="swatch" style="background:#f4c6ba"></span>每个彩色花圃只能有 1 朵花</div>
-        <div class="legend-item"><span class="swatch" style="background:#b9ddc6"></span>排除标记只是你的笔记</div>
         <div class="legend-item"><span class="swatch" style="background:#f3d36b"></span>整轮共 3 次错误机会</div>
       </div>
 
       <div id="winCard" class="win-card">
         <strong>种花完成。</strong>
-        <p class="mini">这就是核心循环：看颜色、做排除、最后把每朵花放到确定的位置。</p>
+        <p class="mini">这就是核心循环：看颜色、判断位置、把每朵花放到正确的格子里。</p>
       </div>
     </aside>
   </main>
@@ -797,9 +748,8 @@
       <ul class="guide-list">
         <li><strong>目标</strong>把花种到棋盘上，让每个彩色花圃、每一行、每一列都正好只有 1 朵花。</li>
         <li><strong>限制</strong>花不能贴着花，斜对角也不行。</li>
-        <li><strong>排除</strong>先选“排除”，点击你确定不可能有花的格子，这只是笔记，不会扣生命。</li>
         <li><strong>通关</strong>一口气连续通过 30 关才算通关。第 1-10、10-20、20-30 是三个连续段，中途失败只会回到本段起点。</li>
-        <li><strong>种花</strong>确定答案后选“种花”，再点击格子。1-10 段给 3 条命，10-20 段给 6 条命，20-30 段给 9 条命。</li>
+        <li><strong>操作</strong>直接点击格子就能种花。1-10 段给 3 条命，10-20 段给 6 条命，20-30 段给 9 条命。</li>
         <li><strong>卡住</strong>点“提示”看下一步，或点“开花”自动种一朵正确的花。开花整轮最多 3 次。</li>
       </ul>
     </div>
@@ -941,8 +891,6 @@
     const resultBody = document.querySelector("#resultBody");
     const resultPrimaryBtn = document.querySelector("#resultPrimaryBtn");
     const resultSecondaryBtn = document.querySelector("#resultSecondaryBtn");
-    const soilModeBtn = document.querySelector("#soilModeBtn");
-    const flowerModeBtn = document.querySelector("#flowerModeBtn");
     const hintBtn = document.querySelector("#hintBtn");
     const bloomBtn = document.querySelector("#bloomBtn");
     const restartBtn = document.querySelector("#restartBtn");
@@ -956,7 +904,6 @@
     const fireworksCtx = fireworksCanvas.getContext("2d");
 
     let levelIndex = 0;
-    let marks = [];
     let flowers = [];
     let maxMistakes = 3;
     const maxBlooms = 3;
@@ -965,7 +912,6 @@
     let startedAt = Date.now();
     let won = false;
     let hintCell = null;
-    let inputMode = "flower";
     let runCleared = false;
     let runFailed = false;
     let resultAction = null;
@@ -976,7 +922,6 @@
       levelIndex = index;
       const level = levels[levelIndex];
       const rule = segmentRuleFor(levelIndex);
-      marks = Array.from({ length: level.size }, () => Array(level.size).fill(false));
       flowers = Array.from({ length: level.size }, () => Array(level.size).fill(false));
       startedAt = Date.now();
       won = false;
@@ -990,7 +935,7 @@
       boardEl.style.setProperty("--size", level.size);
       buildLevelButtons();
       render();
-      setMessage(`${level.name}：当前是“种花”模式。确定格子有花时直接点；需要做笔记时切到“排除”。`);
+      setMessage(`${level.name}：直接点击格子种花。把每个彩色花圃、每一行、每一列都填对。`);
     }
 
     function buildLevelButtons() {
@@ -1068,7 +1013,6 @@
           tile.dataset.row = row;
           tile.dataset.col = col;
           tile.setAttribute("aria-label", `第 ${row + 1} 行，第 ${col + 1} 列`);
-          if (marks[row][col]) tile.classList.add("soil");
           if (flowers[row][col]) {
             tile.classList.add("flower");
             tile.innerHTML = '<span class="flower-icon" aria-hidden="true">✿</span>';
@@ -1076,75 +1020,31 @@
           if (hintCell && hintCell[0] === row && hintCell[1] === col) {
             tile.classList.add("hint");
           }
-          tile.addEventListener("click", () => handleTileTap(row, col));
-          tile.addEventListener("dblclick", (event) => {
-            event.preventDefault();
-            plant(row, col);
-          });
+          tile.addEventListener("click", () => plant(row, col));
           boardEl.appendChild(tile);
         }
       }
 
       updateProgress();
-      updateModeButtons();
       resizeFireworks();
       levelRange.textContent = `第 ${segmentIndex(levelIndex) + 1} 段 ${segmentLabel(levelIndex)} | ${maxMistakes - mistakes}/${rule.lives} 条命`;
-    }
-
-    function setMode(mode) {
-      inputMode = mode;
-      updateModeButtons();
-      setMessage(mode === "flower"
-        ? "种花模式：只有在你确定这里必须有花时，才点击格子。"
-        : "排除模式：点击不可能有花的格子。排除标记不会扣生命。");
-    }
-
-    function updateModeButtons() {
-      soilModeBtn.classList.toggle("active", inputMode === "soil");
-      flowerModeBtn.classList.toggle("active", inputMode === "flower");
-      soilModeBtn.setAttribute("aria-pressed", inputMode === "soil" ? "true" : "false");
-      flowerModeBtn.setAttribute("aria-pressed", inputMode === "flower" ? "true" : "false");
-    }
-
-    function handleTileTap(row, col) {
-      if (runFailed) return;
-      if (inputMode === "flower") {
-        plant(row, col);
-        return;
-      }
-      markSoil(row, col);
-    }
-
-    function markSoil(row, col) {
-      if (won || flowers[row][col]) return;
-      marks[row][col] = !marks[row][col];
-      hintCell = null;
-      render();
     }
 
     function plant(row, col) {
       if (won || runFailed) return;
       if (flowers[row][col]) {
-        flowers[row][col] = false;
-        render();
-        setMessage("花已经拿起。继续保持每行、每列、每个花圃都只有 1 朵花。");
+        setMessage("这里已经种过花了，换一个格子。");
         return;
       }
 
       const level = levels[levelIndex];
       const correct = level.solution.some(([r, c]) => r === row && c === col);
       if (!correct) {
-        countMistake(row, col, "这个位置不符合答案。");
-        return;
-      }
-
-      if (violatesVisibleRules(row, col)) {
-        countMistake(row, col, "这朵花虽然在答案里，但现在和已有花冲突。先移走冲突的花。");
+        countMistake(row, col, "这个位置不对。");
         return;
       }
 
       flowers[row][col] = true;
-      marks[row][col] = false;
       hintCell = null;
       if (isSolved()) {
         won = true;
@@ -1212,7 +1112,7 @@
         setMessage("本段命用完了。看完提示后点击“重新挑战本段”从当前段起点开始。");
         showResult(
           "本段失败",
-          `${reason} 你已经用完本段的全部生命。本段需要从起点重新开始。建议先用“排除”把同一行、同一列、相邻格都标掉，不要急着猜花的位置。`,
+          `${reason} 你已经用完本段的全部生命。本段需要从起点重新开始。建议先观察花圃颜色，再决定下一朵花放哪里。`,
           "重新挑战本段",
           restartSegment,
           "先看棋盘",
@@ -1355,9 +1255,9 @@
     function levelTip(nextLevelNumber) {
       const tips = [
         "提示：优先看形状最窄的彩色花圃，它通常候选格更少。",
-        "提示：种下一朵花后，马上排除同一行、同一列和周围 8 个方向。",
+        "提示：种下一朵花后，继续观察同一行、同一列和周围相邻格子。",
         "提示：不要只盯颜色，也要看行列；一行只能留一个可能位置。",
-        "提示：如果两个候选格互相相邻，它们不可能同时成立，可以顺着这个冲突继续排除。"
+        "提示：如果两个候选格互相相邻，就先检查哪一个更合理。"
       ];
       return tips[nextLevelNumber % tips.length];
     }
@@ -1387,15 +1287,14 @@
       hintCell = target;
       const [row, col] = target;
       const region = level.regions[row][col] + 1;
-      setMode("flower");
-      setMessage(`提示：已经切到“种花”模式。点击高亮格子：第 ${row + 1} 行第 ${col + 1} 列，这是第 ${region} 个彩色花圃的花。`);
+      setMessage(`提示：点击高亮格子：第 ${row + 1} 行第 ${col + 1} 列，这是第 ${region} 个彩色花圃的花。`);
       render();
     }
 
     function bloomOne() {
       if (won || runFailed) return;
       if (bloomsUsed >= maxBlooms) {
-        setMessage("本轮开花次数已经用完。接下来只能靠排除和提示继续推理。");
+        setMessage("本轮开花次数已经用完。接下来只能靠提示继续推理。");
         render();
         return;
       }
@@ -1411,7 +1310,7 @@
     function nextNudge(row, col) {
       const level = levels[levelIndex];
       const region = level.regions[row][col] + 1;
-      return `第 ${region} 个花圃种对了。现在可以把同一行、同一列和周围相邻格子标记为“不可能”。`;
+      return `第 ${region} 个花圃种对了。继续找下一朵花的位置。`;
     }
 
     function nextLevel() {
@@ -1444,8 +1343,6 @@
       if (action) action();
     });
     resultSecondaryBtn.addEventListener("click", closeResult);
-    soilModeBtn.addEventListener("click", () => setMode("soil"));
-    flowerModeBtn.addEventListener("click", () => setMode("flower"));
     hintBtn.addEventListener("click", showHint);
     bloomBtn.addEventListener("click", bloomOne);
     restartBtn.addEventListener("click", () => {
@@ -1471,8 +1368,6 @@
         else restartSegment();
       }
       if (key === "n") nextLevel();
-      if (key === "1") setMode("soil");
-      if (key === "2") setMode("flower");
     });
 
     closePanel();
