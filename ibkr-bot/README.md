@@ -4,6 +4,8 @@ This is a conservative Python skeleton for IBKR robot trading. It is designed to
 
 It is not investment advice and it does not include a profitable strategy. The goal is trading infrastructure: connection checks, strategy interface, risk gates, execution adapter, order audit logs, and notifications.
 
+Maintenance notes for future agents live in [`agents.md`](agents.md).
+
 ## What Is Included
 
 - `ib_insync` based IB Gateway / TWS adapter
