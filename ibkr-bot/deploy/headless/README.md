@@ -1,6 +1,13 @@
-# Headless IB Gateway Deployment
+# Linux Headless IB Gateway Deployment
 
-This notes the deployment pattern tested on a Debian 12 server without a physical GUI. The intent is to keep IB Gateway, IBC, logs, settings, and the trading bot under a normal user home directory, while installing only the minimal virtual display package at the system level.
+This is a Linux-only deployment guide for running IB Gateway, IBC, and the
+Python IBKR bot on a headless server. It was verified on Debian 12 without a
+physical GUI. Commands assume a Linux shell, `apt`, `bash`, standard Unix file
+permissions, and `Xvfb`.
+
+The intent is to keep IB Gateway, IBC, logs, settings, and the trading bot under
+a normal user home directory, while installing only the minimal virtual display
+package at the system level.
 
 ## Tested Host
 
@@ -8,6 +15,30 @@ This notes the deployment pattern tested on a Debian 12 server without a physica
 - Install user: `fwd`
 - Install root: `/home/fwd/ibkr`
 - Available `/home/fwd` space during install: 177 GB
+
+## Migration Variables
+
+The examples use the verified host's paths. For another Linux server, choose
+these values first and keep them consistent:
+
+| Variable | Verified value | Purpose |
+|---|---|---|
+| `INSTALL_USER` | `fwd` | Linux user that owns IB Gateway, IBC, logs, and bot files |
+| `IBKR_HOME` | `/home/fwd/ibkr` | User-owned install root for Gateway, IBC, logs, and settings |
+| `REPO_DIR` | `/home/fwd/work/ai-games-wt-codex-ibkr` | Git checkout containing `ibkr-bot` |
+| `TWS_MAJOR_VRSN` | `1045` | IB Gateway major version used by IBC path conventions |
+| `DISPLAY` | `:99` | Xvfb display used for the headless login window |
+
+The provided scripts default to the verified values but support overrides:
+
+```bash
+export IBKR_HOME=/home/your-user/ibkr
+export TWS_MAJOR_VRSN=1045
+export DISPLAY=:99
+```
+
+Run the scripts as `INSTALL_USER`, not as root. Use `sudo` only for Linux system
+packages such as `xvfb` or optional `x11vnc`.
 
 Observed installed size:
 
@@ -54,10 +85,13 @@ Bind VNC to localhost and access it through an SSH tunnel. Do not expose VNC or 
 From the repository checkout on the target server:
 
 ```bash
+export IBKR_HOME=/home/fwd/ibkr
+export TWS_MAJOR_VRSN=1045
+
 cd /home/fwd/work/ai-games-wt-codex-ibkr/ibkr-bot
 
 # Installs IB Gateway, IBC, config templates, executable permissions,
-# and the IBC Gateway compatibility symlink under /home/fwd/ibkr.
+# and the IBC Gateway compatibility symlink under $IBKR_HOME.
 ./deploy/headless/install-userland.sh
 ```
 
@@ -74,7 +108,7 @@ sudo apt-get install -y xvfb
 Start Paper Gateway:
 
 ```bash
-/home/fwd/ibkr/start-gateway-paper.sh
+"$IBKR_HOME/start-gateway-paper.sh"
 ```
 
 For a long-running shell session, use `nohup`, `setsid`, `tmux`, `screen`, or a systemd user
@@ -98,6 +132,48 @@ ss -ltnp | grep -E ':(4002|4001|7496|7497)\b' || true
 If you need to interact with the first login window, install and run a localhost-only VNC
 server or another X11 viewing method against `DISPLAY=:99`, then complete IBKR Paper login
 and second-factor authentication manually.
+
+## Migrating An Existing Installation
+
+For a fresh Linux server, prefer rerunning `install-userland.sh` instead of
+copying binaries. It redownloads the current IB Gateway stable standalone
+installer, installs IBC, applies permissions, and recreates the compatibility
+symlink.
+
+If you are moving an already configured host and want to preserve local Gateway
+settings, copy only the user-owned runtime state:
+
+```bash
+rsync -a /home/fwd/ibkr/config/ new-host:/home/fwd/ibkr/config/
+rsync -a /home/fwd/ibkr/settings-paper/ new-host:/home/fwd/ibkr/settings-paper/
+```
+
+Treat these directories as sensitive if credentials are ever stored:
+
+- `$IBKR_HOME/config/`
+- `$IBKR_HOME/settings-paper/`
+- bot `.env` files and SQLite databases
+
+Do not commit these runtime files to Git. The repository should keep only
+templates, scripts, and documentation.
+
+Post-migration checklist:
+
+```bash
+command -v Xvfb
+test -x "$IBKR_HOME/start-gateway-paper.sh"
+test -x "$IBKR_HOME/ibc/scripts/ibcstart.sh"
+test -e "$IBKR_HOME/ibgateway/$TWS_MAJOR_VRSN/jars"
+"$IBKR_HOME/start-gateway-paper.sh"
+```
+
+After the login window appears and Paper login is completed, verify the API:
+
+```bash
+ss -ltnp | grep ':4002'
+cd "$REPO_DIR/ibkr-bot"
+ibkr-bot check-connection
+```
 
 ## Install IB Gateway
 
