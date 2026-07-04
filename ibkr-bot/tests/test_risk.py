@@ -22,6 +22,7 @@ def settings(**overrides: object) -> Settings:
         allow_market_orders=False,
         database_path=Path(":memory:"),
         alert_command=None,
+        rotation_symbols=(),
     )
     values.update(overrides)
     return Settings(**values)
@@ -70,4 +71,3 @@ def test_rejects_projected_position_limit() -> None:
     decision = RiskManager(settings()).evaluate(intent, state)
     assert not decision.accepted
     assert any("max_position_notional" in reason for reason in decision.reasons)
-

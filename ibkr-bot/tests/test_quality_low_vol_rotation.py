@@ -4,7 +4,7 @@ from ibkr_bot.strategy.quality_low_vol_rotation import QualityLowVolRotationStra
 
 
 def bars(values: list[float]) -> list[Bar]:
-    return [Bar(timestamp=str(index), close=value) for index, value in enumerate(values)]
+    return [Bar(timestamp=str(index), close=value, volume=5_000_000) for index, value in enumerate(values)]
 
 
 def smooth_series(length: int = 260) -> list[float]:

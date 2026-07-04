@@ -11,6 +11,8 @@ It does not require fundamentals or a separate market-data vendor. In this repos
 
 The goal is not to reproduce an institutional factor portfolio exactly. The goal is to get a usable approximation that can run on the data already available in the bot.
 
+The strategy ranks a built-in liquid ETF catalog by default. You can override that catalog with `IBKR_ROTATION_SYMBOLS`, but you do not need to maintain a universe manually for the default path.
+
 ## Rule
 
 Each month, rank the configured universe by a composite score:
@@ -19,8 +21,10 @@ Each month, rank the configured universe by a composite score:
 - fraction of positive daily returns
 - annualized realized volatility
 - maximum drawdown
+- average daily volume over the recent window
 
 Select the top-ranked symbol only if it clears the minimum score and the volatility cap.
+Symbols with insufficient average volume are discarded before ranking.
 
 Trading behavior:
 
@@ -34,7 +38,9 @@ Default values in code:
 
 - lookback: 252 bars
 - volatility window: 63 bars
+- volume window: 20 bars
 - volatility cap: 20% annualized
+- minimum average volume: 1,000,000 shares
 - quantity: 1 share
 
 These defaults are intentionally conservative.

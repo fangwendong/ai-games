@@ -11,6 +11,7 @@ from ibkr_bot.models import ContractSpec, PositionSnapshot, QuoteSnapshot, RiskS
 from ibkr_bot.risk import RiskManager
 from ibkr_bot.storage import Store
 from ibkr_bot.strategy import (
+    DEFAULT_ETF_CATALOG,
     MovingAverageCrossStrategy,
     QualityLowVolRotationStrategy,
     RotationPlan,
@@ -38,6 +39,7 @@ def main(argv: list[str] | None = None) -> int:
         choices=["volatility_managed_trend", "moving_average_cross", "quality_low_vol_rotation"],
     )
     rebalance = subparsers.add_parser("rebalance")
+    rebalance.add_argument("--symbol", action="append", default=None)
     rebalance.add_argument(
         "--strategy",
         default="quality_low_vol_rotation",
@@ -48,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
         "--symbol",
         action="append",
         default=None,
-        help="override the backtest universe; defaults to IBKR_SYMBOLS",
+        help="override the backtest universe; defaults to the automatic ETF catalog",
     )
     backtest.add_argument("--duration", default="5 Y")
     backtest.add_argument("--capital", type=float, default=10_000.0)
@@ -115,14 +117,15 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "scan":
         store.init_db()
-        symbols = _resolve_symbol_list(settings.symbols, args.symbol)
+        rotation_symbols = _resolve_rotation_symbols(settings, args.symbol)
         with IbkrBroker(settings) as broker:
             positions = broker.positions()
             if args.strategy == "quality_low_vol_rotation":
-                plan = _build_rotation_plan(broker, store, symbols, positions)
+                plan = _build_rotation_plan(broker, store, rotation_symbols, positions)
                 alerts.send(_format_rotation_scan(plan))
                 return 0
 
+            symbols = _resolve_symbol_list(settings.symbols, args.symbol)
             strategy = _build_strategy(args.strategy)
             messages: list[str] = []
             for symbol in symbols:
@@ -146,10 +149,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "rebalance":
         store.init_db()
-        symbols = _resolve_symbol_list(settings.symbols, None)
+        rotation_symbols = _resolve_rotation_symbols(settings, args.symbol)
         with IbkrBroker(settings) as broker:
             positions = broker.positions()
-            plan = _build_rotation_plan(broker, store, symbols, positions)
+            plan = _build_rotation_plan(broker, store, rotation_symbols, positions)
             if not plan.orders:
                 alerts.send(_format_rotation_scan(plan))
                 return 0
@@ -157,12 +160,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "backtest":
-        symbols = _resolve_symbol_list(settings.symbols, args.symbol)
+        symbols = _resolve_rotation_symbols(settings, args.symbol)
         with IbkrBroker(settings) as broker:
-            universe = {
-                symbol: broker.historical_bars(ContractSpec(symbol=symbol), duration=args.duration)
-                for symbol in symbols
-            }
+            universe = {}
+            for symbol in symbols:
+                bars = _load_historical_bars(broker, symbol, args.duration)
+                if bars:
+                    universe[symbol] = bars
         summary, _curve = run_quality_low_vol_rotation_backtest(
             universe=universe,
             strategy=QualityLowVolRotationStrategy(),
@@ -197,6 +201,14 @@ def _resolve_symbol_list(defaults: tuple[str, ...], overrides: list[str] | None)
     return [symbol.upper() for symbol in defaults]
 
 
+def _resolve_rotation_symbols(settings: Settings, overrides: list[str] | None) -> list[str]:
+    if overrides:
+        return [symbol.strip().upper() for symbol in overrides if symbol.strip()]
+    if settings.rotation_symbols:
+        return [symbol.upper() for symbol in settings.rotation_symbols]
+    return list(DEFAULT_ETF_CATALOG)
+
+
 def _build_strategy(name: str):
     if name == "moving_average_cross":
         return MovingAverageCrossStrategy()
@@ -214,7 +226,10 @@ def _build_rotation_plan(
     strategy = QualityLowVolRotationStrategy()
     universe: dict[str, list[Bar]] = {}
     for symbol in symbols:
-        bars = broker.historical_bars(ContractSpec(symbol=symbol))
+        bars = _load_historical_bars(broker, symbol, "30 D")
+        if not bars:
+            store.record_signal(symbol, strategy.name, {"status": "unavailable"})
+            continue
         universe[symbol] = bars
         score = strategy.score(symbol, bars)
         payload = {
@@ -228,6 +243,13 @@ def _build_rotation_plan(
         }
         store.record_signal(symbol, strategy.name, payload)
     return strategy.build_plan(universe, positions)
+
+
+def _load_historical_bars(broker: IbkrBroker, symbol: str, duration: str) -> list[Bar]:
+    try:
+        return broker.historical_bars(ContractSpec(symbol=symbol), duration=duration)
+    except Exception:
+        return []
 
 
 def _execute_rotation_plan(
@@ -264,7 +286,8 @@ def _format_rotation_scan(plan: object) -> str:
         lines.append(
             f"{marker} {candidate.symbol}: score={candidate.score:.4f} "
             f"ret={candidate.trailing_return:.3%} vol={candidate.annualized_volatility:.3%} "
-            f"dd={candidate.max_drawdown:.3%} consistency={candidate.consistency:.3f}"
+            f"dd={candidate.max_drawdown:.3%} consistency={candidate.consistency:.3f} "
+            f"avg_vol={candidate.average_volume:.0f}"
         )
     if not lines:
         return "IBKR bot: no rotation candidates"

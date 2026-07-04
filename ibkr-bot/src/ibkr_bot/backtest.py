@@ -54,7 +54,7 @@ def run_quality_low_vol_rotation_backtest(
     }
 
     price_map = {
-        symbol: {bar_date: close for bar_date, close in series}
+        symbol: {bar_date: close for bar_date, close, _volume in series}
         for symbol, series in normalized.items()
     }
 
@@ -107,17 +107,17 @@ def run_quality_low_vol_rotation_backtest(
     return summary, tuple(curve)
 
 
-def _normalize_bars(bars: list[Bar]) -> list[tuple[date, float]]:
-    normalized: list[tuple[date, float]] = []
+def _normalize_bars(bars: list[Bar]) -> list[tuple[date, float, float]]:
+    normalized: list[tuple[date, float, float]] = []
     for bar in bars:
-        normalized.append((_parse_timestamp(bar.timestamp), bar.close))
+        normalized.append((_parse_timestamp(bar.timestamp), bar.close, float(bar.volume or 0.0)))
     normalized.sort(key=lambda item: item[0])
-    deduped: list[tuple[date, float]] = []
-    for bar_date, close in normalized:
+    deduped: list[tuple[date, float, float]] = []
+    for bar_date, close, volume in normalized:
         if deduped and deduped[-1][0] == bar_date:
-            deduped[-1] = (bar_date, close)
+            deduped[-1] = (bar_date, close, volume)
         else:
-            deduped.append((bar_date, close))
+            deduped.append((bar_date, close, volume))
     return deduped
 
 
@@ -134,12 +134,12 @@ def _parse_timestamp(timestamp: str) -> date:
         raise ValueError(f"unsupported bar timestamp: {timestamp!r}") from exc
 
 
-def _common_dates(universe: dict[str, list[tuple[date, float]]]) -> list[date]:
+def _common_dates(universe: dict[str, list[tuple[date, float, float]]]) -> list[date]:
     if not universe:
         return []
-    common_dates = {bar_date for bar_date, _ in next(iter(universe.values()))}
+    common_dates = {bar_date for bar_date, _close, _volume in next(iter(universe.values()))}
     for series in universe.values():
-        common_dates &= {bar_date for bar_date, _ in series}
+        common_dates &= {bar_date for bar_date, _close, _volume in series}
     return sorted(common_dates)
 
 
@@ -157,13 +157,13 @@ def _month_end_dates(dates: list[date]) -> list[date]:
 
 def _select_at_date(
     strategy: QualityLowVolRotationStrategy,
-    universe: dict[str, list[tuple[date, float]]],
+    universe: dict[str, list[tuple[date, float, float]]],
     rebalance_date: date,
 ) -> str | None:
     bars_by_symbol = {
         symbol: [
-            Bar(timestamp=bar_date.isoformat(), close=close)
-            for bar_date, close in series
+            Bar(timestamp=bar_date.isoformat(), close=close, volume=volume)
+            for bar_date, close, volume in series
             if bar_date <= rebalance_date
         ]
         for symbol, series in universe.items()

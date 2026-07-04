@@ -49,6 +49,7 @@ When changing trading behavior, update these together:
 - The documented headless deployment is Linux on Debian-class systems.
 - Gateway and IBC are expected to live under `/home/fwd/ibkr` in the current setup.
 - The bot connects to `127.0.0.1:4002` for paper trading unless configuration says otherwise.
+- The monthly rotation path uses an automatic liquid ETF catalog by default; `IBKR_ROTATION_SYMBOLS` is only for overrides.
 
 ## Things To Keep Stable
 

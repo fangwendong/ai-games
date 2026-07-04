@@ -11,6 +11,7 @@ from ibkr_bot.models import PositionSnapshot
 class Bar:
     timestamp: str
     close: float
+    volume: float | None = None
 
 
 class Strategy(ABC):

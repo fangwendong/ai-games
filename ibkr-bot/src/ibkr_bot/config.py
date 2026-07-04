@@ -44,6 +44,7 @@ class Settings:
     allow_market_orders: bool
     database_path: Path
     alert_command: str | None
+    rotation_symbols: tuple[str, ...]
 
     @property
     def live_trading_enabled(self) -> bool:
@@ -57,6 +58,11 @@ def load_settings(env_file: str | Path | None = ".env") -> Settings:
     symbols = tuple(
         symbol.strip().upper()
         for symbol in os.getenv("IBKR_SYMBOLS", "SPY,QQQ").split(",")
+        if symbol.strip()
+    )
+    rotation_symbols = tuple(
+        symbol.strip().upper()
+        for symbol in os.getenv("IBKR_ROTATION_SYMBOLS", "").split(",")
         if symbol.strip()
     )
     trading_mode = os.getenv("IBKR_TRADING_MODE", "paper").strip().lower()
@@ -79,5 +85,5 @@ def load_settings(env_file: str | Path | None = ".env") -> Settings:
         allow_market_orders=_bool_env("ALLOW_MARKET_ORDERS", False),
         database_path=Path(os.getenv("DATABASE_PATH", "bot.sqlite3")),
         alert_command=os.getenv("ALERT_COMMAND") or None,
+        rotation_symbols=rotation_symbols,
     )
-

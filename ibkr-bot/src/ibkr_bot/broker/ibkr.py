@@ -94,7 +94,10 @@ class IbkrBroker(AbstractContextManager["IbkrBroker"]):
         )
         if not bars:
             return []
-        return [Bar(timestamp=str(bar.date), close=float(bar.close)) for bar in bars]
+        return [
+            Bar(timestamp=str(bar.date), close=float(bar.close), volume=float(getattr(bar, "volume", 0.0) or 0.0))
+            for bar in bars
+        ]
 
     def quote(self, contract: ContractSpec) -> QuoteSnapshot:
         from ib_insync import Stock

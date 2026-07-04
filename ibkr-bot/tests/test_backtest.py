@@ -7,7 +7,10 @@ from ibkr_bot.strategy.quality_low_vol_rotation import QualityLowVolRotationStra
 
 def bars(values: list[float]) -> list[Bar]:
     start = date(2023, 1, 1)
-    return [Bar(timestamp=(start + timedelta(days=index)).isoformat(), close=value) for index, value in enumerate(values)]
+    return [
+        Bar(timestamp=(start + timedelta(days=index)).isoformat(), close=value, volume=5_000_000)
+        for index, value in enumerate(values)
+    ]
 
 
 def smooth_series(length: int = 300) -> list[float]:
@@ -24,7 +27,12 @@ def noisy_series(length: int = 300) -> list[float]:
 
 
 def test_backtest_prefers_smoother_series() -> None:
-    strategy = QualityLowVolRotationStrategy(lookback=60, volatility_window=20, max_annualized_volatility=1.0)
+    strategy = QualityLowVolRotationStrategy(
+        lookback=60,
+        volatility_window=20,
+        max_annualized_volatility=1.0,
+        min_score=-10.0,
+    )
     summary, curve = run_quality_low_vol_rotation_backtest(
         {
             "SPY": bars(smooth_series()),
