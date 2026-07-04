@@ -27,6 +27,8 @@ ibkr-bot init-db
 ibkr-bot check-connection
 ibkr-bot quote --symbol SPY
 ibkr-bot scan
+ibkr-bot scan --strategy quality_low_vol_rotation
+ibkr-bot rebalance
 ibkr-bot trade-once --symbol SPY
 ```
 
@@ -39,7 +41,7 @@ When changing trading behavior, update these together:
 3. Model types in `src/ibkr_bot/models.py`
 4. Risk checks in `src/ibkr_bot/risk.py`
 5. Tests in `tests/`
-6. User docs in `README.md`
+6. User docs in `README.md` and `docs/`
 
 ## Deployment Notes
 

@@ -6,10 +6,16 @@ import sys
 from ibkr_bot.alerts import AlertSink
 from ibkr_bot.broker import IbkrBroker
 from ibkr_bot.config import Settings, load_settings
-from ibkr_bot.models import ContractSpec, QuoteSnapshot, RiskState
+from ibkr_bot.models import ContractSpec, PositionSnapshot, QuoteSnapshot, RiskState
 from ibkr_bot.risk import RiskManager
 from ibkr_bot.storage import Store
-from ibkr_bot.strategy import MovingAverageCrossStrategy, VolatilityManagedTrendStrategy
+from ibkr_bot.strategy import (
+    MovingAverageCrossStrategy,
+    QualityLowVolRotationStrategy,
+    RotationPlan,
+    VolatilityManagedTrendStrategy,
+)
+from ibkr_bot.strategy.base import Bar
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -28,7 +34,13 @@ def main(argv: list[str] | None = None) -> int:
     scan_parser.add_argument(
         "--strategy",
         default="volatility_managed_trend",
-        choices=["volatility_managed_trend", "moving_average_cross"],
+        choices=["volatility_managed_trend", "moving_average_cross", "quality_low_vol_rotation"],
+    )
+    rebalance = subparsers.add_parser("rebalance")
+    rebalance.add_argument(
+        "--strategy",
+        default="quality_low_vol_rotation",
+        choices=["quality_low_vol_rotation"],
     )
     trade_once = subparsers.add_parser("trade-once")
     trade_once.add_argument("--symbol", default=None)
@@ -89,9 +101,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "scan":
         store.init_db()
         symbols = _resolve_symbol_list(settings.symbols, args.symbol)
-        strategy = _build_strategy(args.strategy)
         with IbkrBroker(settings) as broker:
             positions = broker.positions()
+            if args.strategy == "quality_low_vol_rotation":
+                plan = _build_rotation_plan(broker, store, symbols, positions)
+                alerts.send(_format_rotation_scan(plan))
+                return 0
+
+            strategy = _build_strategy(args.strategy)
             messages: list[str] = []
             for symbol in symbols:
                 bars = broker.historical_bars(ContractSpec(symbol=symbol))
@@ -110,6 +127,18 @@ def main(argv: list[str] | None = None) -> int:
                     f"bars={len(bars)} reason={intent.reason}"
                 )
         alerts.send("\n".join(messages) if messages else "IBKR bot: scan returned no symbols")
+        return 0
+
+    if args.command == "rebalance":
+        store.init_db()
+        symbols = _resolve_symbol_list(settings.symbols, None)
+        with IbkrBroker(settings) as broker:
+            positions = broker.positions()
+            plan = _build_rotation_plan(broker, store, symbols, positions)
+            if not plan.orders:
+                alerts.send(_format_rotation_scan(plan))
+                return 0
+            _execute_rotation_plan(settings, store, alerts, broker, plan)
         return 0
 
     if args.command in {"trade-once", "run-once"}:
@@ -144,6 +173,72 @@ def _build_strategy(name: str):
     if name == "volatility_managed_trend":
         return VolatilityManagedTrendStrategy()
     raise ValueError(f"unknown strategy: {name}")
+
+
+def _build_rotation_plan(
+    broker: IbkrBroker,
+    store: Store,
+    symbols: list[str],
+    positions: dict[str, PositionSnapshot],
+) -> RotationPlan:
+    strategy = QualityLowVolRotationStrategy()
+    universe: dict[str, list[Bar]] = {}
+    for symbol in symbols:
+        bars = broker.historical_bars(ContractSpec(symbol=symbol))
+        universe[symbol] = bars
+        score = strategy.score(symbol, bars)
+        payload = {
+            "bar_count": len(bars),
+            "last_close": bars[-1].close if bars else None,
+            "score": score.score if score else None,
+            "trailing_return": score.trailing_return if score else None,
+            "annualized_volatility": score.annualized_volatility if score else None,
+            "max_drawdown": score.max_drawdown if score else None,
+            "consistency": score.consistency if score else None,
+        }
+        store.record_signal(symbol, strategy.name, payload)
+    return strategy.build_plan(universe, positions)
+
+
+def _execute_rotation_plan(
+    settings: Settings,
+    store: Store,
+    alerts: AlertSink,
+    broker: IbkrBroker,
+    plan: RotationPlan,
+) -> None:
+    messages: list[str] = []
+    for order in plan.orders:
+        state = RiskState(
+            positions=broker.positions(),
+            orders_today=store.orders_today(),
+            realized_pnl_today=0.0,
+        )
+        decision = RiskManager(settings).evaluate(order, state)
+        broker_order_id = None
+        if decision.accepted and not settings.dry_run:
+            broker_order_id = broker.place_order(order)
+        store.record_order_intent(order, decision, settings.dry_run, broker_order_id)
+        messages.append(
+            f"{order.contract.symbol}: {order.side.value} {order.quantity} "
+            f"@{order.limit_price}; accepted={decision.accepted}; reasons={list(decision.reasons)}"
+        )
+    alerts.send("\n".join(messages) if messages else "IBKR bot: rotation produced no orders")
+
+
+def _format_rotation_scan(plan: object) -> str:
+    lines: list[str] = []
+    selected = plan.selected_symbol
+    for candidate in plan.candidates:
+        marker = "*" if candidate.symbol == selected else " "
+        lines.append(
+            f"{marker} {candidate.symbol}: score={candidate.score:.4f} "
+            f"ret={candidate.trailing_return:.3%} vol={candidate.annualized_volatility:.3%} "
+            f"dd={candidate.max_drawdown:.3%} consistency={candidate.consistency:.3f}"
+        )
+    if not lines:
+        return "IBKR bot: no rotation candidates"
+    return "\n".join(lines)
 
 
 def _trade_once(settings: Settings, store: Store, alerts: AlertSink, symbol: str, strategy_name: str) -> None:

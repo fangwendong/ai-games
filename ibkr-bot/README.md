@@ -6,12 +6,14 @@ It is not investment advice and it does not include a profitable strategy. The g
 
 Maintenance notes for future agents live in [`agents.md`](agents.md).
 The low-risk default strategy is documented in [`docs/volatility_managed_trend.md`](docs/volatility_managed_trend.md).
+The monthly rotation variant is documented in [`docs/quality_low_vol_rotation.md`](docs/quality_low_vol_rotation.md).
 
 ## What Is Included
 
 - `ib_insync` based IB Gateway / TWS adapter
 - Paper-first configuration with live trading disabled by default
 - Strategy interface plus a small moving-average crossover example and a low-risk volatility-managed trend strategy
+- Monthly quality-plus-low-volatility rotation for small accounts
 - Risk manager for notional limits, position limits, order frequency, daily loss, and market-order blocking
 - SQLite audit log for signals, orders, fills, and risk events
 - CLI commands for DB initialization, connection checks, live quotes, strategy scans, and one dry-run strategy pass
@@ -44,6 +46,8 @@ ibkr-bot balance
 ibkr-bot positions
 ibkr-bot quote --symbol SPY
 ibkr-bot scan
+ibkr-bot scan --strategy quality_low_vol_rotation
+ibkr-bot rebalance
 ibkr-bot trade-once --symbol SPY
 ibkr-bot run-once --symbol SPY
 ```
@@ -53,6 +57,8 @@ ibkr-bot run-once --symbol SPY
 `quote` fetches the current snapshot for one symbol. `scan` walks the configured symbol list, records the signal history, and prints the current strategy verdict for each symbol. `trade-once` runs one strategy evaluation, applies risk checks, and optionally submits an order.
 
 The default strategy is `volatility_managed_trend`. It is long-only, uses a long moving-average trend filter, and stays out of the market when the recent realized volatility is above a fixed cap. That makes it easier to keep the bot conservative for a small account. You can switch back to the moving-average demo with `--strategy moving_average_cross`.
+
+The rotation model is `quality_low_vol_rotation`. It ranks the configured universe once a month, using return consistency, trailing return, volatility, and drawdown, then rotates into the top symbol or moves to cash when nothing clears the filters.
 
 `run-once` stays as a compatibility alias for `trade-once`. It remains in dry-run mode unless `IBKR_DRY_RUN=false`. Live trading is also blocked unless `IBKR_ALLOW_LIVE=true`, and the default `.env.example` does not allow it.
 
