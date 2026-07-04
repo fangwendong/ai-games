@@ -1,4 +1,4 @@
-from ibkr_bot.main import _format_quote, _resolve_symbol, _resolve_symbol_list
+from ibkr_bot.main import _format_quote, _format_rows, _resolve_symbol, _resolve_symbol_list
 from ibkr_bot.models import QuoteSnapshot
 
 
@@ -35,3 +35,17 @@ def test_format_quote_includes_core_fields() -> None:
     assert "market=499.14" in text
     assert "volume=123456" in text
     assert "time=2026-07-04 10:15:00" in text
+
+
+def test_format_rows_handles_tabular_output() -> None:
+    class Row:
+        account = "DU123"
+        tag = "NetLiquidation"
+        value = "100000.00"
+        currency = "USD"
+
+    text = _format_rows([Row()], ["account", "tag", "value", "currency"])
+
+    assert "account" in text
+    assert "NetLiquidation" in text
+    assert "100000.00" in text

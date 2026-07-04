@@ -5,12 +5,13 @@ This is a conservative Python skeleton for IBKR robot trading. It is designed to
 It is not investment advice and it does not include a profitable strategy. The goal is trading infrastructure: connection checks, strategy interface, risk gates, execution adapter, order audit logs, and notifications.
 
 Maintenance notes for future agents live in [`agents.md`](agents.md).
+The low-risk default strategy is documented in [`docs/volatility_managed_trend.md`](docs/volatility_managed_trend.md).
 
 ## What Is Included
 
 - `ib_insync` based IB Gateway / TWS adapter
 - Paper-first configuration with live trading disabled by default
-- Strategy interface plus a small moving-average crossover example
+- Strategy interface plus a small moving-average crossover example and a low-risk volatility-managed trend strategy
 - Risk manager for notional limits, position limits, order frequency, daily loss, and market-order blocking
 - SQLite audit log for signals, orders, fills, and risk events
 - CLI commands for DB initialization, connection checks, live quotes, strategy scans, and one dry-run strategy pass
@@ -38,13 +39,20 @@ Configure IB Gateway or TWS:
 ```bash
 ibkr-bot init-db
 ibkr-bot check-connection
+ibkr-bot account
+ibkr-bot balance
+ibkr-bot positions
 ibkr-bot quote --symbol SPY
 ibkr-bot scan
 ibkr-bot trade-once --symbol SPY
 ibkr-bot run-once --symbol SPY
 ```
 
+`account` shows the raw account summary rows from IBKR. `balance` filters that summary down to the main cash, net liquidation, buying power, margin, and PnL fields. `positions` shows the open holdings with quantity, average cost, and notional value.
+
 `quote` fetches the current snapshot for one symbol. `scan` walks the configured symbol list, records the signal history, and prints the current strategy verdict for each symbol. `trade-once` runs one strategy evaluation, applies risk checks, and optionally submits an order.
+
+The default strategy is `volatility_managed_trend`. It is long-only, uses a long moving-average trend filter, and stays out of the market when the recent realized volatility is above a fixed cap. That makes it easier to keep the bot conservative for a small account. You can switch back to the moving-average demo with `--strategy moving_average_cross`.
 
 `run-once` stays as a compatibility alias for `trade-once`. It remains in dry-run mode unless `IBKR_DRY_RUN=false`. Live trading is also blocked unless `IBKR_ALLOW_LIVE=true`, and the default `.env.example` does not allow it.
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ibkr_bot.models import OrderIntent, Side
+from ibkr_bot.models import OrderIntent, PositionSnapshot, Side
 from ibkr_bot.strategy.base import Bar, Strategy
 
 
@@ -13,7 +13,12 @@ class MovingAverageCrossStrategy(Strategy):
     quantity: int = 1
     name: str = "moving_average_cross"
 
-    def generate(self, symbol: str, bars: list[Bar]) -> OrderIntent | None:
+    def generate(
+        self,
+        symbol: str,
+        bars: list[Bar],
+        position: PositionSnapshot | None = None,
+    ) -> OrderIntent | None:
         if len(bars) < self.slow_window + 1:
             return None
 
@@ -47,4 +52,3 @@ class MovingAverageCrossStrategy(Strategy):
 
 def _mean(values: list[float]) -> float:
     return sum(values) / len(values)
-

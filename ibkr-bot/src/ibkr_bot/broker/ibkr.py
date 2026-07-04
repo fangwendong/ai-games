@@ -10,6 +10,21 @@ from ibkr_bot.strategy.base import Bar
 
 
 class IbkrBroker(AbstractContextManager["IbkrBroker"]):
+    BALANCE_TAGS = (
+        "NetLiquidation",
+        "TotalCashValue",
+        "SettledCash",
+        "AccruedCash",
+        "BuyingPower",
+        "AvailableFunds",
+        "ExcessLiquidity",
+        "FullInitMarginReq",
+        "FullMaintMarginReq",
+        "GrossPositionValue",
+        "UnrealizedPnL",
+        "RealizedPnL",
+    )
+
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.ib: Any | None = None
@@ -44,6 +59,11 @@ class IbkrBroker(AbstractContextManager["IbkrBroker"]):
     def account_summary(self) -> list[Any]:
         self._require_connection()
         return list(self.ib.accountSummary(account=self.settings.account or ""))
+
+    def balance(self) -> list[Any]:
+        self._require_connection()
+        tags = set(self.BALANCE_TAGS)
+        return [row for row in self.account_summary() if getattr(row, "tag", "") in tags]
 
     def positions(self) -> dict[str, PositionSnapshot]:
         self._require_connection()

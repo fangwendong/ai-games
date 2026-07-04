@@ -9,7 +9,7 @@ from ibkr_bot.config import Settings, load_settings
 from ibkr_bot.models import ContractSpec, QuoteSnapshot, RiskState
 from ibkr_bot.risk import RiskManager
 from ibkr_bot.storage import Store
-from ibkr_bot.strategy import MovingAverageCrossStrategy
+from ibkr_bot.strategy import MovingAverageCrossStrategy, VolatilityManagedTrendStrategy
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -18,13 +18,32 @@ def main(argv: list[str] | None = None) -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("init-db")
     subparsers.add_parser("check-connection")
+    subparsers.add_parser("account")
+    subparsers.add_parser("balance")
+    subparsers.add_parser("positions")
     quote_parser = subparsers.add_parser("quote")
     quote_parser.add_argument("--symbol", default=None)
     scan_parser = subparsers.add_parser("scan")
     scan_parser.add_argument("--symbol", action="append", default=None)
+    scan_parser.add_argument(
+        "--strategy",
+        default="volatility_managed_trend",
+        choices=["volatility_managed_trend", "moving_average_cross"],
+    )
     trade_once = subparsers.add_parser("trade-once")
     trade_once.add_argument("--symbol", default=None)
-    subparsers.add_parser("run-once")
+    trade_once.add_argument(
+        "--strategy",
+        default="volatility_managed_trend",
+        choices=["volatility_managed_trend", "moving_average_cross"],
+    )
+    run_once = subparsers.add_parser("run-once")
+    run_once.add_argument("--symbol", default=None)
+    run_once.add_argument(
+        "--strategy",
+        default="volatility_managed_trend",
+        choices=["volatility_managed_trend", "moving_average_cross"],
+    )
 
     args = parser.parse_args(argv)
     settings = load_settings(args.env_file)
@@ -42,6 +61,24 @@ def main(argv: list[str] | None = None) -> int:
             print(f"connected to IBKR server_time={broker.server_time()} account_rows={summary_count}")
         return 0
 
+    if args.command == "account":
+        with IbkrBroker(settings) as broker:
+            rows = broker.account_summary()
+        print(_format_rows(rows, ["account", "tag", "value", "currency"]))
+        return 0
+
+    if args.command == "balance":
+        with IbkrBroker(settings) as broker:
+            rows = broker.balance()
+        print(_format_rows(rows, ["account", "tag", "value", "currency"]))
+        return 0
+
+    if args.command == "positions":
+        with IbkrBroker(settings) as broker:
+            rows = list(broker.positions().values())
+        print(_format_rows(rows, ["symbol", "quantity", "market_price", "notional"]))
+        return 0
+
     if args.command == "quote":
         symbol = _resolve_symbol(settings.symbols, args.symbol)
         with IbkrBroker(settings) as broker:
@@ -52,8 +89,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "scan":
         store.init_db()
         symbols = _resolve_symbol_list(settings.symbols, args.symbol)
-        strategy = MovingAverageCrossStrategy()
+        strategy = _build_strategy(args.strategy)
         with IbkrBroker(settings) as broker:
+            positions = broker.positions()
             messages: list[str] = []
             for symbol in symbols:
                 bars = broker.historical_bars(ContractSpec(symbol=symbol))
@@ -62,7 +100,7 @@ def main(argv: list[str] | None = None) -> int:
                     strategy.name,
                     {"bar_count": len(bars), "last_close": bars[-1].close if bars else None},
                 )
-                intent = strategy.generate(symbol, bars)
+                intent = strategy.generate(symbol, bars, positions.get(symbol))
                 if intent is None:
                     messages.append(f"{symbol}: no signal bars={len(bars)}")
                     continue
@@ -77,7 +115,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in {"trade-once", "run-once"}:
         store.init_db()
         symbol = _resolve_symbol(settings.symbols, getattr(args, "symbol", None))
-        _trade_once(settings, store, alerts, symbol)
+        strategy_name = getattr(args, "strategy", "volatility_managed_trend")
+        _trade_once(settings, store, alerts, symbol, strategy_name)
         return 0
 
     return 2
@@ -99,18 +138,27 @@ def _resolve_symbol_list(defaults: tuple[str, ...], overrides: list[str] | None)
     return [symbol.upper() for symbol in defaults]
 
 
-def _trade_once(settings: Settings, store: Store, alerts: AlertSink, symbol: str) -> None:
-    strategy = MovingAverageCrossStrategy()
+def _build_strategy(name: str):
+    if name == "moving_average_cross":
+        return MovingAverageCrossStrategy()
+    if name == "volatility_managed_trend":
+        return VolatilityManagedTrendStrategy()
+    raise ValueError(f"unknown strategy: {name}")
+
+
+def _trade_once(settings: Settings, store: Store, alerts: AlertSink, symbol: str, strategy_name: str) -> None:
+    strategy = _build_strategy(strategy_name)
     risk = RiskManager(settings)
 
     with IbkrBroker(settings) as broker:
+        positions = broker.positions()
         bars = broker.historical_bars(ContractSpec(symbol=symbol))
         store.record_signal(
             symbol,
             strategy.name,
             {"bar_count": len(bars), "last_close": bars[-1].close if bars else None},
         )
-        intent = strategy.generate(symbol, bars)
+        intent = strategy.generate(symbol, bars, positions.get(symbol))
         if intent is None:
             alerts.send(f"IBKR bot: no signal for {symbol}")
             return
@@ -161,6 +209,30 @@ def _format_volume(value: int | None) -> str:
     if value is None:
         return "volume=n/a"
     return f"volume={value}"
+
+
+def _format_rows(rows: list[object], columns: list[str]) -> str:
+    dict_rows: list[dict[str, str]] = []
+    for row in rows:
+        dict_row: dict[str, str] = {}
+        for column in columns:
+            dict_row[column] = str(getattr(row, column, ""))
+        dict_rows.append(dict_row)
+
+    if not dict_rows:
+        return "(no rows)"
+
+    widths = {
+        column: max(len(column), *(len(row[column]) for row in dict_rows))
+        for column in columns
+    }
+    header = "  ".join(column.ljust(widths[column]) for column in columns)
+    divider = "  ".join("-" * widths[column] for column in columns)
+    body = [
+        "  ".join(row[column].ljust(widths[column]) for column in columns)
+        for row in dict_rows
+    ]
+    return "\n".join([header, divider, *body])
 
 
 if __name__ == "__main__":
