@@ -54,6 +54,8 @@ ibkr-bot doctor
 
 For a logged-in live IB Gateway, the common API port is `4001`. Keep `IBKR_READONLY=true` for balance, position, and quote checks:
 
+The local IBC startup and login process is documented in [docs/ibc-gateway-startup.md](docs/ibc-gateway-startup.md).
+
 ```bash
 cd apps/ibkr-quant-bot
 export IBKR_HOST=127.0.0.1
