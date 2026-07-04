@@ -79,7 +79,7 @@ class IbkrBroker(AbstractContextManager["IbkrBroker"]):
         return snapshots
 
     def historical_bars(self, contract: ContractSpec, duration: str = "30 D") -> list[Bar]:
-        from ib_insync import Stock, util
+        from ib_insync import Stock
 
         self._require_connection()
         ib_contract = Stock(contract.symbol, contract.exchange, contract.currency)
@@ -92,13 +92,9 @@ class IbkrBroker(AbstractContextManager["IbkrBroker"]):
             useRTH=True,
             formatDate=1,
         )
-        dataframe = util.df(bars)
-        if dataframe is None or dataframe.empty:
+        if not bars:
             return []
-        return [
-            Bar(timestamp=str(row.date), close=float(row.close))
-            for row in dataframe.itertuples(index=False)
-        ]
+        return [Bar(timestamp=str(bar.date), close=float(bar.close)) for bar in bars]
 
     def quote(self, contract: ContractSpec) -> QuoteSnapshot:
         from ib_insync import Stock

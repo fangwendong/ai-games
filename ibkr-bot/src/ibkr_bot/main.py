@@ -4,6 +4,7 @@ import argparse
 import sys
 
 from ibkr_bot.alerts import AlertSink
+from ibkr_bot.backtest import run_quality_low_vol_rotation_backtest
 from ibkr_bot.broker import IbkrBroker
 from ibkr_bot.config import Settings, load_settings
 from ibkr_bot.models import ContractSpec, PositionSnapshot, QuoteSnapshot, RiskState
@@ -38,6 +39,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     rebalance = subparsers.add_parser("rebalance")
     rebalance.add_argument(
+        "--strategy",
+        default="quality_low_vol_rotation",
+        choices=["quality_low_vol_rotation"],
+    )
+    backtest = subparsers.add_parser("backtest")
+    backtest.add_argument(
+        "--symbol",
+        action="append",
+        default=None,
+        help="override the backtest universe; defaults to IBKR_SYMBOLS",
+    )
+    backtest.add_argument("--duration", default="5 Y")
+    backtest.add_argument("--capital", type=float, default=10_000.0)
+    backtest.add_argument(
         "--strategy",
         default="quality_low_vol_rotation",
         choices=["quality_low_vol_rotation"],
@@ -141,6 +156,21 @@ def main(argv: list[str] | None = None) -> int:
             _execute_rotation_plan(settings, store, alerts, broker, plan)
         return 0
 
+    if args.command == "backtest":
+        symbols = _resolve_symbol_list(settings.symbols, args.symbol)
+        with IbkrBroker(settings) as broker:
+            universe = {
+                symbol: broker.historical_bars(ContractSpec(symbol=symbol), duration=args.duration)
+                for symbol in symbols
+            }
+        summary, _curve = run_quality_low_vol_rotation_backtest(
+            universe=universe,
+            strategy=QualityLowVolRotationStrategy(),
+            starting_capital=args.capital,
+        )
+        print(_format_backtest_summary(summary))
+        return 0
+
     if args.command in {"trade-once", "run-once"}:
         store.init_db()
         symbol = _resolve_symbol(settings.symbols, getattr(args, "symbol", None))
@@ -239,6 +269,28 @@ def _format_rotation_scan(plan: object) -> str:
     if not lines:
         return "IBKR bot: no rotation candidates"
     return "\n".join(lines)
+
+
+def _format_backtest_summary(summary) -> str:
+    selected = ", ".join(
+        f"{symbol}:{count}" for symbol, count in sorted(summary.selected_symbol_counts.items())
+    ) or "(none)"
+    return "\n".join(
+        [
+            f"strategy: {summary.strategy}",
+            f"symbols: {', '.join(summary.symbols)}",
+            f"range: {summary.start_date} -> {summary.end_date}",
+            f"starting_capital: {summary.starting_capital:.2f}",
+            f"ending_capital: {summary.ending_capital:.2f}",
+            f"total_return: {summary.total_return:.2%}",
+            f"cagr: {summary.cagr:.2%}",
+            f"annualized_volatility: {summary.annualized_volatility:.2%}",
+            f"max_drawdown: {summary.max_drawdown:.2%}",
+            f"rebalance_count: {summary.rebalance_count}",
+            f"trade_count: {summary.trade_count}",
+            f"selected_symbols: {selected}",
+        ]
+    )
 
 
 def _trade_once(settings: Settings, store: Store, alerts: AlertSink, symbol: str, strategy_name: str) -> None:

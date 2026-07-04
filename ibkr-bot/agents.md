@@ -29,6 +29,7 @@ ibkr-bot quote --symbol SPY
 ibkr-bot scan
 ibkr-bot scan --strategy quality_low_vol_rotation
 ibkr-bot rebalance
+ibkr-bot backtest --duration '3 Y'
 ibkr-bot trade-once --symbol SPY
 ```
 

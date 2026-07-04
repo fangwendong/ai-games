@@ -48,6 +48,7 @@ ibkr-bot quote --symbol SPY
 ibkr-bot scan
 ibkr-bot scan --strategy quality_low_vol_rotation
 ibkr-bot rebalance
+ibkr-bot backtest --duration '3 Y'
 ibkr-bot trade-once --symbol SPY
 ibkr-bot run-once --symbol SPY
 ```
@@ -59,6 +60,8 @@ ibkr-bot run-once --symbol SPY
 The default strategy is `volatility_managed_trend`. It is long-only, uses a long moving-average trend filter, and stays out of the market when the recent realized volatility is above a fixed cap. That makes it easier to keep the bot conservative for a small account. You can switch back to the moving-average demo with `--strategy moving_average_cross`.
 
 The rotation model is `quality_low_vol_rotation`. It ranks the configured universe once a month, using return consistency, trailing return, volatility, and drawdown, then rotates into the top symbol or moves to cash when nothing clears the filters.
+
+`backtest` runs the monthly rotation model over historical daily bars from IBKR and prints return, CAGR, volatility, drawdown, and trade count.
 
 `run-once` stays as a compatibility alias for `trade-once`. It remains in dry-run mode unless `IBKR_DRY_RUN=false`. Live trading is also blocked unless `IBKR_ALLOW_LIVE=true`, and the default `.env.example` does not allow it.
 
