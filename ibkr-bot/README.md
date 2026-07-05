@@ -59,7 +59,7 @@ ibkr-bot run-once --symbol SPY
 
 The default strategy is `volatility_managed_trend`. It is long-only, uses a long moving-average trend filter, and stays out of the market when the recent realized volatility is above a fixed cap. That makes it easier to keep the bot conservative for a small account. You can switch back to the moving-average demo with `--strategy moving_average_cross`.
 
-The rotation model is `quality_low_vol_rotation`. It ranks an automatic liquid ETF catalog once a month, using return consistency, trailing return, volatility, drawdown, and a minimum average volume filter, then rotates into the top symbol or moves to cash when nothing clears the filters. Set `IBKR_ROTATION_SYMBOLS` only if you want to override the built-in catalog.
+The rotation model is `quality_low_vol_rotation`. It ranks an automatic liquid ETF catalog once a month, using a 60-bar trailing window plus volatility, drawdown, consistency, and a minimum average volume filter, then rotates into the top symbol or moves to cash when nothing clears the filters. Set `IBKR_ROTATION_SYMBOLS` only if you want to override the built-in catalog.
 
 `backtest` runs the monthly rotation model over historical daily bars from IBKR and prints return, CAGR, volatility, drawdown, and trade count.
 

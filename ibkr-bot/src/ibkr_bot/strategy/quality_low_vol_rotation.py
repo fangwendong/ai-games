@@ -59,8 +59,8 @@ class RotationPlan:
 
 @dataclass(frozen=True)
 class QualityLowVolRotationStrategy:
-    lookback: int = 252
-    volatility_window: int = 63
+    lookback: int = 60
+    volatility_window: int = 20
     volume_window: int = 20
     max_annualized_volatility: float = 0.20
     min_average_volume: float = 1_000_000.0

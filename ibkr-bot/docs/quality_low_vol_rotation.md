@@ -36,8 +36,8 @@ Trading behavior:
 
 Default values in code:
 
-- lookback: 252 bars
-- volatility window: 63 bars
+- lookback: 60 bars
+- volatility window: 20 bars
 - volume window: 20 bars
 - volatility cap: 20% annualized
 - minimum average volume: 1,000,000 shares
