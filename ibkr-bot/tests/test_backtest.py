@@ -400,10 +400,25 @@ def test_backtest_supports_tech_semiconductor_rotation() -> None:
 
 def test_backtest_supports_five_minute_momentum() -> None:
     strategy = FiveMinuteMomentumStrategy(fast_window=3, slow_window=8, volume_window=4)
+    spy_series = [
+        100,
+        100,
+        100,
+        100,
+        100,
+        100.5,
+        101.0,
+        101.5,
+        102.0,
+        102.4,
+        102.2,
+        103.0,
+        103.5,
+    ]
     summary, curve = run_five_minute_momentum_backtest(
         {
-            "SPY": intraday_bars([100, 100.2, 100.5, 100.8, 101.0, 101.4, 101.8, 102.1, 102.5, 102.9, 103.2, 103.6]),
-            "QQQ": intraday_bars([100 for _ in range(12)]),
+            "SPY": intraday_bars(spy_series),
+            "QQQ": intraday_bars([100 for _ in range(len(spy_series))]),
         },
         strategy,
         starting_capital=3_000.0,
@@ -552,9 +567,24 @@ def test_build_backtest_strategy_supports_vwap_pullback() -> None:
 
 def test_intraday_backtest_penalizes_commissions_and_slippage() -> None:
     strategy = FiveMinuteMomentumStrategy(fast_window=3, slow_window=8, volume_window=4)
+    spy_series = [
+        100,
+        100,
+        100,
+        100,
+        100,
+        100.5,
+        101.0,
+        101.5,
+        102.0,
+        102.4,
+        102.2,
+        103.0,
+        103.5,
+    ]
     universe = {
-        "SPY": intraday_bars([100, 100.2, 100.5, 100.8, 101.0, 101.4, 101.8, 102.1, 102.5, 102.9, 103.2, 103.6]),
-        "QQQ": intraday_bars([100 for _ in range(12)]),
+        "SPY": intraday_bars(spy_series),
+        "QQQ": intraday_bars([100 for _ in range(len(spy_series))]),
     }
     no_cost, _ = run_intraday_signal_backtest(universe, strategy, starting_capital=3_000.0)
     with_cost, _ = run_intraday_signal_backtest(

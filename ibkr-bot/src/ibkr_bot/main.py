@@ -6,6 +6,7 @@ import sys
 from ibkr_bot.alerts import AlertSink
 from ibkr_bot.backtest import (
     run_intraday_signal_backtest,
+    run_intraday_walk_forward_backtest,
     run_quality_low_vol_rotation_backtest,
 )
 from ibkr_bot.broker import IbkrBroker
@@ -109,6 +110,12 @@ def main(argv: list[str] | None = None) -> int:
     backtest.add_argument("--max-annualized-volatility", type=float, default=None)
     backtest.add_argument("--min-trailing-return", type=float, default=None)
     backtest.add_argument("--switch-score-margin", type=float, default=None)
+    backtest.add_argument(
+        "--validation-split",
+        type=float,
+        default=None,
+        help="optional walk-forward split for intraday strategies; prints in-sample and out-of-sample summaries",
+    )
     backtest.add_argument("--market-filter-symbol", default=None)
     backtest.add_argument("--market-filter-window", type=int, default=None)
     trade_once = subparsers.add_parser("trade-once")
@@ -264,6 +271,18 @@ def main(argv: list[str] | None = None) -> int:
                     universe[symbol] = bars
         strategy = _build_backtest_strategy(args.strategy, backtest_options)
         if args.strategy in {"five_minute_momentum", "opening_range_breakout", "vwap_pullback"}:
+            if args.validation_split is not None:
+                validation = run_intraday_walk_forward_backtest(
+                    universe=universe,
+                    strategy=strategy,
+                    starting_capital=args.capital,
+                    validation_split=float(args.validation_split),
+                )
+                print("in_sample:")
+                print(_format_backtest_summary(validation.in_sample))
+                print("out_of_sample:")
+                print(_format_backtest_summary(validation.out_of_sample))
+                return 0
             summary, _curve = run_intraday_signal_backtest(
                 universe=universe,
                 strategy=strategy,

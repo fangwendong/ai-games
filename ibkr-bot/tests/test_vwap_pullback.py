@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 
 from ibkr_bot.models import Side
+from ibkr_bot.backtest import run_intraday_walk_forward_backtest
 from ibkr_bot.strategy.base import Bar
 from ibkr_bot.strategy.vwap_pullback import VwapPullbackStrategy
 from ibkr_bot.backtest import run_intraday_signal_backtest
@@ -55,7 +56,22 @@ def test_intraday_backtest_exits_on_vwap_breakdown() -> None:
         min_volume_multiple=1.0,
         min_trend_return=-0.01,
     )
-    session = [100.0] * 26 + [99.2, 98.8, 98.4, 99.1, 100.4, 100.8, 101.2, 101.1, 101.0, 100.9, 99.4, 98.9]
+    session = [
+        100.0
+    ] * 26 + [
+        99.2,
+        98.8,
+        98.4,
+        99.1,
+        100.4,
+        100.2,
+        100.7,
+        101.0,
+        100.9,
+        100.8,
+        99.4,
+        98.9,
+    ]
     summary, _curve = run_intraday_signal_backtest(
         {"SOXL": bars(session)},
         strategy,
@@ -66,3 +82,44 @@ def test_intraday_backtest_exits_on_vwap_breakdown() -> None:
 
     assert summary.trade_count >= 2
     assert summary.ending_capital != summary.starting_capital
+
+
+def test_intraday_backtest_does_not_fill_on_signal_bar() -> None:
+    strategy = VwapPullbackStrategy(
+        pullback_window=4,
+        trend_window=4,
+        volume_window=2,
+        pullback_depth=0.005,
+        min_volume_multiple=1.0,
+        min_trend_return=-0.01,
+    )
+    session = [100.0] * 10 + [99.2, 98.8, 98.4, 99.1, 100.4]
+    summary, _curve = run_intraday_signal_backtest(
+        {"SOXL": bars(session)},
+        strategy,
+        starting_capital=3_000.0,
+    )
+
+    assert summary.trade_count == 0
+
+
+def test_intraday_walk_forward_validation_split() -> None:
+    strategy = VwapPullbackStrategy(
+        pullback_window=4,
+        trend_window=4,
+        volume_window=2,
+        pullback_depth=0.005,
+        min_volume_multiple=1.0,
+        min_trend_return=-0.01,
+    )
+    session = [100.0] * 20 + [99.2, 98.8, 98.4, 99.1, 100.4, 100.8, 101.2, 101.1, 101.0, 100.9, 99.4, 98.9]
+    result = run_intraday_walk_forward_backtest(
+        {"SOXL": bars(session)},
+        strategy,
+        starting_capital=3_000.0,
+        validation_split=0.7,
+    )
+
+    assert result.validation_split == 0.7
+    assert result.in_sample.strategy == "vwap_pullback"
+    assert result.out_of_sample.strategy == "vwap_pullback"

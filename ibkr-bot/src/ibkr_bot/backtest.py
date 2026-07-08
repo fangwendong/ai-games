@@ -41,6 +41,22 @@ class BacktestPoint:
     equity: float
 
 
+@dataclass(frozen=True)
+class WalkForwardBacktestResult:
+    in_sample: BacktestSummary
+    out_of_sample: BacktestSummary
+    validation_split: float
+
+
+@dataclass(frozen=True)
+class _PendingOrder:
+    symbol: str
+    side: Literal["BUY", "SELL"]
+    quantity: int
+    limit_price: float
+    reason: str
+
+
 def run_quality_low_vol_rotation_backtest(
     universe: dict[str, list[Bar]],
     strategy: QualityLowVolRotationStrategy,
@@ -125,11 +141,13 @@ def run_intraday_signal_backtest(
     starting_capital: float = 10_000.0,
     commission_per_trade: float = 0.0,
     slippage_bps: float = 0.0,
+    track_from_index: int = 0,
 ) -> tuple[BacktestSummary, tuple[BacktestPoint, ...]]:
     normalized = {symbol: _normalize_intraday_bars(bars) for symbol, bars in universe.items()}
     common_timestamps = _common_timestamps(normalized)
     if not common_timestamps:
         raise ValueError("backtest universe has no overlapping intraday timestamps")
+    track_from_index = max(0, min(int(track_from_index), len(common_timestamps) - 1))
 
     price_map = {
         symbol: {bar_timestamp: close for bar_timestamp, close, _volume in series}
@@ -137,76 +155,20 @@ def run_intraday_signal_backtest(
     }
 
     equity = starting_capital
-    curve: list[BacktestPoint] = [BacktestPoint(timestamp=common_timestamps[0].isoformat(), equity=equity)]
+    curve: list[BacktestPoint] = [
+        BacktestPoint(timestamp=common_timestamps[track_from_index].isoformat(), equity=equity)
+    ]
     active_symbol: str | None = None
     active_entry_price: float | None = None
     active_hold_bars = 0
     selected_symbol_counts: Counter[str] = Counter()
     trade_count = 0
+    pending_order: _PendingOrder | None = None
 
-    for index in range(1, len(common_timestamps)):
+    for index in range(track_from_index + 1, len(common_timestamps)):
         previous_timestamp = common_timestamps[index - 1]
         current_timestamp = common_timestamps[index]
-        skip_entry_this_bar = False
-        exited_symbol_this_bar: str | None = None
-
-        if active_symbol is not None:
-            active_bars = [
-                Bar(timestamp=bar_timestamp.isoformat(), close=close, volume=volume)
-                for bar_timestamp, close, volume in normalized[active_symbol]
-                if bar_timestamp <= previous_timestamp
-            ]
-            active_candidate = strategy.score(active_symbol, active_bars)
-            exit_reason = None
-            if active_candidate is not None and active_candidate.signal == "SELL":
-                exit_reason = "signal"
-            elif getattr(strategy, "flat_at_session_end", False) and previous_timestamp.date() != current_timestamp.date():
-                exit_reason = "session_end"
-                skip_entry_this_bar = True
-            elif getattr(strategy, "max_hold_bars", 0) and active_hold_bars >= int(getattr(strategy, "max_hold_bars")):
-                exit_reason = "max_hold"
-            elif active_entry_price is not None:
-                stop_loss_pct = float(getattr(strategy, "stop_loss_pct", 0.0) or 0.0)
-                if stop_loss_pct > 0.0 and price_map[active_symbol][previous_timestamp] <= active_entry_price * (1.0 - stop_loss_pct):
-                    exit_reason = "stop_loss"
-
-            if exit_reason is not None:
-                exit_price = price_map[active_symbol][previous_timestamp]
-                equity = _apply_trade_cost(
-                    equity,
-                    exit_price,
-                    commission_per_trade=commission_per_trade,
-                    slippage_bps=slippage_bps,
-                )
-                trade_count += 1
-                exited_symbol_this_bar = active_symbol
-                active_symbol = None
-                active_entry_price = None
-                active_hold_bars = 0
-
-        next_symbol = None
-        if not skip_entry_this_bar:
-            next_symbol = _select_intraday_entry_at_timestamp(
-                strategy,
-                normalized,
-                previous_timestamp,
-                active_symbol,
-                excluded_symbol=exited_symbol_this_bar,
-            )
-
-        if next_symbol is not None and next_symbol != active_symbol:
-            entry_price = price_map[next_symbol][previous_timestamp]
-            equity = _apply_trade_cost(
-                equity,
-                entry_price,
-                commission_per_trade=commission_per_trade,
-                slippage_bps=slippage_bps,
-            )
-            trade_count += 1
-            active_symbol = next_symbol
-            active_entry_price = entry_price
-            active_hold_bars = 0
-            selected_symbol_counts[active_symbol] += 1
+        filled_this_bar = False
 
         if active_symbol is not None:
             previous_price = price_map[active_symbol][previous_timestamp]
@@ -214,6 +176,68 @@ def run_intraday_signal_backtest(
             if previous_price > 0:
                 equity *= current_price / previous_price
             active_hold_bars += 1
+
+        if active_symbol is not None:
+            active_bars = _bars_until(normalized[active_symbol], current_timestamp)
+            active_candidate = strategy.score(active_symbol, active_bars)
+            exit_reason = None
+            if active_candidate is not None and active_candidate.signal == "SELL":
+                exit_reason = "signal"
+            elif getattr(strategy, "flat_at_session_end", False) and previous_timestamp.date() != current_timestamp.date():
+                exit_reason = "session_end"
+            elif getattr(strategy, "max_hold_bars", 0) and active_hold_bars >= int(getattr(strategy, "max_hold_bars")):
+                exit_reason = "max_hold"
+            else:
+                stop_loss_pct = float(getattr(strategy, "stop_loss_pct", 0.0) or 0.0)
+                if stop_loss_pct > 0.0:
+                    if active_entry_price is not None and current_price <= active_entry_price * (1.0 - stop_loss_pct):
+                        exit_reason = "stop_loss"
+
+            if exit_reason is not None:
+                equity = _apply_trade_cost(
+                    equity,
+                    current_price,
+                    commission_per_trade=commission_per_trade,
+                    slippage_bps=slippage_bps,
+                )
+                trade_count += 1
+                active_symbol = None
+                active_entry_price = None
+                active_hold_bars = 0
+                pending_order = None
+                filled_this_bar = True
+
+        if not filled_this_bar and pending_order is not None:
+            current_price = price_map[pending_order.symbol][current_timestamp]
+            if _limit_can_fill(pending_order.side, pending_order.limit_price, current_price):
+                equity = _apply_trade_cost(
+                    equity,
+                    current_price,
+                    commission_per_trade=commission_per_trade,
+                    slippage_bps=slippage_bps,
+                )
+                trade_count += 1
+                if pending_order.side == "BUY":
+                    active_symbol = pending_order.symbol
+                    active_entry_price = current_price
+                    active_hold_bars = 0
+                    selected_symbol_counts[active_symbol] += 1
+                else:
+                    active_symbol = None
+                    active_entry_price = None
+                    active_hold_bars = 0
+                pending_order = None
+                filled_this_bar = True
+
+        if not filled_this_bar:
+            desired_order = _build_intraday_pending_order(
+                strategy,
+                normalized,
+                price_map,
+                current_timestamp,
+                active_symbol,
+            )
+            pending_order = desired_order
 
         curve.append(BacktestPoint(timestamp=current_timestamp.isoformat(), equity=equity))
 
@@ -239,6 +263,67 @@ def run_intraday_signal_backtest(
         selected_symbol_counts=dict(selected_symbol_counts),
     )
     return summary, tuple(curve)
+
+
+def run_intraday_walk_forward_backtest(
+    universe: dict[str, list[Bar]],
+    strategy: FiveMinuteMomentumStrategy | OpeningRangeBreakoutStrategy | VwapPullbackStrategy,
+    starting_capital: float = 10_000.0,
+    validation_split: float = 0.7,
+    commission_per_trade: float = 0.0,
+    slippage_bps: float = 0.0,
+) -> WalkForwardBacktestResult:
+    normalized = {symbol: _normalize_intraday_bars(bars) for symbol, bars in universe.items()}
+    common_timestamps = _common_timestamps(normalized)
+    if len(common_timestamps) < 4:
+        raise ValueError("backtest universe has too few intraday timestamps for validation")
+    if not 0.0 < validation_split < 1.0:
+        raise ValueError("validation_split must be between 0 and 1")
+
+    split_index = max(2, min(len(common_timestamps) - 1, int(len(common_timestamps) * validation_split)))
+    warmup_bars = max(
+        getattr(strategy, "pullback_window", 0),
+        getattr(strategy, "trend_window", 0),
+        getattr(strategy, "volume_window", 0),
+        getattr(strategy, "slow_window", 0),
+        getattr(strategy, "opening_range_bars", 0),
+        1,
+    ) + 1
+
+    train_universe = {
+        symbol: [Bar(timestamp=bar_timestamp.isoformat(), close=close, volume=volume) for bar_timestamp, close, volume in series[:split_index]]
+        for symbol, series in normalized.items()
+    }
+    train_summary, _ = run_intraday_signal_backtest(
+        train_universe,
+        strategy,
+        starting_capital=starting_capital,
+        commission_per_trade=commission_per_trade,
+        slippage_bps=slippage_bps,
+    )
+
+    validation_start = max(0, split_index - warmup_bars)
+    validation_universe = {
+        symbol: [
+            Bar(timestamp=bar_timestamp.isoformat(), close=close, volume=volume)
+            for bar_timestamp, close, volume in series[validation_start:]
+        ]
+        for symbol, series in normalized.items()
+    }
+    validation_summary, _ = run_intraday_signal_backtest(
+        validation_universe,
+        strategy,
+        starting_capital=starting_capital,
+        commission_per_trade=commission_per_trade,
+        slippage_bps=slippage_bps,
+        track_from_index=warmup_bars if validation_start == split_index - warmup_bars else split_index - validation_start,
+    )
+
+    return WalkForwardBacktestResult(
+        in_sample=train_summary,
+        out_of_sample=validation_summary,
+        validation_split=validation_split,
+    )
 
 
 def run_trend_backtest(
@@ -328,6 +413,56 @@ def _normalize_intraday_bars(bars: list[Bar]) -> list[tuple[datetime, float, flo
         else:
             deduped.append((bar_timestamp, close, volume))
     return deduped
+
+
+def _bars_until(series: list[tuple[datetime, float, float]], timestamp: datetime) -> list[Bar]:
+    return [
+        Bar(timestamp=bar_timestamp.isoformat(), close=close, volume=volume)
+        for bar_timestamp, close, volume in series
+        if bar_timestamp <= timestamp
+    ]
+
+
+def _build_intraday_pending_order(
+    strategy: FiveMinuteMomentumStrategy | OpeningRangeBreakoutStrategy | VwapPullbackStrategy,
+    universe: dict[str, list[tuple[datetime, float, float]]],
+    price_map: dict[str, dict[datetime, float]],
+    current_timestamp: datetime,
+    active_symbol: str | None,
+) -> _PendingOrder | None:
+    if active_symbol is not None:
+        active_bars = _bars_until(universe[active_symbol], current_timestamp)
+        active_candidate = strategy.score(active_symbol, active_bars)
+        if active_candidate is None or active_candidate.signal != "SELL":
+            return None
+        current_price = price_map[active_symbol][current_timestamp]
+        return _PendingOrder(
+            symbol=active_symbol,
+            side="SELL",
+            quantity=1,
+            limit_price=round(current_price * 1.001, 2),
+            reason=f"{strategy.name}: lost VWAP",
+        )
+
+    next_symbol = _select_intraday_entry_at_timestamp(strategy, universe, current_timestamp, None)
+    if next_symbol is None:
+        return None
+    current_price = price_map[next_symbol][current_timestamp]
+    return _PendingOrder(
+        symbol=next_symbol,
+        side="BUY",
+        quantity=1,
+        limit_price=round(current_price * 0.999, 2),
+        reason=f"{strategy.name}: entry signal",
+    )
+
+
+def _limit_can_fill(side: Literal["BUY", "SELL"], limit_price: float, current_price: float) -> bool:
+    if side == "BUY":
+        return current_price <= limit_price
+    if side == "SELL":
+        return current_price >= limit_price
+    return False
 
 
 def _apply_trade_cost(

@@ -88,6 +88,8 @@ You can switch the rebalance cadence with `--profile monthly|daily|low_turnover`
 
 `vwap_pullback` is the more selective intraday mean-reversion variant. It waits for a VWAP reclaim after a real pullback, asks for stronger volume confirmation, and uses tighter exit rules so the backtest does less churn on a small account.
 
+If you want to sanity-check overfitting on intraday strategies, pass `--validation-split 0.7` to `ibkr-bot backtest` and it will print separate in-sample and out-of-sample summaries.
+
 Extended-hours support is opt-in through `IBKR_ALLOW_EXTENDED_HOURS=true`. When enabled, the broker sets `outsideRth=True` and the risk gate keeps extended-hours trading on limit orders only.
 
 `run-once` stays as a compatibility alias for `trade-once`. It remains in dry-run mode unless `IBKR_DRY_RUN=false`. Live trading is also blocked unless `IBKR_ALLOW_LIVE=true`, and the default `.env.example` does not allow it.
