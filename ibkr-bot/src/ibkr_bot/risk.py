@@ -19,6 +19,9 @@ class RiskManager:
         if intent.order_type == OrderType.MARKET and not self.settings.allow_market_orders:
             reasons.append("market orders are disabled")
 
+        if self.settings.allow_extended_hours and intent.order_type == OrderType.MARKET:
+            reasons.append("extended hours trading only supports limit orders")
+
         if intent.order_type == OrderType.LIMIT and intent.limit_price is None:
             reasons.append("limit orders require a limit_price")
 
@@ -55,4 +58,3 @@ class RiskManager:
             reasons.append("live trading mode requested but IBKR_ALLOW_LIVE is false")
 
         return RiskDecision(accepted=not reasons, reasons=tuple(reasons))
-

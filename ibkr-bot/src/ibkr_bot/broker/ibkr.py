@@ -78,7 +78,13 @@ class IbkrBroker(AbstractContextManager["IbkrBroker"]):
                 )
         return snapshots
 
-    def historical_bars(self, contract: ContractSpec, duration: str = "30 D") -> list[Bar]:
+    def historical_bars(
+        self,
+        contract: ContractSpec,
+        duration: str = "30 D",
+        bar_size: str = "1 day",
+        use_rth: bool = True,
+    ) -> list[Bar]:
         from ib_insync import Stock
 
         self._require_connection()
@@ -87,15 +93,19 @@ class IbkrBroker(AbstractContextManager["IbkrBroker"]):
             ib_contract,
             endDateTime="",
             durationStr=duration,
-            barSizeSetting="1 day",
+            barSizeSetting=bar_size,
             whatToShow="TRADES",
-            useRTH=True,
+            useRTH=use_rth,
             formatDate=1,
         )
         if not bars:
             return []
         return [
-            Bar(timestamp=str(bar.date), close=float(bar.close), volume=float(getattr(bar, "volume", 0.0) or 0.0))
+            Bar(
+                timestamp=bar.date.isoformat() if hasattr(bar.date, "isoformat") else str(bar.date),
+                close=float(bar.close),
+                volume=float(getattr(bar, "volume", 0.0) or 0.0),
+            )
             for bar in bars
         ]
 
@@ -144,6 +154,7 @@ class IbkrBroker(AbstractContextManager["IbkrBroker"]):
             order = LimitOrder(intent.side.value, intent.quantity, intent.limit_price)
         else:
             order = MarketOrder(intent.side.value, intent.quantity)
+        order.outsideRth = bool(self.settings.allow_extended_hours)
         trade = self.ib.placeOrder(contract, order)
         return str(getattr(trade.order, "orderId", ""))
 

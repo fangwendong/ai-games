@@ -14,6 +14,7 @@ def settings(**overrides: object) -> Settings:
         trading_mode="paper",
         dry_run=True,
         allow_live=False,
+        allow_extended_hours=False,
         symbols=("SPY",),
         max_notional_per_order=1000.0,
         max_position_notional=2000.0,
@@ -59,6 +60,24 @@ def test_rejects_market_order_by_default() -> None:
     decision = RiskManager(settings()).evaluate(intent, empty_state())
     assert not decision.accepted
     assert "market orders are disabled" in decision.reasons
+
+
+def test_rejects_market_order_in_extended_hours_mode() -> None:
+    intent = OrderIntent(
+        contract=OrderIntent.limit("SPY", Side.BUY, 1, 400, "base").contract,
+        side=Side.BUY,
+        quantity=1,
+        order_type=OrderType.MARKET,
+        limit_price=None,
+        reason="test",
+        created_at=OrderIntent.limit("SPY", Side.BUY, 1, 400, "base").created_at,
+    )
+    decision = RiskManager(settings(allow_market_orders=True, allow_extended_hours=True)).evaluate(
+        intent,
+        empty_state(),
+    )
+    assert not decision.accepted
+    assert "extended hours trading only supports limit orders" in decision.reasons
 
 
 def test_rejects_projected_position_limit() -> None:

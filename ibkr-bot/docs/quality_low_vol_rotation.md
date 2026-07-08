@@ -1,6 +1,6 @@
 # Quality + Low Volatility Rotation
 
-This strategy is a conservative monthly rotation model for small accounts.
+This strategy is a conservative rotation model for small accounts.
 
 It does not require fundamentals or a separate market-data vendor. In this repository, "quality" is a practical proxy built from price behavior:
 
@@ -15,7 +15,7 @@ The strategy ranks a built-in liquid ETF catalog by default. You can override th
 
 ## Rule
 
-Each month, rank the configured universe by a composite score:
+At each rebalance point, rank the configured universe by a composite score:
 
 - trailing return over the lookback window
 - fraction of positive daily returns
@@ -25,12 +25,15 @@ Each month, rank the configured universe by a composite score:
 
 Select the top-ranked symbol only if it clears the minimum score and the volatility cap.
 Symbols with insufficient average volume are discarded before ranking.
+The low-turnover profile also requires positive trailing return and keeps the
+current holding when its score is close enough to the top-ranked candidate.
 
 Trading behavior:
 
 - buy the top-ranked symbol if it is not already held
 - sell any current long positions that are not the selected symbol
 - move to cash if nothing clears the filters
+- avoid switching when the current holding is still inside the configured score margin
 
 ## Parameters
 
@@ -41,9 +44,21 @@ Default values in code:
 - volume window: 20 bars
 - volatility cap: 20% annualized
 - minimum average volume: 1,000,000 shares
+- minimum trailing return: disabled by default
+- switch score margin: disabled by default
 - quantity: 1 share
 
 These defaults are intentionally conservative.
+
+The `low_turnover` backtest profile is more suitable for small accounts:
+
+- rebalance frequency: weekly
+- lookback: 60 bars
+- volatility window: 20 bars
+- volume window: 20 bars
+- volatility cap: 25% annualized
+- minimum trailing return: 0%
+- switch score margin: 0.03
 
 ## CLI
 
@@ -57,6 +72,18 @@ Rebalance into the top candidate:
 
 ```bash
 ibkr-bot rebalance
+```
+
+Backtest with adjustable cadence:
+
+```bash
+ibkr-bot backtest --duration '3 Y' --profile monthly
+ibkr-bot backtest --duration '3 Y' --profile daily
+ibkr-bot backtest --duration '3 Y' --profile low_turnover
+ibkr-bot backtest --duration '3 Y' --rebalance-frequency monthly
+ibkr-bot backtest --duration '3 Y' --rebalance-frequency weekly --lookback 60 --volatility-window 20 --volume-window 20
+ibkr-bot backtest --duration '3 Y' --rebalance-frequency daily --lookback 20 --volatility-window 10 --volume-window 10
+ibkr-bot backtest --duration '3 Y' --profile low_turnover --switch-score-margin 0.05 --min-trailing-return 0.01
 ```
 
 ## Notes

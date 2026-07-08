@@ -61,3 +61,47 @@ def test_build_plan_rotates_out_of_other_holdings() -> None:
     assert len(plan.orders) == 2
     assert any(order.contract.symbol == "QQQ" and order.side == Side.SELL for order in plan.orders)
     assert any(order.contract.symbol == "SPY" and order.side == Side.BUY for order in plan.orders)
+
+
+def test_build_plan_keeps_current_holding_inside_switch_margin() -> None:
+    strategy = QualityLowVolRotationStrategy(
+        lookback=252,
+        volatility_window=63,
+        max_annualized_volatility=1.0,
+        switch_score_margin=10.0,
+    )
+    universe = {
+        "SPY": bars(smooth_series()),
+        "QQQ": bars(choppy_series()),
+    }
+    positions = {
+        "QQQ": PositionSnapshot(symbol="QQQ", quantity=3, market_price=101),
+    }
+
+    plan = strategy.build_plan(universe, positions)
+
+    assert plan.selected_symbol == "QQQ"
+    assert plan.orders == ()
+
+
+def test_build_plan_moves_to_cash_when_market_filter_is_off() -> None:
+    strategy = QualityLowVolRotationStrategy(
+        lookback=252,
+        volatility_window=63,
+        max_annualized_volatility=1.0,
+        market_filter_window=5,
+    )
+    universe = {
+        "SPY": bars([100, 99, 98, 97, 96, 95, 94]),
+        "QQQ": bars(smooth_series(7)),
+    }
+    positions = {
+        "QQQ": PositionSnapshot(symbol="QQQ", quantity=3, market_price=101),
+    }
+
+    plan = strategy.build_plan(universe, positions)
+
+    assert plan.selected_symbol is None
+    assert len(plan.orders) == 1
+    assert plan.orders[0].contract.symbol == "QQQ"
+    assert plan.orders[0].side == Side.SELL

@@ -6,71 +6,23 @@ from statistics import pstdev
 
 from ibkr_bot.models import OrderIntent, PositionSnapshot, Side
 from ibkr_bot.strategy.base import Bar
-
-
-DEFAULT_ETF_CATALOG: tuple[str, ...] = (
-    "SPY",
-    "VOO",
-    "IVV",
-    "VTI",
-    "QQQ",
-    "DIA",
-    "IWM",
-    "SCHD",
-    "VIG",
-    "DGRO",
-    "QUAL",
-    "USMV",
-    "SPLV",
-    "XLK",
-    "XLF",
-    "XLV",
-    "XLY",
-    "XLP",
-    "XLE",
-    "XLI",
-    "XLB",
-    "XLRE",
-    "XLC",
-    "TLT",
-    "IEF",
-    "SHY",
-    "GLD",
-)
+from ibkr_bot.strategy.quality_low_vol_rotation import RotationCandidate, RotationPlan
 
 
 @dataclass(frozen=True)
-class RotationCandidate:
-    symbol: str
-    score: float
-    trailing_return: float
-    annualized_volatility: float
-    max_drawdown: float
-    consistency: float
-    average_volume: float
-
-
-@dataclass(frozen=True)
-class RotationPlan:
-    selected_symbol: str | None
-    candidates: tuple[RotationCandidate, ...]
-    orders: tuple[OrderIntent, ...]
-
-
-@dataclass(frozen=True)
-class QualityLowVolRotationStrategy:
-    lookback: int = 60
-    volatility_window: int = 20
-    volume_window: int = 20
-    max_annualized_volatility: float = 0.20
+class WeeklyMomentumRotationStrategy:
+    lookback: int = 20
+    volatility_window: int = 10
+    volume_window: int = 10
+    max_annualized_volatility: float = 0.30
     min_average_volume: float = 1_000_000.0
-    min_trailing_return: float = -1.0
-    min_score: float = -10.0
-    switch_score_margin: float = 0.0
+    min_trailing_return: float = 0.0
+    min_score: float = 0.0
+    switch_score_margin: float = 0.02
     market_filter_symbol: str = "SPY"
-    market_filter_window: int = 200
+    market_filter_window: int = 50
     quantity: int = 1
-    name: str = "quality_low_vol_rotation"
+    name: str = "weekly_momentum_rotation"
 
     def build_plan(
         self,
@@ -146,22 +98,44 @@ class QualityLowVolRotationStrategy:
                     side=Side.BUY,
                     quantity=self.quantity,
                     limit_price=max(0.01, round(last_close * 0.999, 2)),
-                    reason=f"{self.name}: selected top-ranked candidate",
+                    reason=f"{self.name}: selected top-ranked weekly momentum candidate",
                 )
             )
 
         return RotationPlan(selected_symbol=selected_symbol, candidates=tuple(candidates), orders=tuple(orders))
 
-    def _market_is_risk_on(self, universe: dict[str, list[Bar]]) -> bool:
-        if self.market_filter_window <= 0:
-            return True
-        bars = universe.get(self.market_filter_symbol)
-        if bars is None or len(bars) < self.market_filter_window + 1:
-            return True
-        trailing_bars = bars[-(self.market_filter_window + 1) :]
+    def score(self, symbol: str, bars: list[Bar]) -> RotationCandidate | None:
+        required_bars = max(self.lookback, self.volatility_window, self.volume_window) + 1
+        if len(bars) < required_bars:
+            return None
+
+        trailing_bars = bars[-(self.lookback + 1) :]
         closes = [bar.close for bar in trailing_bars]
-        average_close = sum(closes[-self.market_filter_window :]) / self.market_filter_window
-        return closes[-1] >= average_close
+        trailing_return = closes[-1] / closes[0] - 1.0
+        annualized_volatility = _annualized_volatility(closes[-(self.volatility_window + 1) :])
+        max_drawdown = _max_drawdown(closes)
+        consistency = _positive_return_ratio(closes)
+        average_volume = _average_volume(trailing_bars[-self.volume_window :])
+
+        if average_volume < self.min_average_volume:
+            return None
+
+        score = (
+            1.2 * trailing_return
+            + 0.35 * consistency
+            - 0.9 * annualized_volatility
+            - 0.55 * max_drawdown
+            + 0.03 * log10(average_volume)
+        )
+        return RotationCandidate(
+            symbol=symbol,
+            score=score,
+            trailing_return=trailing_return,
+            annualized_volatility=annualized_volatility,
+            max_drawdown=max_drawdown,
+            consistency=consistency,
+            average_volume=average_volume,
+        )
 
     def _select_symbol(
         self,
@@ -182,37 +156,16 @@ class QualityLowVolRotationStrategy:
 
         return candidates[0].symbol
 
-    def score(self, symbol: str, bars: list[Bar]) -> RotationCandidate | None:
-        if len(bars) < max(self.lookback, self.volume_window) + 1:
-            return None
-
-        trailing_bars = bars[-(self.lookback + 1) :]
+    def _market_is_risk_on(self, universe: dict[str, list[Bar]]) -> bool:
+        if self.market_filter_window <= 0:
+            return True
+        bars = universe.get(self.market_filter_symbol)
+        if bars is None or len(bars) < self.market_filter_window + 1:
+            return True
+        trailing_bars = bars[-(self.market_filter_window + 1) :]
         closes = [bar.close for bar in trailing_bars]
-        trailing_return = closes[-1] / closes[0] - 1.0
-        annualized_volatility = _annualized_volatility(closes[-(self.volatility_window + 1) :])
-        max_drawdown = _max_drawdown(closes)
-        consistency = _positive_return_ratio(closes)
-        average_volume = _average_volume(trailing_bars[-self.volume_window :])
-
-        if average_volume < self.min_average_volume:
-            return None
-
-        score = (
-            1.5 * trailing_return
-            + 0.75 * consistency
-            - 1.0 * annualized_volatility
-            - 0.75 * max_drawdown
-            + 0.05 * log10(average_volume)
-        )
-        return RotationCandidate(
-            symbol=symbol,
-            score=score,
-            trailing_return=trailing_return,
-            annualized_volatility=annualized_volatility,
-            max_drawdown=max_drawdown,
-            consistency=consistency,
-            average_volume=average_volume,
-        )
+        average_close = sum(closes[-self.market_filter_window :]) / self.market_filter_window
+        return closes[-1] >= average_close
 
 
 def _annualized_volatility(closes: list[float]) -> float:

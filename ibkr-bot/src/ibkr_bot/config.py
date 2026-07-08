@@ -36,6 +36,7 @@ class Settings:
     trading_mode: str
     dry_run: bool
     allow_live: bool
+    allow_extended_hours: bool
     symbols: tuple[str, ...]
     max_notional_per_order: float
     max_position_notional: float
@@ -77,6 +78,7 @@ def load_settings(env_file: str | Path | None = ".env") -> Settings:
         trading_mode=trading_mode,
         dry_run=_bool_env("IBKR_DRY_RUN", True),
         allow_live=_bool_env("IBKR_ALLOW_LIVE", False),
+        allow_extended_hours=_bool_env("IBKR_ALLOW_EXTENDED_HOURS", False),
         symbols=symbols,
         max_notional_per_order=_float_env("MAX_NOTIONAL_PER_ORDER", 1000.0),
         max_position_notional=_float_env("MAX_POSITION_NOTIONAL", 5000.0),

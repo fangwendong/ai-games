@@ -1,102 +1,33 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import ceil, log10, sqrt
+from math import ceil, sqrt
 from statistics import pstdev
 
 from ibkr_bot.models import OrderIntent, PositionSnapshot, Side
 from ibkr_bot.strategy.base import Bar
-
-
-DEFAULT_ETF_CATALOG: tuple[str, ...] = (
-    "SPY",
-    "VOO",
-    "IVV",
-    "VTI",
-    "QQQ",
-    "DIA",
-    "IWM",
-    "SCHD",
-    "VIG",
-    "DGRO",
-    "QUAL",
-    "USMV",
-    "SPLV",
-    "XLK",
-    "XLF",
-    "XLV",
-    "XLY",
-    "XLP",
-    "XLE",
-    "XLI",
-    "XLB",
-    "XLRE",
-    "XLC",
-    "TLT",
-    "IEF",
-    "SHY",
-    "GLD",
-)
+from ibkr_bot.strategy.quality_low_vol_rotation import RotationCandidate, RotationPlan
 
 
 @dataclass(frozen=True)
-class RotationCandidate:
-    symbol: str
-    score: float
-    trailing_return: float
-    annualized_volatility: float
-    max_drawdown: float
-    consistency: float
-    average_volume: float
-
-
-@dataclass(frozen=True)
-class RotationPlan:
-    selected_symbol: str | None
-    candidates: tuple[RotationCandidate, ...]
-    orders: tuple[OrderIntent, ...]
-
-
-@dataclass(frozen=True)
-class QualityLowVolRotationStrategy:
-    lookback: int = 60
-    volatility_window: int = 20
+class ShortTermMomentumRotationStrategy:
+    lookback: int = 30
+    volatility_window: int = 10
     volume_window: int = 20
-    max_annualized_volatility: float = 0.20
     min_average_volume: float = 1_000_000.0
-    min_trailing_return: float = -1.0
-    min_score: float = -10.0
-    switch_score_margin: float = 0.0
-    market_filter_symbol: str = "SPY"
-    market_filter_window: int = 200
+    min_score: float = 0.0
     quantity: int = 1
-    name: str = "quality_low_vol_rotation"
+    name: str = "short_term_momentum_rotation"
 
     def build_plan(
         self,
         universe: dict[str, list[Bar]],
         positions: dict[str, PositionSnapshot],
     ) -> RotationPlan:
-        if not self._market_is_risk_on(universe):
-            current_positions = {symbol: position for symbol, position in positions.items() if position.quantity > 0}
-            orders = [
-                OrderIntent.limit(
-                    symbol=symbol,
-                    side=Side.SELL,
-                    quantity=max(1, ceil(abs(position.quantity))),
-                    limit_price=max(0.01, round(position.market_price * 0.999, 2)),
-                    reason=f"{self.name}: market filter is off",
-                )
-                for symbol, position in current_positions.items()
-            ]
-            return RotationPlan(selected_symbol=None, candidates=(), orders=tuple(orders))
-
         candidates = [
             candidate
             for symbol, bars in universe.items()
             if (candidate := self.score(symbol, bars)) is not None
-            and candidate.annualized_volatility <= self.max_annualized_volatility
-            and candidate.trailing_return >= self.min_trailing_return
         ]
         candidates.sort(
             key=lambda candidate: (
@@ -108,9 +39,9 @@ class QualityLowVolRotationStrategy:
             reverse=True,
         )
 
+        selected_symbol = candidates[0].symbol if candidates and candidates[0].score >= self.min_score else None
         orders: list[OrderIntent] = []
         current_positions = {symbol: position for symbol, position in positions.items() if position.quantity > 0}
-        selected_symbol = self._select_symbol(candidates, current_positions)
 
         if selected_symbol is None:
             for symbol, position in current_positions.items():
@@ -120,7 +51,7 @@ class QualityLowVolRotationStrategy:
                         side=Side.SELL,
                         quantity=max(1, ceil(abs(position.quantity))),
                         limit_price=max(0.01, round(position.market_price * 0.999, 2)),
-                        reason=f"{self.name}: no candidate cleared the score threshold",
+                        reason=f"{self.name}: no candidate cleared the momentum threshold",
                     )
                 )
             return RotationPlan(selected_symbol=None, candidates=tuple(candidates), orders=tuple(orders))
@@ -146,44 +77,15 @@ class QualityLowVolRotationStrategy:
                     side=Side.BUY,
                     quantity=self.quantity,
                     limit_price=max(0.01, round(last_close * 0.999, 2)),
-                    reason=f"{self.name}: selected top-ranked candidate",
+                    reason=f"{self.name}: selected top short-term momentum candidate",
                 )
             )
 
         return RotationPlan(selected_symbol=selected_symbol, candidates=tuple(candidates), orders=tuple(orders))
 
-    def _market_is_risk_on(self, universe: dict[str, list[Bar]]) -> bool:
-        if self.market_filter_window <= 0:
-            return True
-        bars = universe.get(self.market_filter_symbol)
-        if bars is None or len(bars) < self.market_filter_window + 1:
-            return True
-        trailing_bars = bars[-(self.market_filter_window + 1) :]
-        closes = [bar.close for bar in trailing_bars]
-        average_close = sum(closes[-self.market_filter_window :]) / self.market_filter_window
-        return closes[-1] >= average_close
-
-    def _select_symbol(
-        self,
-        candidates: list[RotationCandidate],
-        current_positions: dict[str, PositionSnapshot],
-    ) -> str | None:
-        if not candidates or candidates[0].score < self.min_score:
-            return None
-
-        current_symbols = set(current_positions)
-        if current_symbols and self.switch_score_margin > 0:
-            current_candidate = next(
-                (candidate for candidate in candidates if candidate.symbol in current_symbols),
-                None,
-            )
-            if current_candidate is not None and current_candidate.score >= candidates[0].score - self.switch_score_margin:
-                return current_candidate.symbol
-
-        return candidates[0].symbol
-
     def score(self, symbol: str, bars: list[Bar]) -> RotationCandidate | None:
-        if len(bars) < max(self.lookback, self.volume_window) + 1:
+        required_bars = max(self.lookback, self.volatility_window, self.volume_window) + 1
+        if len(bars) < required_bars:
             return None
 
         trailing_bars = bars[-(self.lookback + 1) :]
@@ -197,13 +99,7 @@ class QualityLowVolRotationStrategy:
         if average_volume < self.min_average_volume:
             return None
 
-        score = (
-            1.5 * trailing_return
-            + 0.75 * consistency
-            - 1.0 * annualized_volatility
-            - 0.75 * max_drawdown
-            + 0.05 * log10(average_volume)
-        )
+        score = trailing_return
         return RotationCandidate(
             symbol=symbol,
             score=score,
