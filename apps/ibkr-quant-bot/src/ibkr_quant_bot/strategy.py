@@ -38,6 +38,24 @@ def _vwap_series(bars: list[Bar]) -> list[float]:
     return series
 
 
+def _atr(bars: list[Bar], window: int) -> float:
+    if not bars:
+        return 0.0
+    true_ranges: list[float] = []
+    previous_close: float | None = None
+    for bar in bars:
+        true_range = bar.high - bar.low
+        if previous_close is not None:
+            true_range = max(
+                true_range,
+                abs(bar.high - previous_close),
+                abs(bar.low - previous_close),
+            )
+        true_ranges.append(max(0.0, true_range))
+        previous_close = bar.close
+    return _sma(true_ranges, window)
+
+
 @dataclass(frozen=True)
 class MovingAverageStrategy:
     fast: int = 5
@@ -71,7 +89,12 @@ class MovingAverageStrategy:
             limit_price=None,
             reason=f"fast={fast_sma:.2f} slow={slow_sma:.2f} latest={latest:.2f}",
             signal=bullish,
-            meta={"fast": fast_sma, "slow": slow_sma, "latest": latest, "bars": len(closes)},
+            meta={
+                "fast": fast_sma,
+                "slow": slow_sma,
+                "latest": latest,
+                "bars": len(closes),
+            },
         )
 
 
@@ -115,14 +138,15 @@ class VwapPullbackStrategy:
         last = bars[-1]
         prev = bars[-2]
         last_vwap = vwap_series[-1]
-        prev_vwap = vwap_series[-2]
         or_window = bars[: min(self.opening_range_bars, len(bars))]
         or_high = max(bar.high for bar in or_window)
         or_low = min(bar.low for bar in or_window)
         lookback_bars = bars[-min(self.touch_lookback, len(bars)) :]
         lookback_vwaps = vwap_series[-len(lookback_bars) :]
 
-        touched = any(bar.low <= vwap for bar, vwap in zip(lookback_bars, lookback_vwaps))
+        touched = any(
+            bar.low <= vwap for bar, vwap in zip(lookback_bars, lookback_vwaps)
+        )
         reclaimed = last.close > last_vwap and last.close >= prev.close
         breakout = last.close > or_high
         signal = touched and reclaimed and breakout and last.close >= prev.high
@@ -200,6 +224,12 @@ class IntradayMomentumStrategy:
     min_vwap_gap: float = 0.0005
     min_score: float = 0.008
     require_benchmark_confirmation: bool = True
+    max_risk_per_trade: float = 10.0
+    atr_window: int = 14
+    atr_stop_multiple: float = 2.0
+    use_exit_hysteresis: bool = False
+    exit_confirm_bars: int = 3
+    exit_reversal_votes: int = 2
 
     def stop_loss_pct_for(self, symbol: str) -> float:
         return self.stop_loss_pct
@@ -207,8 +237,21 @@ class IntradayMomentumStrategy:
     def take_profit_pct_for(self, symbol: str) -> float:
         return self.take_profit_pct
 
+    def protective_prices(
+        self, symbol: str, average_cost: float, bars: list[Bar]
+    ) -> tuple[float, float]:
+        atr_distance = _atr(bars, self.atr_window) * self.atr_stop_multiple
+        stop_distance = max(average_cost * self.stop_loss_pct_for(symbol), atr_distance)
+        return max(0.01, average_cost - stop_distance), average_cost * (
+            1 + self.take_profit_pct_for(symbol)
+        )
+
     def _benchmark_bullish(self, bars: list[Bar]) -> bool:
-        if len(bars) < max(self.benchmark_fast_window, self.benchmark_slow_window, self.benchmark_trend_lookback):
+        if len(bars) < max(
+            self.benchmark_fast_window,
+            self.benchmark_slow_window,
+            self.benchmark_trend_lookback,
+        ):
             return False
         closes = [bar.close for bar in bars]
         fast_series = _ema_series(closes, self.benchmark_fast_window)
@@ -256,7 +299,9 @@ class IntradayMomentumStrategy:
             "above_vwap_bars": float(above_vwap_bars),
         }
 
-    def _bullish(self, bars: list[Bar], benchmark_bars: list[Bar] | None = None) -> bool:
+    def _bullish(
+        self, bars: list[Bar], benchmark_bars: list[Bar] | None = None
+    ) -> bool:
         snapshot = self._snapshot(bars)
         last = snapshot["last"]
         fast = snapshot["fast_ema"]
@@ -266,14 +311,53 @@ class IntradayMomentumStrategy:
         trend_gap = snapshot["trend_gap"]
         vwap_gap = snapshot["vwap_gap"]
         trend_slope = snapshot["trend_slope"]
-        bullish = fast > slow and last >= fast and last > trend and trend_slope > 0 and trend_gap >= self.min_trend_gap
+        bullish = (
+            fast > slow
+            and last >= fast
+            and last > trend
+            and trend_slope > 0
+            and trend_gap >= self.min_trend_gap
+        )
         if self.require_vwap_confirmation:
-            bullish = bullish and last > vwap and vwap_gap >= self.min_vwap_gap and snapshot["above_vwap_bars"] >= float(self.min_confirm_bars)
+            bullish = (
+                bullish
+                and last > vwap
+                and vwap_gap >= self.min_vwap_gap
+                and snapshot["above_vwap_bars"] >= float(self.min_confirm_bars)
+            )
         if self.require_benchmark_confirmation:
-            bullish = bullish and benchmark_bars is not None and self._benchmark_bullish(benchmark_bars)
+            bullish = (
+                bullish
+                and benchmark_bars is not None
+                and self._benchmark_bullish(benchmark_bars)
+            )
         return bullish
 
-    def decide(self, symbol: str, quote: Quote, bars: list[Bar], benchmark_bars: list[Bar] | None = None) -> StrategyDecision:
+    def _technical_reversal_confirmed(self, bars: list[Bar]) -> bool:
+        confirm_bars = max(1, self.exit_confirm_bars)
+        required_votes = max(1, min(3, self.exit_reversal_votes))
+        if len(bars) < confirm_bars:
+            return False
+        for end in range(len(bars) - confirm_bars + 1, len(bars) + 1):
+            snapshot = self._snapshot(bars[:end])
+            reversal_votes = sum(
+                (
+                    snapshot["fast_ema"] <= snapshot["slow_ema"],
+                    snapshot["last"] < snapshot["trend_ema"],
+                    snapshot["last"] < snapshot["vwap"],
+                )
+            )
+            if reversal_votes < required_votes:
+                return False
+        return True
+
+    def decide(
+        self,
+        symbol: str,
+        quote: Quote,
+        bars: list[Bar],
+        benchmark_bars: list[Bar] | None = None,
+    ) -> StrategyDecision:
         symbol = symbol.upper()
         if len(bars) < self.min_bars:
             return StrategyDecision(
@@ -293,6 +377,14 @@ class IntradayMomentumStrategy:
         limit_price = round(max(reference_price, snapshot["last"]), 2)
         quantity = int(self.max_notional // limit_price) if limit_price > 0 else 0
         score = float(snapshot["score"])
+        atr = _atr(bars, self.atr_window)
+        stop_distance = max(
+            reference_price * self.stop_loss_pct, atr * self.atr_stop_multiple
+        )
+        risk_quantity = (
+            int(self.max_risk_per_trade // stop_distance) if stop_distance > 0 else 0
+        )
+        quantity = min(quantity, risk_quantity)
 
         if not bullish or quantity <= 0 or score < self.min_score:
             return StrategyDecision(
@@ -309,7 +401,12 @@ class IntradayMomentumStrategy:
                 meta={
                     **snapshot,
                     "bullish": bullish,
-                    "benchmark_bullish": self._benchmark_bullish(benchmark_bars) if benchmark_bars else False,
+                    "benchmark_bullish": self._benchmark_bullish(benchmark_bars)
+                    if benchmark_bars
+                    else False,
+                    "atr": atr,
+                    "stop_distance": stop_distance,
+                    "risk_quantity": risk_quantity,
                     "bars": len(bars),
                 },
             )
@@ -328,12 +425,25 @@ class IntradayMomentumStrategy:
             meta={
                 **snapshot,
                 "bullish": bullish,
-                "benchmark_bullish": self._benchmark_bullish(benchmark_bars) if benchmark_bars else False,
+                "benchmark_bullish": self._benchmark_bullish(benchmark_bars)
+                if benchmark_bars
+                else False,
+                "atr": atr,
+                "stop_distance": stop_distance,
+                "risk_quantity": risk_quantity,
                 "bars": len(bars),
             },
         )
 
-    def exit_decide(self, symbol: str, quote: Quote, bars: list[Bar], quantity: int, average_cost: float) -> StrategyDecision:
+    def exit_decide(
+        self,
+        symbol: str,
+        quote: Quote,
+        bars: list[Bar],
+        quantity: int,
+        average_cost: float,
+        benchmark_bars: list[Bar] | None = None,
+    ) -> StrategyDecision:
         symbol = symbol.upper()
         if quantity <= 0:
             return StrategyDecision(
@@ -361,9 +471,12 @@ class IntradayMomentumStrategy:
 
         snapshot = self._snapshot(bars)
         last = snapshot["last"]
-        stop_price = average_cost * (1 - self.stop_loss_pct)
-        take_price = average_cost * (1 + self.take_profit_pct)
-        bearish = not self._bullish(bars)
+        stop_price, take_price = self.protective_prices(symbol, average_cost, bars)
+        bearish = (
+            self._technical_reversal_confirmed(bars)
+            if self.use_exit_hysteresis
+            else not self._bullish(bars, benchmark_bars)
+        )
         stop_hit = last <= stop_price
         take_hit = last >= take_price
 
@@ -380,7 +493,13 @@ class IntradayMomentumStrategy:
                     f"last={last:.2f} vwap={snapshot['vwap']:.2f}"
                 ),
                 signal=False,
-                meta={**snapshot, "bullish": not bearish, "bars": len(bars), "stop_price": stop_price, "take_price": take_price},
+                meta={
+                    **snapshot,
+                    "bullish": not bearish,
+                    "bars": len(bars),
+                    "stop_price": stop_price,
+                    "take_price": take_price,
+                },
             )
 
         return StrategyDecision(
@@ -437,6 +556,13 @@ class SemiconductorRotationStrategy:
     short_min_score: float = 0.006
     require_vwap_confirmation: bool = True
     require_benchmark_confirmation: bool = True
+    max_risk_per_trade: float = 10.0
+    atr_window: int = 14
+    atr_stop_multiple: float = 2.0
+    use_exit_hysteresis: bool = False
+    exit_confirm_bars: int = 3
+    benchmark_exit_confirm_bars: int = 1
+    exit_reversal_votes: int = 2
     long_strategy: IntradayMomentumStrategy = field(init=False, repr=False)
     short_strategy: IntradayMomentumStrategy = field(init=False, repr=False)
 
@@ -464,6 +590,12 @@ class SemiconductorRotationStrategy:
             min_vwap_gap=self.long_min_vwap_gap,
             min_score=self.long_min_score,
             require_benchmark_confirmation=self.require_benchmark_confirmation,
+            max_risk_per_trade=self.max_risk_per_trade,
+            atr_window=self.atr_window,
+            atr_stop_multiple=self.atr_stop_multiple,
+            use_exit_hysteresis=self.use_exit_hysteresis,
+            exit_confirm_bars=self.exit_confirm_bars,
+            exit_reversal_votes=self.exit_reversal_votes,
         )
         self.short_strategy = IntradayMomentumStrategy(
             symbols=(self.short_symbol,),
@@ -485,6 +617,12 @@ class SemiconductorRotationStrategy:
             min_vwap_gap=self.short_min_vwap_gap,
             min_score=self.short_min_score,
             require_benchmark_confirmation=False,
+            max_risk_per_trade=self.max_risk_per_trade,
+            atr_window=self.atr_window,
+            atr_stop_multiple=self.atr_stop_multiple,
+            use_exit_hysteresis=self.use_exit_hysteresis,
+            exit_confirm_bars=self.exit_confirm_bars,
+            exit_reversal_votes=self.exit_reversal_votes,
         )
 
     def _benchmark_bullish(self, bars: list[Bar]) -> bool:
@@ -505,6 +643,33 @@ class SemiconductorRotationStrategy:
         if symbol == self.short_symbol:
             return self.short_take_profit_pct
         raise ValueError(f"symbol not traded: {symbol}")
+
+    def protective_prices(
+        self, symbol: str, average_cost: float, bars: list[Bar]
+    ) -> tuple[float, float]:
+        symbol = symbol.upper()
+        if symbol == self.long_symbol:
+            strategy = self.long_strategy
+        elif symbol == self.short_symbol:
+            strategy = self.short_strategy
+        else:
+            raise ValueError(f"symbol not traded: {symbol}")
+        return strategy.protective_prices(symbol, average_cost, bars)
+
+    def _benchmark_reversal_confirmed(
+        self, symbol: str, benchmark_bars: list[Bar] | None
+    ) -> bool:
+        confirm_bars = max(1, self.benchmark_exit_confirm_bars)
+        if benchmark_bars is None or len(benchmark_bars) < confirm_bars:
+            return False
+        for end in range(
+            len(benchmark_bars) - confirm_bars + 1, len(benchmark_bars) + 1
+        ):
+            bullish = self._benchmark_bullish(benchmark_bars[:end])
+            reversal = not bullish if symbol == self.long_symbol else bullish
+            if not reversal:
+                return False
+        return True
 
     def decide(
         self,
@@ -540,7 +705,9 @@ class SemiconductorRotationStrategy:
         bullish = self._benchmark_bullish(benchmark_bars)
         if symbol == self.long_symbol:
             if bullish:
-                return self.long_strategy.decide(symbol, quote, bars, benchmark_bars=benchmark_bars)
+                return self.long_strategy.decide(
+                    symbol, quote, bars, benchmark_bars=benchmark_bars
+                )
             return StrategyDecision(
                 symbol=symbol,
                 action="HOLD",
@@ -553,7 +720,9 @@ class SemiconductorRotationStrategy:
             )
         if symbol == self.short_symbol:
             if not bullish:
-                return self.short_strategy.decide(symbol, quote, bars, benchmark_bars=None)
+                return self.short_strategy.decide(
+                    symbol, quote, bars, benchmark_bars=None
+                )
             return StrategyDecision(
                 symbol=symbol,
                 action="HOLD",
@@ -582,12 +751,50 @@ class SemiconductorRotationStrategy:
         bars: list[Bar],
         quantity: int,
         average_cost: float,
+        benchmark_bars: list[Bar] | None = None,
     ) -> StrategyDecision:
         symbol = symbol.upper()
         if symbol == self.long_symbol:
-            return self.long_strategy.exit_decide(symbol, quote, bars, quantity, average_cost)
+            decision = self.long_strategy.exit_decide(
+                symbol,
+                quote,
+                bars,
+                quantity,
+                average_cost,
+                benchmark_bars=benchmark_bars,
+            )
+            if not decision.signal and self._benchmark_reversal_confirmed(
+                symbol, benchmark_bars
+            ):
+                return StrategyDecision(
+                    symbol=symbol,
+                    action="SELL",
+                    quantity=quantity,
+                    reference_price=quote.reference_price,
+                    limit_price=None,
+                    reason="exit long execution ETF: benchmark regime turned bearish",
+                    signal=True,
+                    meta={**decision.meta, "benchmark_bullish": False, "bearish": True},
+                )
+            return decision
         if symbol == self.short_symbol:
-            return self.short_strategy.exit_decide(symbol, quote, bars, quantity, average_cost)
+            decision = self.short_strategy.exit_decide(
+                symbol, quote, bars, quantity, average_cost, benchmark_bars=None
+            )
+            if not decision.signal and self._benchmark_reversal_confirmed(
+                symbol, benchmark_bars
+            ):
+                return StrategyDecision(
+                    symbol=symbol,
+                    action="SELL",
+                    quantity=quantity,
+                    reference_price=quote.reference_price,
+                    limit_price=None,
+                    reason="exit inverse execution ETF: benchmark regime turned bullish",
+                    signal=True,
+                    meta={**decision.meta, "benchmark_bullish": True, "bearish": True},
+                )
+            return decision
         return StrategyDecision(
             symbol=symbol,
             action="HOLD",

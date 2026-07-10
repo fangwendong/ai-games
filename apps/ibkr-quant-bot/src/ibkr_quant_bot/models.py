@@ -38,6 +38,9 @@ class TradeRequest:
     quantity: int
     order_type: str = "MKT"
     limit_price: float | None = None
+    time_in_force: str | None = None
+    order_ref: str | None = None
+    reduce_only: bool = False
 
 
 @dataclass(frozen=True)

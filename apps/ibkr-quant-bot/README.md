@@ -9,6 +9,12 @@ This project is intentionally guarded:
 - `IBKR_DRY_RUN=true` is the default, so validated orders are not sent.
 - Live mode requires both `IBKR_TRADING_MODE=live` and `IBKR_ALLOW_LIVE_TRADING=true`.
 - Every order is checked against `IBKR_ALLOWED_SYMBOLS` and `IBKR_MAX_ORDER_NOTIONAL`.
+- A submitted order must also match the account environment reported by Gateway:
+  `DU...` paper accounts are rejected in live mode and `U...` production
+  accounts are rejected in paper mode. Set `IBKR_ACCOUNT` when more than one
+  account is exposed.
+- `SELL` is reduce-only in this application: it must be covered by the current
+  long position after subtracting active sell orders.
 
 ## API Choice
 
@@ -64,6 +70,11 @@ ibkr-bot doctor
 For a logged-in live IB Gateway, the common API port is `4001`. Keep `IBKR_READONLY=true` for balance, position, and quote checks:
 
 The local IBC startup and login process is documented in [docs/ibc-gateway-startup.md](docs/ibc-gateway-startup.md).
+If quotes unexpectedly fall back to delayed data or the live strategy reports
+that live quotes are unavailable, use
+[docs/ibkr-market-data-troubleshooting.md](docs/ibkr-market-data-troubleshooting.md).
+That runbook also documents how to enable real-time market data in IBKR Client
+Portal and the required Market Data API acknowledgement.
 
 ```bash
 cd apps/ibkr-quant-bot
@@ -164,6 +175,17 @@ In live trading mode, the intraday scanners refuse delayed market data:
 - Historical bars must be fresh. By default the latest bar may be at most
   `IBKR_LIVE_BAR_MAX_AGE_SECONDS=420` seconds old, which allows normal
   completed 5-minute bars but rejects 15-20 minute delayed data.
+- Strategy bars are restricted to the current New York regular session, so the
+  opening signal cannot inherit the prior day's EMA or VWAP history.
+- The scanner stops entering and liquidates positions during the final
+  `IBKR_FLATTEN_BEFORE_CLOSE_MINUTES=10` minutes. Run the command on a schedule
+  that includes this window; no software can flatten a position if it is not running.
+
+The market data troubleshooting runbook is
+[docs/ibkr-market-data-troubleshooting.md](docs/ibkr-market-data-troubleshooting.md).
+It documents the previous failure mode where subscriptions were enabled but
+the active Gateway session still needed a restart and fresh 2FA before live
+quotes worked.
 
 For a more active variant, use:
 
@@ -171,19 +193,36 @@ For a more active variant, use:
 ibkr-bot intraday-momentum --profile high-frequency
 ```
 
-For the best backtested variant in this branch, use the semiconductor
-rotation preset:
+The semiconductor rotation research preset is available with:
 
 ```bash
 ibkr-bot intraday-momentum --profile rotation
 ibkr-bot backtest-momentum --profile rotation
 ```
 
-This preset rotates between `SOXL` and `SOXS` based on the `QQQ` regime and
-has been the strongest performer in the recent 7D/14D/30D tests. The current
-tuned defaults use a slightly looser entry filter and a wider take-profit:
+This preset rotates between `SOXL` and `SOXS` based on the `QQQ` regime. The
+old 7D/14D/30D numbers were overlapping diagnostics, not independent
+validation, and are intentionally no longer presented as evidence of an edge.
+The current research parameters are:
 `min_confirm_bars=1`, `min_trend_gap=0.001`, `min_vwap_gap=0.00025`,
 `min_score=0.006`, `take_profit_pct=0.035`.
+
+An opt-in exit-hysteresis research profile is also available:
+
+```bash
+ibkr-bot intraday-momentum --profile rotation-hysteresis
+ibkr-bot backtest-momentum --profile rotation-hysteresis
+```
+
+It keeps the same entries and risk budget but requires three consecutive bars
+to confirm a technical reversal, three consecutive benchmark states to confirm
+a regime reversal, and uses a 4.5% take-profit. The ordinary `rotation` profile
+is intentionally unchanged. In the 2025-07-10 through 2026-07-09 research run,
+28 candidates were compared on 209 development sessions before opening a final
+42-session holdout. The hysteresis profile improved the holdout net return from
+3.52% to 8.74%, but two of four development blocks remained negative and a
+double-cost development stress test remained negative. Treat it as a paper-
+trading candidate, not a proven production edge.
 
 Backtest the same rule with a built-in transaction-cost model:
 
@@ -191,15 +230,37 @@ Backtest the same rule with a built-in transaction-cost model:
 ibkr-bot backtest-momentum
 ```
 
-The backtest models per-order commission plus per-side spread/slippage, so the
-reported `net_return_pct` is the more realistic number.
+By default the command builds one three-year data set using backward `1 W`
+pages with explicit request end times (rather than an invalid monolithic
+`3 Y`/`5 mins` request), runs chronological
+252-day/63-day walk-forward folds, and reserves the final 63 trading days as a
+fully untouched holdout. The parameters remain fixed: training ranges are
+reported for provenance and are not silently optimized. The backtest models
+commission, spread and slippage; entry and signal exits fill at the next bar's
+open, and benchmark/asset bars are aligned by timestamp rather than array index.
+
+Live entry size is capped by both notional and ATR risk:
+`quantity <= IBKR_MAX_RISK_PER_TRADE / max(percent_stop, ATR * multiple)`.
+Filled entries receive broker-hosted GTC stop/take OCA orders. On restart, the
+scanner queries active and completed IBKR orders by deterministic order ref,
+rebuilds missing protection for an open position, and refuses duplicate entry
+tasks. Order snapshots distinguish active, partial, filled, cancelled, and
+rejected/inactive states.
+
+SOXL and SOXS are execution instruments with a daily 3x/-3x objective, not a
+promise of three times the index's cumulative multi-day return. See the
+[Direxion product disclosure](https://www.direxion.com/product/daily-semiconductor-bull-bear-3x-etfs).
+The mandatory intraday flatten and risk cap are deliberate; for future signal
+research, prefer an unleveraged semiconductor proxy such as SOXX or SMH and
+keep the leveraged ETF confined to execution.
 
 ## Production Checklist
 
 - Keep strategy code deterministic and test it without a broker connection.
 - Keep paper trading on until market data, account, risk, and order-state handling are verified.
-- Add position-aware risk controls before any live use.
-- Add structured logs and alerting for disconnects, rejected orders, partial fills, and stale data.
+- Verify OCA behavior, partial fills, rejection handling, restart recovery, and
+  end-of-day scheduling in the target paper account before enabling production.
+- Add external alerting for disconnects, rejected orders, partial fills, and stale data.
 - Run the bot under a process manager only after it can recover cleanly from TWS or Gateway restarts.
 - For this host's IBC/Gateway keepalive setup, daily restart, Sunday cold restart, and 2FA retry notes, see [docs/ibc-gateway-startup.md](docs/ibc-gateway-startup.md).
 
