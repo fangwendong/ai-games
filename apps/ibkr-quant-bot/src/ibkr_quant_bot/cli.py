@@ -15,6 +15,7 @@ from .backtest import (
     evaluate_parameter_stability,
 )
 from .config import Settings, load_settings
+from .historical_cache import load_bars, save_bars_by_day
 from .models import Bar, StrategyDecision, TradeRequest
 from .risk import RiskManager
 from .strategy import (
@@ -227,6 +228,16 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     backtest.add_argument(
         "--spread-bps", type=float, default=1.0, help="spread in basis points per side"
+    )
+    backtest.add_argument(
+        "--data-dir",
+        default=".ibkr_bot_data/historical",
+        help="daily historical bar cache directory",
+    )
+    backtest.add_argument(
+        "--reuse-data",
+        action="store_true",
+        help="run from cached daily bars without connecting to IBKR",
     )
 
     return parser
@@ -613,8 +624,10 @@ def _build_momentum_strategy(args: argparse.Namespace, settings: Settings):
             max_risk_per_trade=settings.max_risk_per_trade,
             atr_window=settings.atr_window,
             atr_stop_multiple=settings.atr_stop_multiple,
-            long_take_profit_pct=0.045 if hysteresis else 0.035,
-            short_take_profit_pct=0.045 if hysteresis else 0.035,
+            long_stop_loss_pct=0.006 if hysteresis else 0.012,
+            short_stop_loss_pct=0.006 if hysteresis else 0.012,
+            long_take_profit_pct=0.0375 if hysteresis else 0.035,
+            short_take_profit_pct=0.0375 if hysteresis else 0.035,
             use_exit_hysteresis=hysteresis,
             exit_confirm_bars=3,
             benchmark_exit_confirm_bars=3 if hysteresis else 1,
@@ -640,7 +653,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "doctor":
         return _doctor(settings)
 
-    broker = _with_broker(settings)
+    broker = None
+    if not (args.command == "backtest-momentum" and args.reuse_data):
+        broker = _with_broker(settings)
     try:
         if args.command == "quote":
             print(
@@ -989,7 +1004,8 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             entry_order_ref = (
                 f"momentum-{datetime.now(NEW_YORK).date()}-"
-                f"{max(buy_candidates, key=lambda item: float(item.meta.get('score', 0.0))).symbol}-entry"
+                f"{max(buy_candidates, key=lambda item: float(item.meta.get('score', 0.0))).symbol}-entry-"
+                f"{datetime.now(NEW_YORK).strftime('%H%M%S')}"
             )
             if broker.order_ref_exists(entry_order_ref):
                 print(
@@ -1183,18 +1199,44 @@ def main(argv: list[str] | None = None) -> int:
                     "test_days": args.test_days,
                     "step_days": args.step_days,
                     "holdout_days": args.holdout_days,
+                    "data_source": "daily cache" if args.reuse_data else "IBKR",
+                    "data_dir": str(Path(args.data_dir).resolve()),
                 },
             }
             bars_by_symbol: dict[str, list[Bar]] = {}
             for symbol in strategy.symbols:
-                bars_by_symbol[symbol] = broker.historical_bars_paged(
-                    symbol, duration=args.duration, bar_size="5 mins"
+                if args.reuse_data:
+                    bars_by_symbol[symbol] = load_bars(
+                        args.data_dir, symbol, "5 mins", duration=args.duration
+                    )
+                else:
+                    bars_by_symbol[symbol] = broker.historical_bars_paged(
+                        symbol,
+                        duration=args.duration,
+                        bar_size="5 mins",
+                        page_callback=lambda rows, cached_symbol=symbol: save_bars_by_day(
+                            args.data_dir, cached_symbol, "5 mins", rows
+                        ),
+                    )
+            benchmark = strategy.benchmark_symbol
+            if args.reuse_data:
+                bars_by_symbol[benchmark] = load_bars(
+                    args.data_dir, benchmark, "5 mins", duration=args.duration
                 )
-            bars_by_symbol[strategy.benchmark_symbol] = broker.historical_bars_paged(
-                strategy.benchmark_symbol,
-                duration=args.duration,
-                bar_size="5 mins",
-            )
+            else:
+                bars_by_symbol[benchmark] = broker.historical_bars_paged(
+                    benchmark,
+                    duration=args.duration,
+                    bar_size="5 mins",
+                    page_callback=lambda rows: save_bars_by_day(
+                        args.data_dir, benchmark, "5 mins", rows
+                    ),
+                )
+            missing = [symbol for symbol, bars in bars_by_symbol.items() if not bars]
+            if missing:
+                raise BrokerError(
+                    "no historical bars available for " + ", ".join(sorted(missing))
+                )
             evaluation = evaluate_fixed_strategy_walk_forward(
                 bars_by_symbol,
                 strategy,
@@ -1296,7 +1338,8 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(report, indent=2, sort_keys=True))
             return 0
     finally:
-        broker.disconnect()
+        if broker is not None:
+            broker.disconnect()
 
     return 2
 

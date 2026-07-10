@@ -66,7 +66,7 @@ class LiveDataGuardsTest(unittest.TestCase):
         self.assertTrue(strategy.use_exit_hysteresis)
         self.assertEqual(3, strategy.exit_confirm_bars)
         self.assertEqual(3, strategy.benchmark_exit_confirm_bars)
-        self.assertEqual(0.045, strategy.long_take_profit_pct)
+        self.assertEqual(0.0375, strategy.long_take_profit_pct)
 
     def test_plain_rotation_profile_is_still_available(self) -> None:
         args = _build_parser().parse_args(["intraday-momentum", "--profile", "rotation"])
@@ -83,7 +83,7 @@ class LiveDataGuardsTest(unittest.TestCase):
         strategy = _build_momentum_strategy(args, Settings())
 
         self.assertTrue(strategy.use_exit_hysteresis)
-        self.assertEqual(0.045, strategy.long_take_profit_pct)
+        self.assertEqual(0.0375, strategy.long_take_profit_pct)
 
     def test_live_strategy_rejects_stale_bars(self) -> None:
         settings = Settings(trading_mode="live", live_bar_max_age_seconds=420)

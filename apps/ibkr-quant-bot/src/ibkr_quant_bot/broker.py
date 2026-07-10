@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import time
 import uuid
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -178,6 +178,7 @@ class IbkrBroker:
         what_to_show: str = "TRADES",
         chunk_duration: str = "1 W",
         end_time: datetime | None = None,
+        page_callback: Callable[[list[Bar]], None] | None = None,
     ) -> list[Bar]:
         """Page backward with explicit end times for long intraday histories."""
         end = end_time or datetime.now(timezone.utc)
@@ -211,9 +212,13 @@ class IbkrBroker:
                 )
                 for row in rows
             ]
+            page_rows: list[Bar] = []
             for timestamp, row in normalized:
                 if cutoff <= timestamp <= end:
                     rows_by_time[timestamp] = row
+                    page_rows.append(row)
+            if page_callback is not None and page_rows:
+                page_callback(page_rows)
             earliest = min(timestamp for timestamp, _ in normalized)
             if earliest <= cutoff:
                 break

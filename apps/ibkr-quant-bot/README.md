@@ -234,6 +234,45 @@ Backtest the same rule with a built-in transaction-cost model:
 ibkr-bot backtest-momentum
 ```
 
+The tuning workflow used for this branch is documented in
+[docs/backtest-parameter-tuning.md](docs/backtest-parameter-tuning.md).
+
+### Historical Data Cache
+
+Long intraday backtests persist every completed IBKR history page as daily
+JSON files under `.ibkr_bot_data/historical/` by default:
+
+```text
+.ibkr_bot_data/historical/
+├── 2026-07-08/
+│   ├── QQQ__5_mins.json
+│   ├── SOXL__5_mins.json
+│   └── SOXS__5_mins.json
+└── 2026-07-09/
+    ├── QQQ__5_mins.json
+    ├── SOXL__5_mins.json
+    └── SOXS__5_mins.json
+```
+
+Overlapping pages are merged by timestamp, so retrying a download is safe.
+The cache directory is ignored by git. To choose another location:
+
+```bash
+ibkr-bot backtest-momentum --data-dir /path/to/ibkr-history
+```
+
+To rerun from the daily files without connecting to IBKR, use the same
+duration and cache directory with `--reuse-data`:
+
+```bash
+ibkr-bot backtest-momentum --duration "3 Y" --reuse-data
+```
+
+`--reuse-data` never refreshes the cache. Run once without that flag after a
+new market session to download current bars and merge them into the daily
+files. Keep the cache local: although it contains market data rather than
+credentials, redistribution may be restricted by the data provider's terms.
+
 By default the command builds one three-year data set using backward `1 W`
 pages with explicit request end times (rather than an invalid monolithic
 `3 Y`/`5 mins` request), runs chronological
