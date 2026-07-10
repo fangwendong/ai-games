@@ -25,6 +25,7 @@ from .strategy import (
 )
 
 NEW_YORK = ZoneInfo("America/New_York")
+DEFAULT_MOMENTUM_PROFILE = "rotation-hysteresis"
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -82,8 +83,8 @@ def _build_parser() -> argparse.ArgumentParser:
     momentum.add_argument(
         "--profile",
         choices=["balanced", "high-frequency", "rotation", "rotation-hysteresis"],
-        default="balanced",
-        help="strategy preset; high-frequency increases trade count but usually weakens returns",
+        default=DEFAULT_MOMENTUM_PROFILE,
+        help="strategy preset; rotation-hysteresis is the current default live profile",
     )
     momentum.add_argument(
         "--benchmark-symbol",
@@ -164,8 +165,8 @@ def _build_parser() -> argparse.ArgumentParser:
     backtest.add_argument(
         "--profile",
         choices=["balanced", "high-frequency", "rotation", "rotation-hysteresis"],
-        default="balanced",
-        help="strategy preset; high-frequency increases trade count but usually weakens returns",
+        default=DEFAULT_MOMENTUM_PROFILE,
+        help="strategy preset; rotation-hysteresis is the current default live profile",
     )
     backtest.add_argument(
         "--benchmark-symbol",

@@ -58,16 +58,31 @@ def make_bar(age: timedelta) -> Bar:
 
 
 class LiveDataGuardsTest(unittest.TestCase):
-    def test_hysteresis_profile_is_opt_in(self) -> None:
-        args = _build_parser().parse_args(
-            ["intraday-momentum", "--profile", "rotation-hysteresis"]
-        )
+    def test_hysteresis_profile_is_default(self) -> None:
+        args = _build_parser().parse_args(["intraday-momentum"])
 
         strategy = _build_momentum_strategy(args, Settings())
 
         self.assertTrue(strategy.use_exit_hysteresis)
         self.assertEqual(3, strategy.exit_confirm_bars)
         self.assertEqual(3, strategy.benchmark_exit_confirm_bars)
+        self.assertEqual(0.045, strategy.long_take_profit_pct)
+
+    def test_plain_rotation_profile_is_still_available(self) -> None:
+        args = _build_parser().parse_args(["intraday-momentum", "--profile", "rotation"])
+
+        strategy = _build_momentum_strategy(args, Settings())
+
+        self.assertFalse(strategy.use_exit_hysteresis)
+        self.assertEqual(1, strategy.benchmark_exit_confirm_bars)
+        self.assertEqual(0.035, strategy.long_take_profit_pct)
+
+    def test_backtest_uses_hysteresis_profile_by_default(self) -> None:
+        args = _build_parser().parse_args(["backtest-momentum"])
+
+        strategy = _build_momentum_strategy(args, Settings())
+
+        self.assertTrue(strategy.use_exit_hysteresis)
         self.assertEqual(0.045, strategy.long_take_profit_pct)
 
     def test_live_strategy_rejects_stale_bars(self) -> None:
