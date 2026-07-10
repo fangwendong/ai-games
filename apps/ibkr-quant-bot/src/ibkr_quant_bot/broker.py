@@ -54,14 +54,21 @@ class IbkrBroker:
         self._stock = Stock
 
     def connect(self) -> None:
+        type(self._ib).RequestTimeout = self.settings.request_timeout
         self._ib.connect(
             self.settings.host,
             self.settings.port,
             clientId=self.settings.client_id,
+            timeout=self.settings.request_timeout,
             readonly=self.settings.readonly,
         )
+        self._set_market_data_type(self.settings.market_data_type)
+
+    def _set_market_data_type(self, market_data_type: str) -> int:
         data_types = {"live": 1, "frozen": 2, "delayed": 3, "delayed_frozen": 4}
-        self._ib.reqMarketDataType(data_types.get(self.settings.market_data_type, 3))
+        resolved = data_types.get(market_data_type, 3)
+        self._ib.reqMarketDataType(resolved)
+        return resolved
 
     def disconnect(self) -> None:
         if self._ib.isConnected():
@@ -74,7 +81,8 @@ class IbkrBroker:
             raise BrokerError(f"could not qualify stock contract for {symbol}")
         return qualified[0]
 
-    def quote(self, symbol: str) -> Quote:
+    def _quote_with_type(self, symbol: str, market_data_type: str) -> Quote:
+        self._set_market_data_type(market_data_type)
         contract = self._stock_contract(symbol)
         ticker = self._ib.reqMktData(contract, "", False, False)
         self._ib.sleep(2)
@@ -87,11 +95,26 @@ class IbkrBroker:
             close=_clean_number(ticker.close),
         )
 
+    def quote(self, symbol: str) -> Quote:
+        mode = (self.settings.market_data_type or "auto").strip().lower()
+        if mode == "auto":
+            live_quote = self._quote_with_type(symbol, "live")
+            if live_quote.bid is not None or live_quote.ask is not None or live_quote.last is not None:
+                return live_quote
+            return self._quote_with_type(symbol, "delayed")
+        return self._quote_with_type(symbol, mode)
+
+    def live_quote(self, symbol: str) -> Quote:
+        quote = self._quote_with_type(symbol, "live")
+        if quote.bid is None and quote.ask is None and quote.last is None:
+            raise BrokerError(f"live quote unavailable for {symbol}; refusing to use delayed data")
+        return quote
+
     def historical_bars(
         self,
         symbol: str,
-        duration: str = "2 D",
-        bar_size: str = "5 mins",
+        duration: str = "1 D",
+        bar_size: str = "1 min",
         what_to_show: str = "TRADES",
     ) -> list[Bar]:
         contract = self._stock_contract(symbol)
@@ -159,6 +182,9 @@ class IbkrBroker:
         trade = self._ib.placeOrder(contract, order)
         self._ib.sleep(1)
         return trade
+
+    def market_clock(self) -> datetime:
+        return datetime.utcnow()
 
 
 def format_table(rows: Iterable[dict[str, str]], columns: list[str]) -> str:

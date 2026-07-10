@@ -5,7 +5,7 @@ Python scaffold for connecting to Interactive Brokers market data and trading AP
 This project is intentionally guarded:
 
 - `IBKR_READONLY=true` is the default, so broker connections are read-only unless explicitly changed.
-- Paper trading port `7497` is the default.
+- IB Gateway port `4001` is the default in this environment.
 - `IBKR_DRY_RUN=true` is the default, so validated orders are not sent.
 - Live mode requires both `IBKR_TRADING_MODE=live` and `IBKR_ALLOW_LIVE_TRADING=true`.
 - Every order is checked against `IBKR_ALLOWED_SYMBOLS` and `IBKR_MAX_ORDER_NOTIONAL`.
@@ -41,6 +41,15 @@ set -a
 source .env
 set +a
 ```
+
+### Runtime Isolation
+
+Use separate checkouts for backtest/dev and live execution:
+
+- `apps/ibkr-quant-bot/` is the development and backtest checkout.
+- `/home/fwd/work/ai-games-wt-codex-live/apps/ibkr-quant-bot/` is the live checkout used by the running strategy.
+
+Each checkout keeps its own `.env`, so editing backtest code or parameters in the dev tree does not affect the live bot unless you explicitly sync the live tree.
 
 ## Commands
 
@@ -108,6 +117,83 @@ Run the sample moving-average strategy once:
 ibkr-bot run-once AAPL --fast 5 --slow 20 --quantity 1
 ```
 
+### VWAP Pullback Scanner
+
+Scan the intraday VWAP pullback setup for `SOXL`, `TQQQ`, and `TECL`:
+
+```bash
+ibkr-bot vwap-pullback
+```
+
+The command only runs during regular US market hours, and it uses a single
+order cap of `IBKR_MAX_ORDER_NOTIONAL` (default `1000`).
+
+Automatic order submission still respects the existing safety switches:
+
+- `IBKR_READONLY=true` suppresses order placement.
+- `IBKR_DRY_RUN=true` prints the order instead of submitting it.
+- `IBKR_ALLOW_LIVE_TRADING=true` is required for live trading in `live` mode.
+- `IBKR_ALLOWED_SYMBOLS` still applies to the generic order command, while the
+  VWAP scanner uses `IBKR_VWAP_SYMBOLS` (`SOXL,TQQQ,TECL` by default).
+
+### Intraday Momentum Rotation
+
+The VWAP pullback model was kept for reference, but the higher-conviction
+intraday setup in this branch is the momentum rotation rule:
+
+- 5-minute bars
+- fast EMA 13
+- slow EMA 21
+- medium-term EMA regime filter
+- lighter benchmark confirmation on `QQQ`
+- enter only when price is above the fast/slow EMAs, the regime EMA, and VWAP
+- require a minimum momentum score plus recent VWAP confirmation before entry
+- exit on stop loss, take profit, or bearish reversal
+- one open position at a time across `SOXL`, `TQQQ`, and `TECL`
+
+Run the scanner and exit manager with:
+
+```bash
+ibkr-bot intraday-momentum
+```
+
+In live trading mode, the intraday scanners refuse delayed market data:
+
+- Quote requests are forced through live market data instead of the generic
+  `auto` fallback path.
+- Historical bars must be fresh. By default the latest bar may be at most
+  `IBKR_LIVE_BAR_MAX_AGE_SECONDS=420` seconds old, which allows normal
+  completed 5-minute bars but rejects 15-20 minute delayed data.
+
+For a more active variant, use:
+
+```bash
+ibkr-bot intraday-momentum --profile high-frequency
+```
+
+For the best backtested variant in this branch, use the semiconductor
+rotation preset:
+
+```bash
+ibkr-bot intraday-momentum --profile rotation
+ibkr-bot backtest-momentum --profile rotation
+```
+
+This preset rotates between `SOXL` and `SOXS` based on the `QQQ` regime and
+has been the strongest performer in the recent 7D/14D/30D tests. The current
+tuned defaults use a slightly looser entry filter and a wider take-profit:
+`min_confirm_bars=1`, `min_trend_gap=0.001`, `min_vwap_gap=0.00025`,
+`min_score=0.006`, `take_profit_pct=0.035`.
+
+Backtest the same rule with a built-in transaction-cost model:
+
+```bash
+ibkr-bot backtest-momentum
+```
+
+The backtest models per-order commission plus per-side spread/slippage, so the
+reported `net_return_pct` is the more realistic number.
+
 ## Production Checklist
 
 - Keep strategy code deterministic and test it without a broker connection.
@@ -115,6 +201,7 @@ ibkr-bot run-once AAPL --fast 5 --slow 20 --quantity 1
 - Add position-aware risk controls before any live use.
 - Add structured logs and alerting for disconnects, rejected orders, partial fills, and stale data.
 - Run the bot under a process manager only after it can recover cleanly from TWS or Gateway restarts.
+- For this host's IBC/Gateway keepalive setup, daily restart, Sunday cold restart, and 2FA retry notes, see [docs/ibc-gateway-startup.md](docs/ibc-gateway-startup.md).
 
 ## Tests
 

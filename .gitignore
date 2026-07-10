@@ -1,0 +1,5 @@
+.env
+__pycache__/
+*.py[cod]
+.ibkr_bot_state/
+.ibkr_bot_state*/
