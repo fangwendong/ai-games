@@ -207,6 +207,23 @@ The current research parameters are:
 `min_confirm_bars=1`, `min_trend_gap=0.001`, `min_vwap_gap=0.00025`,
 `min_score=0.006`, `take_profit_pct=0.035`.
 
+An opt-in exit-hysteresis research profile is also available:
+
+```bash
+ibkr-bot intraday-momentum --profile rotation-hysteresis
+ibkr-bot backtest-momentum --profile rotation-hysteresis
+```
+
+It keeps the same entries and risk budget but requires three consecutive bars
+to confirm a technical reversal, three consecutive benchmark states to confirm
+a regime reversal, and uses a 4.5% take-profit. The ordinary `rotation` profile
+is intentionally unchanged. In the 2025-07-10 through 2026-07-09 research run,
+28 candidates were compared on 209 development sessions before opening a final
+42-session holdout. The hysteresis profile improved the holdout net return from
+3.52% to 8.74%, but two of four development blocks remained negative and a
+double-cost development stress test remained negative. Treat it as a paper-
+trading candidate, not a proven production edge.
+
 Backtest the same rule with a built-in transaction-cost model:
 
 ```bash

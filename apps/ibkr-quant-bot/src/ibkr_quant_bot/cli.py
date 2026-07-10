@@ -81,7 +81,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     momentum.add_argument(
         "--profile",
-        choices=["balanced", "high-frequency", "rotation"],
+        choices=["balanced", "high-frequency", "rotation", "rotation-hysteresis"],
         default="balanced",
         help="strategy preset; high-frequency increases trade count but usually weakens returns",
     )
@@ -163,7 +163,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     backtest.add_argument(
         "--profile",
-        choices=["balanced", "high-frequency", "rotation"],
+        choices=["balanced", "high-frequency", "rotation", "rotation-hysteresis"],
         default="balanced",
         help="strategy preset; high-frequency increases trade count but usually weakens returns",
     )
@@ -604,13 +604,20 @@ def _momentum_kwargs(args: argparse.Namespace) -> dict[str, object]:
 
 def _build_momentum_strategy(args: argparse.Namespace, settings: Settings):
     profile = getattr(args, "profile", "balanced")
-    if profile == "rotation":
+    if profile in {"rotation", "rotation-hysteresis"}:
+        hysteresis = profile == "rotation-hysteresis"
         return SemiconductorRotationStrategy(
             benchmark_symbol=args.benchmark_symbol,
             max_notional=args.max_notional or settings.max_order_notional,
             max_risk_per_trade=settings.max_risk_per_trade,
             atr_window=settings.atr_window,
             atr_stop_multiple=settings.atr_stop_multiple,
+            long_take_profit_pct=0.045 if hysteresis else 0.035,
+            short_take_profit_pct=0.045 if hysteresis else 0.035,
+            use_exit_hysteresis=hysteresis,
+            exit_confirm_bars=3,
+            benchmark_exit_confirm_bars=3 if hysteresis else 1,
+            exit_reversal_votes=2,
         )
     return IntradayMomentumStrategy(
         symbols=settings.vwap_symbols,
@@ -1114,6 +1121,10 @@ def main(argv: list[str] | None = None) -> int:
                     "min_bars": strategy.min_bars,
                     "require_benchmark_confirmation": strategy.require_benchmark_confirmation,
                     "require_vwap_confirmation": strategy.require_vwap_confirmation,
+                    "use_exit_hysteresis": strategy.use_exit_hysteresis,
+                    "exit_confirm_bars": strategy.exit_confirm_bars,
+                    "benchmark_exit_confirm_bars": strategy.benchmark_exit_confirm_bars,
+                    "exit_reversal_votes": strategy.exit_reversal_votes,
                     "max_notional": strategy.max_notional,
                     "long": {
                         "stop_loss_pct": strategy.long_stop_loss_pct,

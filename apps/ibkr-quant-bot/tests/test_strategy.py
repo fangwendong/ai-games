@@ -95,6 +95,51 @@ class IntradayMomentumStrategyTest(unittest.TestCase):
         self.assertEqual("HOLD", decision.action)
         self.assertFalse(decision.meta.get("bearish", False))
 
+    def test_exit_hysteresis_ignores_one_bar_dip_but_exits_confirmed_reversal(
+        self,
+    ) -> None:
+        strategy = IntradayMomentumStrategy(
+            min_score=0.0,
+            require_benchmark_confirmation=False,
+            use_exit_hysteresis=True,
+            exit_confirm_bars=3,
+            exit_reversal_votes=2,
+            stop_loss_pct=0.5,
+            take_profit_pct=1.0,
+            atr_stop_multiple=0.0,
+        )
+        rising = [100 + i * 0.5 for i in range(30)]
+        quote = Quote(symbol="SOXL", bid=110, ask=110.1, last=110, close=110)
+
+        one_bar_dip = strategy.exit_decide(
+            "SOXL",
+            quote,
+            make_bars([*rising, 105]),
+            quantity=1,
+            average_cost=107,
+        )
+        confirmed = strategy.exit_decide(
+            "SOXL",
+            quote,
+            make_bars([*rising, 105, 100, 95]),
+            quantity=1,
+            average_cost=107,
+        )
+
+        self.assertFalse(one_bar_dip.signal)
+        self.assertTrue(confirmed.signal)
+        self.assertTrue(confirmed.meta["bearish"])
+
+    def test_rotation_benchmark_exit_requires_configured_confirmation(self) -> None:
+        strategy = SemiconductorRotationStrategy(benchmark_exit_confirm_bars=3)
+        strategy._benchmark_bullish = lambda bars: bars[-1].close > 0  # type: ignore[method-assign]
+
+        not_confirmed = make_benchmark_bars([1, 1, -1])
+        confirmed = make_benchmark_bars([-1, -1, -1])
+
+        self.assertFalse(strategy._benchmark_reversal_confirmed("SOXL", not_confirmed))
+        self.assertTrue(strategy._benchmark_reversal_confirmed("SOXL", confirmed))
+
     def test_decide_honors_min_score_threshold(self) -> None:
         strategy = IntradayMomentumStrategy(min_score=1.0)
         bars = make_bars([100 + i * 0.5 for i in range(30)])

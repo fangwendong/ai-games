@@ -10,6 +10,8 @@ from tempfile import TemporaryDirectory
 from ibkr_quant_bot.broker import BrokerError
 from ibkr_quant_bot.cli import (
     NEW_YORK,
+    _build_momentum_strategy,
+    _build_parser,
     _daily_entry_count,
     _daily_entry_limit_reached,
     _fresh_historical_bars,
@@ -56,6 +58,18 @@ def make_bar(age: timedelta) -> Bar:
 
 
 class LiveDataGuardsTest(unittest.TestCase):
+    def test_hysteresis_profile_is_opt_in(self) -> None:
+        args = _build_parser().parse_args(
+            ["intraday-momentum", "--profile", "rotation-hysteresis"]
+        )
+
+        strategy = _build_momentum_strategy(args, Settings())
+
+        self.assertTrue(strategy.use_exit_hysteresis)
+        self.assertEqual(3, strategy.exit_confirm_bars)
+        self.assertEqual(3, strategy.benchmark_exit_confirm_bars)
+        self.assertEqual(0.045, strategy.long_take_profit_pct)
+
     def test_live_strategy_rejects_stale_bars(self) -> None:
         settings = Settings(trading_mode="live", live_bar_max_age_seconds=420)
         broker = FakeBroker([make_bar(timedelta(minutes=20))])

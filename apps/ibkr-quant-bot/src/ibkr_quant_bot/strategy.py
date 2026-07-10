@@ -227,6 +227,9 @@ class IntradayMomentumStrategy:
     max_risk_per_trade: float = 10.0
     atr_window: int = 14
     atr_stop_multiple: float = 2.0
+    use_exit_hysteresis: bool = False
+    exit_confirm_bars: int = 3
+    exit_reversal_votes: int = 2
 
     def stop_loss_pct_for(self, symbol: str) -> float:
         return self.stop_loss_pct
@@ -329,6 +332,24 @@ class IntradayMomentumStrategy:
                 and self._benchmark_bullish(benchmark_bars)
             )
         return bullish
+
+    def _technical_reversal_confirmed(self, bars: list[Bar]) -> bool:
+        confirm_bars = max(1, self.exit_confirm_bars)
+        required_votes = max(1, min(3, self.exit_reversal_votes))
+        if len(bars) < confirm_bars:
+            return False
+        for end in range(len(bars) - confirm_bars + 1, len(bars) + 1):
+            snapshot = self._snapshot(bars[:end])
+            reversal_votes = sum(
+                (
+                    snapshot["fast_ema"] <= snapshot["slow_ema"],
+                    snapshot["last"] < snapshot["trend_ema"],
+                    snapshot["last"] < snapshot["vwap"],
+                )
+            )
+            if reversal_votes < required_votes:
+                return False
+        return True
 
     def decide(
         self,
@@ -451,7 +472,11 @@ class IntradayMomentumStrategy:
         snapshot = self._snapshot(bars)
         last = snapshot["last"]
         stop_price, take_price = self.protective_prices(symbol, average_cost, bars)
-        bearish = not self._bullish(bars, benchmark_bars)
+        bearish = (
+            self._technical_reversal_confirmed(bars)
+            if self.use_exit_hysteresis
+            else not self._bullish(bars, benchmark_bars)
+        )
         stop_hit = last <= stop_price
         take_hit = last >= take_price
 
@@ -534,6 +559,10 @@ class SemiconductorRotationStrategy:
     max_risk_per_trade: float = 10.0
     atr_window: int = 14
     atr_stop_multiple: float = 2.0
+    use_exit_hysteresis: bool = False
+    exit_confirm_bars: int = 3
+    benchmark_exit_confirm_bars: int = 1
+    exit_reversal_votes: int = 2
     long_strategy: IntradayMomentumStrategy = field(init=False, repr=False)
     short_strategy: IntradayMomentumStrategy = field(init=False, repr=False)
 
@@ -564,6 +593,9 @@ class SemiconductorRotationStrategy:
             max_risk_per_trade=self.max_risk_per_trade,
             atr_window=self.atr_window,
             atr_stop_multiple=self.atr_stop_multiple,
+            use_exit_hysteresis=self.use_exit_hysteresis,
+            exit_confirm_bars=self.exit_confirm_bars,
+            exit_reversal_votes=self.exit_reversal_votes,
         )
         self.short_strategy = IntradayMomentumStrategy(
             symbols=(self.short_symbol,),
@@ -588,6 +620,9 @@ class SemiconductorRotationStrategy:
             max_risk_per_trade=self.max_risk_per_trade,
             atr_window=self.atr_window,
             atr_stop_multiple=self.atr_stop_multiple,
+            use_exit_hysteresis=self.use_exit_hysteresis,
+            exit_confirm_bars=self.exit_confirm_bars,
+            exit_reversal_votes=self.exit_reversal_votes,
         )
 
     def _benchmark_bullish(self, bars: list[Bar]) -> bool:
@@ -620,6 +655,21 @@ class SemiconductorRotationStrategy:
         else:
             raise ValueError(f"symbol not traded: {symbol}")
         return strategy.protective_prices(symbol, average_cost, bars)
+
+    def _benchmark_reversal_confirmed(
+        self, symbol: str, benchmark_bars: list[Bar] | None
+    ) -> bool:
+        confirm_bars = max(1, self.benchmark_exit_confirm_bars)
+        if benchmark_bars is None or len(benchmark_bars) < confirm_bars:
+            return False
+        for end in range(
+            len(benchmark_bars) - confirm_bars + 1, len(benchmark_bars) + 1
+        ):
+            bullish = self._benchmark_bullish(benchmark_bars[:end])
+            reversal = not bullish if symbol == self.long_symbol else bullish
+            if not reversal:
+                return False
+        return True
 
     def decide(
         self,
@@ -713,10 +763,8 @@ class SemiconductorRotationStrategy:
                 average_cost,
                 benchmark_bars=benchmark_bars,
             )
-            if (
-                not decision.signal
-                and benchmark_bars is not None
-                and not self._benchmark_bullish(benchmark_bars)
+            if not decision.signal and self._benchmark_reversal_confirmed(
+                symbol, benchmark_bars
             ):
                 return StrategyDecision(
                     symbol=symbol,
@@ -733,10 +781,8 @@ class SemiconductorRotationStrategy:
             decision = self.short_strategy.exit_decide(
                 symbol, quote, bars, quantity, average_cost, benchmark_bars=None
             )
-            if (
-                not decision.signal
-                and benchmark_bars is not None
-                and self._benchmark_bullish(benchmark_bars)
+            if not decision.signal and self._benchmark_reversal_confirmed(
+                symbol, benchmark_bars
             ):
                 return StrategyDecision(
                     symbol=symbol,
