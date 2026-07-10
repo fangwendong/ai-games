@@ -54,7 +54,9 @@ ReadOnlyApi=yes
 ReadOnlyLogin=no
 SecondFactorAuthenticationTimeout=180
 ExitAfterSecondFactorAuthenticationTimeout=no
-ReloginAfterSecondFactorAuthenticationTimeout=no
+ReloginAfterSecondFactorAuthenticationTimeout=yes
+AutoRestartTime=10:00 AM
+ColdRestartTime=20:00
 ```
 
 Meaning:
@@ -65,9 +67,99 @@ Meaning:
   cancelling orders.
 - `ReadOnlyLogin=no` means the account still follows normal login and 2FA.
   Read-only protection is applied at the API layer.
+- `SecondFactorAuthenticationTimeout=180` gives the user three minutes to
+  approve the IBKR Mobile prompt.
+- `ReloginAfterSecondFactorAuthenticationTimeout=yes` tells IBC to start
+  another login attempt if the 2FA window expires.
+- `AutoRestartTime=10:00 AM` asks Gateway to perform its daily restart at
+  10:00 local time.
+- `ColdRestartTime=20:00` asks IBC to perform the Sunday cold restart at
+  20:00 local time, which is after 01:00 US/Eastern and is a reasonable time
+  for manual 2FA approval.
+
+Keep only one copy of each setting in `config.ini`. IBC's sample config is
+large, and duplicated settings can make the effective value unclear.
 
 The local Python bot also connects with `IBKR_READONLY=true` by default, so the
 client side and Gateway side are both read-only.
+
+## Keep Gateway Running
+
+IBKR Gateway/TWS cannot be kept logged in forever. IBKR still requires regular
+restarts, and some restarts require IBKR Mobile 2FA approval. The practical
+target is:
+
+1. Keep IBC/Gateway running when the host is up.
+2. Restart Gateway automatically if the process exits.
+3. Let Gateway do its daily auto-restart without a full login when possible.
+4. Do a Sunday cold restart at a time when the account owner can approve 2FA.
+
+On this host, the simple supervisor is a per-user cron job that calls a
+watchdog script once per minute:
+
+```cron
+* * * * * /home/fwd/.local/bin/ibkr-gateway-watchdog
+```
+
+The watchdog uses a lock to avoid concurrent starts, checks for the Java
+`ibcalpha.ibc.IbcGateway` process or the IBC startup script, and starts Gateway
+only when neither is running:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+DISPLAY="${DISPLAY:-:1}"
+export DISPLAY
+
+lock_file=/tmp/ibkr-gateway-watchdog.lock
+log_dir=/home/fwd/ibc/logs
+watchdog_log="$log_dir/ibkr-gateway-watchdog.log"
+
+mkdir -p "$log_dir"
+
+exec 9>"$lock_file"
+if ! flock -n 9; then
+  exit 0
+fi
+
+if pgrep -f 'ibcalpha\.ibc\.IbcGateway /home/fwd/ibc/config\.ini' >/dev/null; then
+  exit 0
+fi
+
+if pgrep -f '/opt/ibc/scripts/ibcstart\.sh 1045 .*--ibc-ini=/home/fwd/ibc/config\.ini' >/dev/null; then
+  exit 0
+fi
+
+{
+  printf '[%s] IB Gateway not running; starting via IBC\n' "$(date '+%Y-%m-%d %H:%M:%S %Z')"
+  nohup /opt/ibc/gatewaystart.sh -inline >>"$watchdog_log" 2>&1 &
+} >>"$watchdog_log" 2>&1
+```
+
+Install or verify the cron entry with:
+
+```bash
+chmod +x /home/fwd/.local/bin/ibkr-gateway-watchdog
+( crontab -l 2>/dev/null | grep -v -F '/home/fwd/.local/bin/ibkr-gateway-watchdog'; \
+  echo '* * * * * /home/fwd/.local/bin/ibkr-gateway-watchdog' ) | crontab -
+crontab -l
+```
+
+After changing `config.ini`, keep a timestamped backup:
+
+```bash
+cp /home/fwd/ibc/config.ini /home/fwd/ibc/config.ini.bak-$(date '+%Y%m%d-%H%M%S')
+```
+
+`systemctl --user` may not be available in this environment because there is no
+user bus. Cron is intentionally used here because it works without that
+session-level service manager.
+
+Operational boundary: this setup can reduce manual work, but it cannot bypass
+IBKR security. If IBKR requires browser login, trusted-device renewal, or
+IBKR Mobile approval, a human still needs to complete it.
 
 ## Login Sequence
 
