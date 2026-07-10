@@ -2,11 +2,24 @@ from __future__ import annotations
 
 import unittest
 from datetime import datetime, timedelta
+from json import loads
+from pathlib import Path
+from types import SimpleNamespace
+from tempfile import TemporaryDirectory
 
 from ibkr_quant_bot.broker import BrokerError
-from ibkr_quant_bot.cli import NEW_YORK, _fresh_historical_bars, _strategy_quote
+from ibkr_quant_bot.cli import (
+    NEW_YORK,
+    _daily_entry_count,
+    _daily_entry_limit_reached,
+    _fresh_historical_bars,
+    _orders_state_path,
+    _record_daily_entry,
+    _record_order_state,
+    _strategy_quote,
+)
 from ibkr_quant_bot.config import Settings
-from ibkr_quant_bot.models import Bar, Quote
+from ibkr_quant_bot.models import Bar, Quote, TradeRequest
 
 
 class FakeBroker:
@@ -72,6 +85,66 @@ class LiveDataGuardsTest(unittest.TestCase):
 
         with self.assertRaisesRegex(BrokerError, "live quote unavailable"):
             broker.live_quote("SOXL")
+
+    def test_daily_entry_limit_defaults_to_one(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            settings = Settings(trading_mode="live", state_dir=tmpdir, max_daily_entries=1)
+            request = TradeRequest(symbol="SOXL", action="BUY", quantity=5, order_type="LMT", limit_price=100.0)
+
+            self.assertFalse(_daily_entry_limit_reached(settings))
+            _record_daily_entry(settings, request)
+
+            self.assertEqual(1, _daily_entry_count(settings))
+            self.assertTrue(_daily_entry_limit_reached(settings))
+
+    def test_nonpositive_daily_entry_limit_is_unlimited(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            settings = Settings(trading_mode="live", state_dir=tmpdir, max_daily_entries=0)
+            request = TradeRequest(symbol="SOXL", action="BUY", quantity=5)
+
+            _record_daily_entry(settings, request)
+
+            self.assertEqual(1, _daily_entry_count(settings))
+            self.assertFalse(_daily_entry_limit_reached(settings))
+
+    def test_order_state_is_recorded_as_jsonl(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            settings = Settings(trading_mode="live", state_dir=tmpdir)
+            request = TradeRequest(symbol="SOXL", action="BUY", quantity=5, order_type="LMT", limit_price=188.12)
+            trade = SimpleNamespace(
+                order=SimpleNamespace(
+                    orderId=123,
+                    permId=456,
+                    clientId=42,
+                    action="BUY",
+                    totalQuantity=5,
+                    orderType="LMT",
+                    lmtPrice=188.12,
+                    account="DU123",
+                ),
+                orderStatus=SimpleNamespace(
+                    status="Submitted",
+                    filled=0,
+                    remaining=5,
+                    avgFillPrice=0.0,
+                    lastFillPrice=0.0,
+                    whyHeld="",
+                ),
+                fills=[],
+                log=[],
+            )
+
+            _record_order_state(settings, request, trade)
+
+            path = _orders_state_path(settings)
+            self.assertTrue(Path(path).exists())
+            row = loads(Path(path).read_text().strip())
+            self.assertEqual("SOXL", row["request"]["symbol"])
+            self.assertEqual(123, row["order"]["order_id"])
+            self.assertEqual(456, row["order"]["perm_id"])
+            self.assertEqual("Submitted", row["status"]["status"])
+            self.assertEqual(0, row["status"]["filled"])
+            self.assertEqual(5, row["status"]["remaining"])
 
 
 if __name__ == "__main__":

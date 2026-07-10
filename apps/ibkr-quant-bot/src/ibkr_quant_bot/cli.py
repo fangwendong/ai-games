@@ -4,6 +4,7 @@ import argparse
 import json
 from dataclasses import asdict, replace
 from datetime import datetime, time
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from .broker import BrokerError, IbkrBroker, format_table
@@ -151,6 +152,7 @@ def _submit_or_print(broker: IbkrBroker, settings: Settings, request: TradeReque
         return
     trade = broker.place_order(request)
     print(trade)
+    _record_order_state(settings, request, trade)
 
 
 def _is_market_hours(now: datetime | None = None) -> bool:
@@ -220,6 +222,124 @@ def _strategy_quote(broker: IbkrBroker, settings: Settings, symbol: str):
     if settings.is_live:
         return broker.live_quote(symbol)
     return broker.quote(symbol)
+
+
+def _entry_state_path(settings: Settings, now: datetime | None = None) -> Path:
+    now = now or datetime.now(NEW_YORK)
+    state_dir = Path(settings.state_dir).expanduser()
+    return state_dir / f"entries-{now.date().isoformat()}.json"
+
+
+def _orders_state_path(settings: Settings, now: datetime | None = None) -> Path:
+    now = now or datetime.now(NEW_YORK)
+    state_dir = Path(settings.state_dir).expanduser()
+    return state_dir / f"orders-{now.date().isoformat()}.jsonl"
+
+
+def _json_safe(value):
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    return str(value)
+
+
+def _load_entry_state(settings: Settings, now: datetime | None = None) -> dict[str, object]:
+    path = _entry_state_path(settings, now)
+    if not path.exists():
+        return {"entry_count": 0, "entries": []}
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {"entry_count": 0, "entries": []}
+    if not isinstance(data, dict):
+        return {"entry_count": 0, "entries": []}
+    data.setdefault("entry_count", 0)
+    data.setdefault("entries", [])
+    return data
+
+
+def _daily_entry_count(settings: Settings, now: datetime | None = None) -> int:
+    state = _load_entry_state(settings, now)
+    try:
+        return int(state.get("entry_count", 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _daily_entry_limit_reached(settings: Settings, now: datetime | None = None) -> bool:
+    if settings.max_daily_entries <= 0:
+        return False
+    return _daily_entry_count(settings, now) >= settings.max_daily_entries
+
+
+def _record_daily_entry(settings: Settings, request: TradeRequest, now: datetime | None = None) -> None:
+    now = now or datetime.now(NEW_YORK)
+    path = _entry_state_path(settings, now)
+    state = _load_entry_state(settings, now)
+    entries = state.get("entries", [])
+    if not isinstance(entries, list):
+        entries = []
+    entries.append(
+        {
+            "time": now.isoformat(),
+            "symbol": request.symbol.upper(),
+            "quantity": request.quantity,
+            "order_type": request.order_type,
+            "limit_price": request.limit_price,
+        }
+    )
+    state["entry_count"] = _daily_entry_count(settings, now) + 1
+    state["entries"] = entries
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, indent=2, sort_keys=True))
+
+
+def _record_order_state(settings: Settings, request: TradeRequest, trade, now: datetime | None = None) -> None:
+    now = now or datetime.now(NEW_YORK)
+    order = getattr(trade, "order", None)
+    order_status = getattr(trade, "orderStatus", None)
+    fills = getattr(trade, "fills", [])
+    log = getattr(trade, "log", [])
+    record = {
+        "recorded_at": now.isoformat(),
+        "request": {
+            "symbol": request.symbol.upper(),
+            "action": request.action.upper(),
+            "quantity": request.quantity,
+            "order_type": request.order_type,
+            "limit_price": request.limit_price,
+        },
+        "order": {
+            "order_id": getattr(order, "orderId", None),
+            "perm_id": getattr(order, "permId", None),
+            "client_id": getattr(order, "clientId", None),
+            "action": getattr(order, "action", None),
+            "total_quantity": getattr(order, "totalQuantity", None),
+            "order_type": getattr(order, "orderType", None),
+            "limit_price": getattr(order, "lmtPrice", None),
+            "account": getattr(order, "account", None),
+        },
+        "status": {
+            "status": getattr(order_status, "status", None),
+            "filled": getattr(order_status, "filled", None),
+            "remaining": getattr(order_status, "remaining", None),
+            "avg_fill_price": getattr(order_status, "avgFillPrice", None),
+            "last_fill_price": getattr(order_status, "lastFillPrice", None),
+            "why_held": getattr(order_status, "whyHeld", None),
+        },
+        "fills": _json_safe(fills),
+        "log": _json_safe(log),
+    }
+    path = _orders_state_path(settings, now)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as file:
+        file.write(json.dumps(record, sort_keys=True))
+        file.write("\n")
 
 
 def _parse_position_rows(rows: list[dict[str, str]], symbols: tuple[str, ...]) -> dict[str, dict[str, str]]:
@@ -475,6 +595,12 @@ def main(argv: list[str] | None = None) -> int:
             if not buy_candidates:
                 print("no signal: no order")
                 return 0
+            if settings.is_live and _daily_entry_limit_reached(settings):
+                print(
+                    f"daily entry limit reached: "
+                    f"{_daily_entry_count(settings)}/{settings.max_daily_entries}; no new entry"
+                )
+                return 0
 
             decision = max(buy_candidates, key=lambda item: float(item.meta.get("score", 0.0)))
             request = TradeRequest(
@@ -489,6 +615,8 @@ def main(argv: list[str] | None = None) -> int:
             print(risk_decision.reason)
             if risk_decision.allowed:
                 _submit_or_print(broker, settings, request, f"auto order candidate: {decision.symbol} qty={decision.quantity} limit={decision.limit_price:.2f}")
+                if settings.is_live and not settings.readonly and not settings.dry_run:
+                    _record_daily_entry(settings, request)
             return 0
 
         if args.command == "backtest-momentum":

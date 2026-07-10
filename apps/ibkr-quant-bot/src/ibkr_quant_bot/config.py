@@ -53,6 +53,8 @@ class Settings:
     market_data_type: str = "auto"
     request_timeout: float = 30.0
     live_bar_max_age_seconds: int = 420
+    max_daily_entries: int = 1
+    state_dir: str = ".ibkr_bot_state/semiconductor_rotation_intraday"
 
     @property
     def is_live(self) -> bool:
@@ -76,4 +78,6 @@ def load_settings() -> Settings:
         market_data_type=os.getenv("IBKR_MARKET_DATA_TYPE", "auto").strip().lower(),
         request_timeout=float(os.getenv("IBKR_REQUEST_TIMEOUT", "30")),
         live_bar_max_age_seconds=int(os.getenv("IBKR_LIVE_BAR_MAX_AGE_SECONDS", "420")),
+        max_daily_entries=int(os.getenv("IBKR_MAX_DAILY_ENTRIES", "1")),
+        state_dir=os.getenv("IBKR_STATE_DIR", ".ibkr_bot_state/semiconductor_rotation_intraday"),
     )
