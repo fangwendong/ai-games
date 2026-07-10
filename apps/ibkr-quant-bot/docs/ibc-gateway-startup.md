@@ -308,6 +308,13 @@ No `4001` listener
 : Gateway has not completed login or API configuration. Check the IBC log for
   login, 2FA, or configuration errors.
 
+Live quotes are unavailable even though subscriptions are enabled
+
+: Restart Gateway through IBC and complete a fresh IBKR Mobile 2FA approval,
+  then force `IBKR_MARKET_DATA_TYPE=live` quote checks. The active Gateway
+  session can be stale after subscription changes. See
+  [ibkr-market-data-troubleshooting.md](ibkr-market-data-troubleshooting.md).
+
 `INVALID_USERNAME_OR_BAD_IP` or `Authorization failed`
 
 : IBKR rejected the login. Check credentials in `/home/fwd/ibc/config.ini`,

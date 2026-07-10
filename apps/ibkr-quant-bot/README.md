@@ -64,6 +64,11 @@ ibkr-bot doctor
 For a logged-in live IB Gateway, the common API port is `4001`. Keep `IBKR_READONLY=true` for balance, position, and quote checks:
 
 The local IBC startup and login process is documented in [docs/ibc-gateway-startup.md](docs/ibc-gateway-startup.md).
+If quotes unexpectedly fall back to delayed data or the live strategy reports
+that live quotes are unavailable, use
+[docs/ibkr-market-data-troubleshooting.md](docs/ibkr-market-data-troubleshooting.md).
+That runbook also documents how to enable real-time market data in IBKR Client
+Portal and the required Market Data API acknowledgement.
 
 ```bash
 cd apps/ibkr-quant-bot
@@ -164,6 +169,12 @@ In live trading mode, the intraday scanners refuse delayed market data:
 - Historical bars must be fresh. By default the latest bar may be at most
   `IBKR_LIVE_BAR_MAX_AGE_SECONDS=420` seconds old, which allows normal
   completed 5-minute bars but rejects 15-20 minute delayed data.
+
+The market data troubleshooting runbook is
+[docs/ibkr-market-data-troubleshooting.md](docs/ibkr-market-data-troubleshooting.md).
+It documents the previous failure mode where subscriptions were enabled but
+the active Gateway session still needed a restart and fresh 2FA before live
+quotes worked.
 
 For a more active variant, use:
 
