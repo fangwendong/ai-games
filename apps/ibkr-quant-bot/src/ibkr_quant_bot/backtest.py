@@ -109,6 +109,14 @@ def _select_signal(
     return symbol, quantity, score
 
 
+def _exit_reason_from_decision(decision_meta: dict[str, object]) -> str:
+    if decision_meta.get("stop_hit"):
+        return "stop"
+    if decision_meta.get("take_hit"):
+        return "take"
+    return "signal"
+
+
 def run_intraday_momentum_backtest(
     bars_by_symbol: dict[str, list[Bar]],
     strategy: IntradayMomentumStrategy | None = None,
@@ -168,29 +176,19 @@ def run_intraday_momentum_backtest(
                 bars = daily_bars_by_symbol.get(open_position.symbol, [])
                 if index < len(bars):
                     bar = bars[index]
-                    stop_loss_pct = strategy.stop_loss_pct_for(open_position.symbol)
-                    take_profit_pct = strategy.take_profit_pct_for(open_position.symbol)
-                    stop_price = open_position.entry_price * (1 - stop_loss_pct)
-                    take_price = open_position.entry_price * (1 + take_profit_pct)
                     exit_price: float | None = None
                     exit_reason: str | None = None
-                    if bar.low <= stop_price:
-                        exit_price = stop_price
-                        exit_reason = "stop"
-                    elif bar.high >= take_price:
-                        exit_price = take_price
-                        exit_reason = "take"
-                    else:
-                        quote = Quote(symbol=open_position.symbol, bid=bar.close, ask=bar.close, last=bar.close, close=bar.close)
-                        if strategy.exit_decide(
-                            open_position.symbol,
-                            quote,
-                            bars[: index + 1],
-                            open_position.quantity,
-                            open_position.entry_price,
-                        ).signal:
-                            exit_price = bar.close
-                            exit_reason = "signal"
+                    quote = Quote(symbol=open_position.symbol, bid=bar.close, ask=bar.close, last=bar.close, close=bar.close)
+                    exit_decision = strategy.exit_decide(
+                        open_position.symbol,
+                        quote,
+                        bars[: index + 1],
+                        open_position.quantity,
+                        open_position.entry_price,
+                    )
+                    if exit_decision.signal:
+                        exit_price = bar.close
+                        exit_reason = _exit_reason_from_decision(exit_decision.meta)
 
                     if exit_price is not None and exit_reason is not None:
                         gross_cash += open_position.quantity * exit_price

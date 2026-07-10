@@ -4,7 +4,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 from ibkr_quant_bot.backtest import BacktestCostModel, run_intraday_momentum_backtest
-from ibkr_quant_bot.models import Bar
+from ibkr_quant_bot.models import Bar, Quote, StrategyDecision
 from ibkr_quant_bot.strategy import IntradayMomentumStrategy, SemiconductorRotationStrategy
 
 
@@ -53,6 +53,71 @@ def make_benchmark_bars(start_price: float = 300.0) -> list[Bar]:
 
 
 class BacktestCostTest(unittest.TestCase):
+    def test_stop_take_uses_close_based_strategy_exit_not_intrabar_high_low(self) -> None:
+        class CloseOnlyStrategy:
+            symbols = ("SOXL",)
+            benchmark_symbol = "QQQ"
+            min_bars = 1
+            slow_window = 1
+            trend_window = 1
+            trend_lookback = 1
+
+            def decide(
+                self,
+                symbol: str,
+                quote: Quote,
+                bars: list[Bar],
+                benchmark_bars: list[Bar] | None = None,
+            ) -> StrategyDecision:
+                return StrategyDecision(
+                    symbol=symbol,
+                    action="BUY",
+                    quantity=1,
+                    reference_price=quote.reference_price,
+                    limit_price=None,
+                    reason="test entry",
+                    signal=len(bars) == 2,
+                    meta={"score": 1.0},
+                )
+
+            def exit_decide(
+                self,
+                symbol: str,
+                quote: Quote,
+                bars: list[Bar],
+                quantity: int,
+                average_cost: float,
+            ) -> StrategyDecision:
+                take_hit = quote.reference_price >= average_cost * 1.10
+                return StrategyDecision(
+                    symbol=symbol,
+                    action="SELL" if take_hit else "HOLD",
+                    quantity=quantity if take_hit else 0,
+                    reference_price=quote.reference_price,
+                    limit_price=None,
+                    reason="close-based exit",
+                    signal=take_hit,
+                    meta={"take_hit": take_hit},
+                )
+
+        start = datetime(2026, 7, 8, 9, 30, tzinfo=timezone.utc)
+        bars = [
+            Bar(time=start, open=100.0, high=101.0, low=99.0, close=100.0, volume=1000),
+            Bar(time=start + timedelta(minutes=5), open=100.0, high=101.0, low=99.0, close=100.0, volume=1000),
+            Bar(time=start + timedelta(minutes=10), open=100.0, high=115.0, low=99.0, close=101.0, volume=1000),
+        ]
+
+        result = run_intraday_momentum_backtest(
+            bars_by_symbol={"SOXL": bars, "QQQ": bars},
+            strategy=CloseOnlyStrategy(),
+            cost_model=BacktestCostModel(commission_per_order=0.0, slippage_bps=0.0, spread_bps=0.0),
+            initial_capital=1000.0,
+        )
+
+        self.assertEqual(result.trade_count, 1)
+        self.assertEqual(result.trades[0].exit_reason, "eod")
+        self.assertEqual(result.trades[0].gross_exit_price, 101.0)
+
     def test_cost_model_worsens_net_return(self) -> None:
         strategy = IntradayMomentumStrategy(symbols=("SOXL",), require_vwap_confirmation=False)
         bars_by_symbol = {"SOXL": make_trending_bars("SOXL"), "QQQ": make_benchmark_bars()}
