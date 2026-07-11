@@ -273,6 +273,54 @@ new market session to download current bars and merge them into the daily
 files. Keep the cache local: although it contains market data rather than
 credentials, redistribution may be restricted by the data provider's terms.
 
+### Backtest Calibration And Interpretation
+
+Keep a backtest aligned with the live strategy before interpreting its return:
+
+- Load the same `.env` used to define the live risk budget, then pass the same
+  profile explicitly. In particular, match `--capital`, `--max-notional`, and
+  `IBKR_MAX_RISK_PER_TRADE`; otherwise share counts can differ materially.
+- Calibrate costs from actual execution reports. The default commission is
+  `$1.00` per order, based on recent live IBKR fills of about `$1` on each side
+  of a trade. A complete buy/sell trade therefore starts with about `$2` of
+  fixed commission before spread and slippage. Override it when the account's
+  realized commissions change.
+- Keep spread and slippage enabled. A zero-cost run is useful only as a gross
+  upper bound, not as an expected result.
+- Use `--reuse-data` for reproducible comparisons after the daily cache has
+  been refreshed. Record the first and last bar dates; a `60 D` request means
+  60 calendar days and normally contains fewer trading sessions.
+- Treat nested recent windows such as 30D and 60D as diagnostics, not
+  independent validation. The 30D observations are contained in the 60D
+  sample and do not provide a second confirmation of the strategy.
+- Prefer the default chronological walk-forward report and untouched holdout
+  for research conclusions. Do not tune parameters on the final holdout and
+  then continue describing it as out-of-sample.
+- Compare the simulator with live mechanics whenever execution code changes.
+  The current engine enters and exits on the next bar open after a signal,
+  evaluates stop/take conditions from bar closes, permits at most one completed
+  trade per session, and liquidates any remaining position at the session end.
+
+Example calibrated run using the live rotation profile and a `$4,000` order
+budget:
+
+```bash
+set -a
+source .env
+set +a
+ibkr-bot backtest-momentum \
+  --profile rotation-hysteresis \
+  --capital 4000 \
+  --max-notional 4000 \
+  --commission-per-order 1.00 \
+  --slippage-bps 1.0 \
+  --spread-bps 1.0
+```
+
+To rerun against an already captured data set without contacting IBKR, append
+`--reuse-data`. Confirm that the cache covers the intended end date before
+comparing results.
+
 By default the command builds one three-year data set using backward `1 W`
 pages with explicit request end times (rather than an invalid monolithic
 `3 Y`/`5 mins` request), runs chronological

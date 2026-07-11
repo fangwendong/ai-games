@@ -58,6 +58,11 @@ def make_bar(age: timedelta) -> Bar:
 
 
 class LiveDataGuardsTest(unittest.TestCase):
+    def test_backtest_commission_matches_live_calibration(self) -> None:
+        args = _build_parser().parse_args(["backtest-momentum"])
+
+        self.assertEqual(1.0, args.commission_per_order)
+
     def test_hysteresis_profile_is_default(self) -> None:
         args = _build_parser().parse_args(["intraday-momentum"])
 

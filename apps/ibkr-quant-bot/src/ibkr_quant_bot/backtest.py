@@ -14,7 +14,7 @@ from .strategy import IntradayMomentumStrategy
 
 @dataclass(frozen=True)
 class BacktestCostModel:
-    commission_per_order: float = 0.35
+    commission_per_order: float = 1.0
     slippage_bps: float = 1.0
     spread_bps: float = 1.0
 
