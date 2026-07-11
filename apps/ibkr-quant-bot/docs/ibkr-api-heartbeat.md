@@ -51,6 +51,29 @@ not mean the task stopped. The log is reserved for starts and failures.
 The stamp lives under `/tmp`, so it is expected to disappear after a reboot.
 The next successful heartbeat recreates it.
 
+## Log Retention
+
+The watchdog applies a bounded retention policy on every cron invocation:
+
+- `/home/fwd/ibc/logs/ibkr-gateway-watchdog.log` is truncated after it reaches
+  1 MiB, with one previous copy kept as `ibkr-gateway-watchdog.log.1`;
+- IBC Gateway diagnostic files matching `ibc-*_GATEWAY-*.txt` are retained for
+  14 days; and
+- temporary files matching `gateway-restart-*.log` are retained for 14 days.
+
+Rotation uses copy-and-truncate because the launched IBC/Gateway process may
+still hold the original log file descriptor. These rules apply only to local
+startup and connectivity diagnostics. They do not remove order, fill,
+position, account, or broker audit data.
+
+Check current usage and retained files with:
+
+```bash
+du -sh /home/fwd/ibc/logs
+find /home/fwd/ibc/logs -maxdepth 1 -type f \
+  -printf '%s %TY-%Tm-%Td %TH:%TM %f\n' | sort -nr
+```
+
 ## Quick Health Check
 
 Verify the schedule and local Gateway state:

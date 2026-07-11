@@ -13,6 +13,8 @@ heartbeat_stamp=/tmp/ibkr-gateway-heartbeat.stamp
 log_dir=/home/fwd/ibc/logs
 watchdog_log="$log_dir/ibkr-gateway-watchdog.log"
 bot_dir=/home/fwd/work/ai-games-wt-codex-live/apps/ibkr-quant-bot
+log_retention_days=14
+watchdog_log_max_bytes=1048576
 
 mkdir -p "$log_dir"
 
@@ -20,6 +22,20 @@ exec 9>"$lock_file"
 if ! flock -n 9; then
   exit 0
 fi
+
+# Keep only recent operational diagnostics. Use copy-and-truncate for the
+# watchdog log because an IBC/Gateway process may still hold its file
+# descriptor after startup. This does not touch order, fill, or account data.
+if [[ -f "$watchdog_log" ]]; then
+  watchdog_log_size=$(stat -c %s "$watchdog_log" 2>/dev/null || printf '0')
+  if (( watchdog_log_size >= watchdog_log_max_bytes )); then
+    cp "$watchdog_log" "$watchdog_log.1"
+    : >"$watchdog_log"
+  fi
+fi
+find "$log_dir" -maxdepth 1 -type f \
+  \( -name 'ibc-*_GATEWAY-*.txt' -o -name 'gateway-restart-*.log' \) \
+  -mtime "+$log_retention_days" -delete
 
 gateway_running=false
 if pgrep -f 'ibcalpha\.ibc\.IbcGateway /home/fwd/ibc/config\.ini' >/dev/null; then
