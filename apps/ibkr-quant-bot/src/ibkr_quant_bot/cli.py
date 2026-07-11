@@ -218,7 +218,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="allow entries without the close being above VWAP",
     )
     backtest.add_argument(
-        "--commission-per-order", type=float, default=0.35, help="commission per order"
+        "--commission-per-order",
+        type=float,
+        default=1.0,
+        help="commission per order (default: $1, calibrated from recent live fills)",
     )
     backtest.add_argument(
         "--slippage-bps",
