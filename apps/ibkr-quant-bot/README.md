@@ -162,7 +162,8 @@ intraday setup in this branch is the momentum rotation rule:
 - exit on stop loss, take profit, or bearish reversal
 - one open position at a time across `SOXL`, `TQQQ`, and `TECL`
 
-Run the scanner and exit manager with:
+Run the scanner and exit manager with the current default
+`rotation-hysteresis` profile:
 
 ```bash
 ibkr-bot intraday-momentum
@@ -193,21 +194,23 @@ For a more active variant, use:
 ibkr-bot intraday-momentum --profile high-frequency
 ```
 
-The semiconductor rotation research preset is available with:
+The legacy semiconductor rotation preset is still available for comparison or
+rollback with:
 
 ```bash
 ibkr-bot intraday-momentum --profile rotation
 ibkr-bot backtest-momentum --profile rotation
 ```
 
-This preset rotates between `SOXL` and `SOXS` based on the `QQQ` regime. The
+The default rotation setup rotates between `SOXL` and `SOXS` based on the
+`QQQ` regime. The
 old 7D/14D/30D numbers were overlapping diagnostics, not independent
 validation, and are intentionally no longer presented as evidence of an edge.
-The current research parameters are:
+The legacy `rotation` research parameters are:
 `min_confirm_bars=1`, `min_trend_gap=0.001`, `min_vwap_gap=0.00025`,
 `min_score=0.006`, `take_profit_pct=0.035`.
 
-An opt-in exit-hysteresis research profile is also available:
+The default `rotation-hysteresis` profile can be selected explicitly with:
 
 ```bash
 ibkr-bot intraday-momentum --profile rotation-hysteresis
@@ -217,7 +220,8 @@ ibkr-bot backtest-momentum --profile rotation-hysteresis
 It keeps the same entries and risk budget but requires three consecutive bars
 to confirm a technical reversal, three consecutive benchmark states to confirm
 a regime reversal, and uses a 4.5% take-profit. The ordinary `rotation` profile
-is intentionally unchanged. In the 2025-07-10 through 2026-07-09 research run,
+is intentionally kept available as a rollback path. In the 2025-07-10 through
+2026-07-09 research run,
 28 candidates were compared on 209 development sessions before opening a final
 42-session holdout. The hysteresis profile improved the holdout net return from
 3.52% to 8.74%, but two of four development blocks remained negative and a
@@ -229,6 +233,45 @@ Backtest the same rule with a built-in transaction-cost model:
 ```bash
 ibkr-bot backtest-momentum
 ```
+
+The tuning workflow used for this branch is documented in
+[docs/backtest-parameter-tuning.md](docs/backtest-parameter-tuning.md).
+
+### Historical Data Cache
+
+Long intraday backtests persist every completed IBKR history page as daily
+JSON files under `.ibkr_bot_data/historical/` by default:
+
+```text
+.ibkr_bot_data/historical/
+├── 2026-07-08/
+│   ├── QQQ__5_mins.json
+│   ├── SOXL__5_mins.json
+│   └── SOXS__5_mins.json
+└── 2026-07-09/
+    ├── QQQ__5_mins.json
+    ├── SOXL__5_mins.json
+    └── SOXS__5_mins.json
+```
+
+Overlapping pages are merged by timestamp, so retrying a download is safe.
+The cache directory is ignored by git. To choose another location:
+
+```bash
+ibkr-bot backtest-momentum --data-dir /path/to/ibkr-history
+```
+
+To rerun from the daily files without connecting to IBKR, use the same
+duration and cache directory with `--reuse-data`:
+
+```bash
+ibkr-bot backtest-momentum --duration "3 Y" --reuse-data
+```
+
+`--reuse-data` never refreshes the cache. Run once without that flag after a
+new market session to download current bars and merge them into the daily
+files. Keep the cache local: although it contains market data rather than
+credentials, redistribution may be restricted by the data provider's terms.
 
 By default the command builds one three-year data set using backward `1 W`
 pages with explicit request end times (rather than an invalid monolithic

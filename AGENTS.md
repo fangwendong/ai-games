@@ -84,7 +84,7 @@ Common local commands:
 cd apps/ibkr-quant-bot
 PYTHONPATH=src python -m pytest tests
 PYTHONPATH=src python -m ibkr_quant_bot.cli doctor
-PYTHONPATH=src python -m ibkr_quant_bot.cli backtest-momentum --profile rotation
+PYTHONPATH=src python -m ibkr_quant_bot.cli backtest-momentum
 ```
 
 Safety rules for the bot:
@@ -102,8 +102,10 @@ Safety rules for the bot:
 
 Recent strategy facts worth knowing:
 
-- The current live profile is semiconductor rotation between `SOXL` and `SOXS`
-  with `QQQ` as the regime benchmark.
+- The current live profile is `rotation-hysteresis`, a semiconductor rotation
+  between `SOXL` and `SOXS` with `QQQ` as the regime benchmark.
+- The legacy `rotation` profile remains available with `--profile rotation`
+  as an explicit rollback path.
 - Live strategy uses fresh 5-minute bars and live quote checks.
 - Backtest exits are intentionally aligned with live behavior: stop/take exits
   are close-based via `exit_decide()`, not optimistic intrabar high/low fills.
@@ -235,4 +237,3 @@ If you cannot run an expected check, say why in the final response.
   explicitly asks for it.
 - Do not leave a game prototype as a launch-only scene with no objective,
   feedback, or restart loop.
-
