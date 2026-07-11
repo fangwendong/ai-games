@@ -332,6 +332,8 @@ open, and benchmark/asset bars are aligned by timestamp rather than array index.
 
 Live entry size is capped by both notional and ATR risk:
 `quantity <= IBKR_MAX_RISK_PER_TRADE / max(percent_stop, ATR * multiple)`.
+The current live checkout sets `IBKR_MAX_RISK_PER_TRADE=120`; the committed
+`.env.example` intentionally remains at the conservative `$10` setup default.
 Filled entries receive broker-hosted GTC stop/take OCA orders. On restart, the
 scanner queries active and completed IBKR orders by deterministic order ref,
 rebuilds missing protection for an open position, and refuses duplicate entry
