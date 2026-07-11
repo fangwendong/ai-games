@@ -36,6 +36,9 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser(
         "doctor", help="show local configuration and dependency status"
     )
+    subparsers.add_parser(
+        "heartbeat", help="verify the Gateway API with a server-time round trip"
+    )
 
     quote = subparsers.add_parser("quote", help="fetch a market data snapshot")
     quote.add_argument("symbol")
@@ -660,6 +663,10 @@ def main(argv: list[str] | None = None) -> int:
     if not (args.command == "backtest-momentum" and args.reuse_data):
         broker = _with_broker(settings)
     try:
+        if args.command == "heartbeat":
+            print(broker.server_time().isoformat())
+            return 0
+
         if args.command == "quote":
             print(
                 json.dumps(asdict(broker.quote(args.symbol)), indent=2, sort_keys=True)

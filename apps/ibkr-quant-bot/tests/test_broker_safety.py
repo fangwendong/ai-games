@@ -53,6 +53,9 @@ class FakeIB:
     def sleep(self, seconds):
         return None
 
+    def reqCurrentTime(self):
+        return datetime(2026, 7, 11, 5, 0, tzinfo=timezone.utc)
+
 
 def make_broker(settings: Settings, fake_ib: FakeIB) -> IbkrBroker:
     broker = object.__new__(IbkrBroker)
@@ -62,6 +65,14 @@ def make_broker(settings: Settings, fake_ib: FakeIB) -> IbkrBroker:
 
 
 class BrokerSafetyTest(unittest.TestCase):
+    def test_heartbeat_returns_gateway_server_time(self) -> None:
+        broker = make_broker(Settings(), FakeIB("DU123456"))
+
+        self.assertEqual(
+            datetime(2026, 7, 11, 5, 0, tzinfo=timezone.utc),
+            broker.server_time(),
+        )
+
     def test_historical_pagination_moves_end_time_backward_and_deduplicates(
         self,
     ) -> None:

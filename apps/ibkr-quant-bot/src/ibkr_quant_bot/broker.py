@@ -78,6 +78,13 @@ class IbkrBroker:
         if self._ib.isConnected():
             self._ib.disconnect()
 
+    def server_time(self) -> datetime:
+        """Round-trip a lightweight request to verify the API session."""
+        value = self._ib.reqCurrentTime()
+        if not isinstance(value, datetime):
+            raise BrokerError("IBKR heartbeat returned an invalid server time")
+        return value
+
     def _stock_contract(
         self, symbol: str, exchange: str = "SMART", currency: str = "USD"
     ) -> Any:
