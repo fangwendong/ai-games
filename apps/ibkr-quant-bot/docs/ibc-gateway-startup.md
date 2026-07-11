@@ -120,6 +120,8 @@ heartbeat exits because the original lock appears to remain held.
 The canonical watchdog script is tracked at
 `scripts/ibkr-gateway-watchdog` and installed to
 `/home/fwd/.local/bin/ibkr-gateway-watchdog`.
+See [ibkr-api-heartbeat.md](ibkr-api-heartbeat.md) for the success stamp,
+manual verification commands, failure interpretation, and safety boundary.
 
 The original process-only version was:
 
