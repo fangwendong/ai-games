@@ -9,6 +9,8 @@ from tempfile import TemporaryDirectory
 
 from ibkr_quant_bot.broker import BrokerError
 from ibkr_quant_bot.cli import (
+    FROZEN_ROTATION_HYSTERESIS_PARAMETERS,
+    FROZEN_ROTATION_HYSTERESIS_VERSION,
     NEW_YORK,
     _build_momentum_strategy,
     _build_parser,
@@ -74,6 +76,26 @@ class LiveDataGuardsTest(unittest.TestCase):
         self.assertEqual(3, strategy.exit_confirm_bars)
         self.assertEqual(3, strategy.benchmark_exit_confirm_bars)
         self.assertEqual(0.0375, strategy.long_take_profit_pct)
+
+    def test_frozen_hysteresis_profile_matches_versioned_baseline(self) -> None:
+        args = _build_parser().parse_args(["intraday-momentum"])
+        strategy = _build_momentum_strategy(
+            args, Settings(max_order_notional=4000, max_risk_per_trade=120)
+        )
+
+        self.assertEqual("rotation-hysteresis-v1", FROZEN_ROTATION_HYSTERESIS_VERSION)
+        for name, expected in FROZEN_ROTATION_HYSTERESIS_PARAMETERS.items():
+            self.assertEqual(expected, getattr(strategy, name), name)
+        self.assertEqual(4000, strategy.max_notional)
+        self.assertEqual(120, strategy.max_risk_per_trade)
+
+    def test_frozen_hysteresis_rejects_benchmark_override(self) -> None:
+        args = _build_parser().parse_args(
+            ["intraday-momentum", "--benchmark-symbol", "SPY"]
+        )
+
+        with self.assertRaisesRegex(ValueError, "create a new candidate profile"):
+            _build_momentum_strategy(args, Settings())
 
     def test_plain_rotation_profile_is_still_available(self) -> None:
         args = _build_parser().parse_args(["intraday-momentum", "--profile", "rotation"])

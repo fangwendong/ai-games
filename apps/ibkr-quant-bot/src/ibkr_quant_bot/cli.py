@@ -27,6 +27,39 @@ from .strategy import (
 
 NEW_YORK = ZoneInfo("America/New_York")
 DEFAULT_MOMENTUM_PROFILE = "rotation-hysteresis"
+FROZEN_ROTATION_HYSTERESIS_VERSION = "rotation-hysteresis-v1"
+FROZEN_ROTATION_HYSTERESIS_PARAMETERS: dict[str, object] = {
+    "symbols": ("SOXL", "SOXS"),
+    "benchmark_symbol": "QQQ",
+    "fast_window": 13,
+    "slow_window": 21,
+    "trend_window": 34,
+    "trend_lookback": 5,
+    "benchmark_fast_window": 13,
+    "benchmark_slow_window": 21,
+    "benchmark_trend_lookback": 5,
+    "min_bars": 30,
+    "long_stop_loss_pct": 0.006,
+    "long_take_profit_pct": 0.0375,
+    "long_min_confirm_bars": 1,
+    "long_min_trend_gap": 0.001,
+    "long_min_vwap_gap": 0.00025,
+    "long_min_score": 0.006,
+    "short_stop_loss_pct": 0.006,
+    "short_take_profit_pct": 0.0375,
+    "short_min_confirm_bars": 2,
+    "short_min_trend_gap": 0.0015,
+    "short_min_vwap_gap": 0.00025,
+    "short_min_score": 0.006,
+    "require_vwap_confirmation": True,
+    "require_benchmark_confirmation": True,
+    "atr_window": 14,
+    "atr_stop_multiple": 2.0,
+    "use_exit_hysteresis": True,
+    "exit_confirm_bars": 3,
+    "benchmark_exit_confirm_bars": 3,
+    "exit_reversal_votes": 2,
+}
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -656,19 +689,31 @@ def _build_momentum_strategy(args: argparse.Namespace, settings: Settings):
     profile = getattr(args, "profile", "balanced")
     if profile in {"rotation", "rotation-hysteresis"}:
         hysteresis = profile == "rotation-hysteresis"
+        if hysteresis:
+            benchmark_symbol = str(args.benchmark_symbol).upper()
+            if benchmark_symbol != FROZEN_ROTATION_HYSTERESIS_PARAMETERS["benchmark_symbol"]:
+                raise ValueError(
+                    f"{FROZEN_ROTATION_HYSTERESIS_VERSION} freezes benchmark_symbol=QQQ; "
+                    "create a new candidate profile instead of overriding the baseline"
+                )
+            return SemiconductorRotationStrategy(
+                **FROZEN_ROTATION_HYSTERESIS_PARAMETERS,
+                max_notional=args.max_notional or settings.max_order_notional,
+                max_risk_per_trade=settings.max_risk_per_trade,
+            )
         return SemiconductorRotationStrategy(
             benchmark_symbol=args.benchmark_symbol,
             max_notional=args.max_notional or settings.max_order_notional,
             max_risk_per_trade=settings.max_risk_per_trade,
             atr_window=settings.atr_window,
             atr_stop_multiple=settings.atr_stop_multiple,
-            long_stop_loss_pct=0.006 if hysteresis else 0.012,
-            short_stop_loss_pct=0.006 if hysteresis else 0.012,
-            long_take_profit_pct=0.0375 if hysteresis else 0.035,
-            short_take_profit_pct=0.0375 if hysteresis else 0.035,
-            use_exit_hysteresis=hysteresis,
+            long_stop_loss_pct=0.012,
+            short_stop_loss_pct=0.012,
+            long_take_profit_pct=0.035,
+            short_take_profit_pct=0.035,
+            use_exit_hysteresis=False,
             exit_confirm_bars=3,
-            benchmark_exit_confirm_bars=3 if hysteresis else 1,
+            benchmark_exit_confirm_bars=1,
             exit_reversal_votes=2,
         )
     return IntradayMomentumStrategy(

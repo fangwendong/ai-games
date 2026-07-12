@@ -247,6 +247,8 @@ ibkr-bot backtest-momentum
 
 The tuning workflow used for this branch is documented in
 [docs/backtest-parameter-tuning.md](docs/backtest-parameter-tuning.md).
+The versioned parameters and change-control rules for the frozen live baseline
+are documented in [docs/strategy-baseline-v1.md](docs/strategy-baseline-v1.md).
 
 ### Historical Data Cache
 
