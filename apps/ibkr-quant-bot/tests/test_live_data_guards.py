@@ -15,6 +15,8 @@ from ibkr_quant_bot.cli import (
     _daily_entry_count,
     _daily_entry_limit_reached,
     _fresh_historical_bars,
+    _has_price_scale_discontinuity,
+    _is_market_hours,
     _marketable_buy_limit_price,
     _orders_state_path,
     _record_daily_entry,
@@ -25,7 +27,7 @@ from ibkr_quant_bot.cli import (
     _trade_lifecycle,
 )
 from ibkr_quant_bot.config import Settings
-from ibkr_quant_bot.models import Bar, Quote, TradeRequest
+from ibkr_quant_bot.models import Bar, MarketSession, Quote, TradeRequest
 
 
 class FakeBroker:
@@ -144,6 +146,51 @@ class LiveDataGuardsTest(unittest.TestCase):
         )
         self.assertTrue(
             _should_flatten(settings, datetime(2026, 7, 10, 15, 50, tzinfo=NEW_YORK))
+        )
+
+    def test_early_close_changes_market_and_flatten_windows(self) -> None:
+        session = MarketSession(
+            session_date=datetime(2026, 11, 27).date(),
+            opens_at=datetime(2026, 11, 27, 9, 30, tzinfo=NEW_YORK),
+            closes_at=datetime(2026, 11, 27, 13, 0, tzinfo=NEW_YORK),
+        )
+        settings = Settings(flatten_before_close_minutes=10)
+
+        self.assertTrue(
+            _is_market_hours(datetime(2026, 11, 27, 12, 55, tzinfo=NEW_YORK), session)
+        )
+        self.assertFalse(
+            _is_market_hours(datetime(2026, 11, 27, 13, 1, tzinfo=NEW_YORK), session)
+        )
+        self.assertTrue(
+            _should_flatten(
+                settings,
+                datetime(2026, 11, 27, 12, 50, tzinfo=NEW_YORK),
+                session,
+            )
+        )
+
+    def test_reverse_split_scale_discontinuity_is_detected(self) -> None:
+        bars = [
+            Bar(
+                time=datetime(2026, 7, 10, 9, 30, tzinfo=NEW_YORK),
+                open=50,
+                high=51,
+                low=49,
+                close=50,
+                volume=1,
+            )
+        ]
+
+        self.assertTrue(
+            _has_price_scale_discontinuity(
+                Quote("SOXS", bid=50, ask=51, last=50, close=10), bars
+            )
+        )
+        self.assertFalse(
+            _has_price_scale_discontinuity(
+                Quote("SOXS", bid=50, ask=51, last=50, close=49), bars
+            )
         )
 
     def test_live_strategy_forces_live_quote(self) -> None:

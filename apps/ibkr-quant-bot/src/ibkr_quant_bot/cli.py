@@ -16,7 +16,7 @@ from .backtest import (
 )
 from .config import Settings, load_settings
 from .historical_cache import load_bars, save_bars_by_day
-from .models import Bar, StrategyDecision, TradeRequest
+from .models import Bar, MarketSession, StrategyDecision, TradeRequest
 from .risk import RiskManager
 from .strategy import (
     IntradayMomentumStrategy,
@@ -341,15 +341,27 @@ def _marketable_buy_limit_price(
     return math.ceil(adjusted * 100.0) / 100.0
 
 
-def _is_market_hours(now: datetime | None = None) -> bool:
+def _is_market_hours(
+    now: datetime | None = None, session: MarketSession | None = None
+) -> bool:
     now = now or datetime.now(NEW_YORK)
+    if session is not None:
+        return session.opens_at <= now < session.closes_at
     current = now.timetz().replace(tzinfo=None)
     return now.weekday() < 5 and time(9, 30) <= current < time(16, 0)
 
 
-def _should_flatten(settings: Settings, now: datetime | None = None) -> bool:
+def _should_flatten(
+    settings: Settings,
+    now: datetime | None = None,
+    session: MarketSession | None = None,
+) -> bool:
     now = now or datetime.now(NEW_YORK)
-    close = datetime.combine(now.date(), time(16, 0), tzinfo=NEW_YORK)
+    close = (
+        session.closes_at
+        if session is not None
+        else datetime.combine(now.date(), time(16, 0), tzinfo=NEW_YORK)
+    )
     cutoff = close - timedelta(minutes=max(0, settings.flatten_before_close_minutes))
     return now.weekday() < 5 and cutoff <= now < close
 
@@ -389,6 +401,7 @@ def _fresh_historical_bars(
     bar_size: str = "1 min",
     what_to_show: str = "TRADES",
     session_only: bool = False,
+    session: MarketSession | None = None,
     now: datetime | None = None,
 ) -> list[Bar]:
     bars = broker.historical_bars(
@@ -396,11 +409,19 @@ def _fresh_historical_bars(
     )
     now = now or datetime.now(NEW_YORK)
     if session_only:
+        session_open = session.opens_at if session is not None else None
+        session_close = session.closes_at if session is not None else None
         bars = [
             bar
             for bar in bars
             if (normalized := _normalize_bar_time(bar.time)).date() == now.date()
-            and time(9, 30) <= normalized.timetz().replace(tzinfo=None) < time(16, 0)
+            and (
+                session_open <= normalized < session_close
+                if session_open is not None and session_close is not None
+                else time(9, 30)
+                <= normalized.timetz().replace(tzinfo=None)
+                < time(16, 0)
+            )
         ]
     if not settings.is_live:
         return bars
@@ -430,6 +451,17 @@ def _strategy_quote(broker: IbkrBroker, settings: Settings, symbol: str):
     if settings.is_live:
         return broker.live_quote(symbol)
     return broker.quote(symbol)
+
+
+def _has_price_scale_discontinuity(
+    quote, bars: list[Bar], *, maximum_ratio: float = 1.8
+) -> bool:
+    """Catch unadjusted split/reverse-split data before opening a new position."""
+    prices = [bar.open for bar in bars] + [bar.close for bar in bars]
+    if quote.close is not None:
+        prices.append(float(quote.close))
+    prices = [price for price in prices if price > 0]
+    return bool(prices) and max(prices) / min(prices) >= maximum_ratio
 
 
 def _entry_state_path(settings: Settings, now: datetime | None = None) -> Path:
@@ -752,14 +784,18 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "vwap-pullback":
-            if not _is_market_hours():
-                print("market closed: skipping vwap_pullback scan")
-                return 0
-
             strategy = VwapPullbackStrategy(
                 symbols=settings.vwap_symbols,
                 max_notional=args.max_notional or settings.max_order_notional,
             )
+            now = datetime.now(NEW_YORK)
+            session = broker.market_session(strategy.symbols[0], now.date())
+            if session is None:
+                print("exchange holiday: skipping vwap_pullback scan")
+                return 0
+            if not _is_market_hours(now, session):
+                print("market closed: skipping vwap_pullback scan")
+                return 0
             scan_rows: list[dict[str, object]] = []
             signal_decisions: list[tuple[str, object]] = []
             for symbol in strategy.symbols:
@@ -821,34 +857,55 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "intraday-momentum":
-            if not _is_market_hours():
+            strategy = _build_momentum_strategy(args, settings)
+            now = datetime.now(NEW_YORK)
+            session = broker.market_session(strategy.benchmark_symbol, now.date())
+            if session is None:
+                print("exchange holiday: skipping intraday_momentum scan")
+                return 0
+            if not _is_market_hours(now, session):
                 print("market closed: skipping intraday_momentum scan")
                 return 0
-
-            strategy = _build_momentum_strategy(args, settings)
             benchmark_bars = _fresh_historical_bars(
                 broker,
                 settings,
                 strategy.benchmark_symbol,
                 bar_size="5 mins",
                 session_only=True,
+                session=session,
+                now=now,
             )
 
             current_positions = _parse_position_rows(
                 broker.positions(), strategy.symbols
             )
+            for symbol, position_row in current_positions.items():
+                position = float(position_row["position"])
+                if not math.isclose(position, round(position), abs_tol=1e-6):
+                    raise BrokerError(
+                        f"fractional {symbol} strategy position {position:g}; possible corporate action; refusing automation"
+                    )
             scan_rows: list[dict[str, object]] = []
             decisions: dict[str, object] = {}
+            price_scale_discontinuities: set[str] = set()
 
             for symbol in strategy.symbols:
                 quote = _strategy_quote(broker, settings, symbol)
                 bars = _fresh_historical_bars(
-                    broker, settings, symbol, bar_size="5 mins", session_only=True
+                    broker,
+                    settings,
+                    symbol,
+                    bar_size="5 mins",
+                    session_only=True,
+                    session=session,
+                    now=now,
                 )
+                if _has_price_scale_discontinuity(quote, bars):
+                    price_scale_discontinuities.add(symbol)
                 if symbol in current_positions:
                     position_row = current_positions[symbol]
                     quantity = int(float(position_row["position"]))
-                    if _should_flatten(settings):
+                    if _should_flatten(settings, now, session):
                         decision = StrategyDecision(
                             symbol=symbol,
                             action="SELL",
@@ -964,6 +1021,8 @@ def main(argv: list[str] | None = None) -> int:
                             symbol,
                             bar_size="5 mins",
                             session_only=True,
+                            session=session,
+                            now=now,
                         )
                         stop_price, take_price = strategy.protective_prices(
                             symbol, average_cost, bars
@@ -1003,13 +1062,19 @@ def main(argv: list[str] | None = None) -> int:
             if not buy_candidates:
                 print("no signal: no order")
                 return 0
+            if price_scale_discontinuities:
+                print(
+                    "possible split/reverse-split or unadjusted price discontinuity for "
+                    f"{','.join(sorted(price_scale_discontinuities))}; no new entry"
+                )
+                return 0
             if settings.is_live and _daily_entry_limit_reached(settings):
                 print(
                     f"daily entry limit reached: "
                     f"{_daily_entry_count(settings)}/{settings.max_daily_entries}; no new entry"
                 )
                 return 0
-            if _should_flatten(settings):
+            if _should_flatten(settings, now, session):
                 print("end-of-day flatten window: no new entry")
                 return 0
             entry_order_ref = (

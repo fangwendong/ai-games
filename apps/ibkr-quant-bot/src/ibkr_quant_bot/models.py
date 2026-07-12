@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 
@@ -13,6 +13,13 @@ class Bar:
     low: float
     close: float
     volume: float
+
+
+@dataclass(frozen=True)
+class MarketSession:
+    session_date: date
+    opens_at: datetime
+    closes_at: datetime
 
 
 @dataclass(frozen=True)

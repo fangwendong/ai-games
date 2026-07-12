@@ -173,6 +173,10 @@ ibkr-bot intraday-momentum
 
 In live trading mode, the intraday scanners refuse delayed market data:
 
+- The scanner reads the current regular/liquid session from IBKR contract
+  details before trading. Exchange holidays are skipped explicitly, and early
+  closes move the mandatory flatten window to ten minutes before the actual
+  close. A missing or malformed IBKR calendar entry fails closed.
 - Quote requests are forced through live market data instead of the generic
   `auto` fallback path.
 - Historical bars must be fresh. By default the latest bar may be at most
@@ -180,6 +184,11 @@ In live trading mode, the intraday scanners refuse delayed market data:
   completed 5-minute bars but rejects 15-20 minute delayed data.
 - Strategy bars are restricted to the current New York regular session, so the
   opening signal cannot inherit the prior day's EMA or VWAP history.
+- A large mismatch between the prior close and current-session prices blocks
+  new entries as a possible split, reverse split, or unadjusted-data event.
+  Fractional strategy positions also stop automation for manual corporate-
+  action review. This is especially relevant to leveraged ETFs such as
+  `SOXS`; normal exits remain available before the new-entry guard is applied.
 - The scanner stops entering and liquidates positions during the final
   `IBKR_FLATTEN_BEFORE_CLOSE_MINUTES=10` minutes. Run the command on a schedule
   that includes this window; no software can flatten a position if it is not running.

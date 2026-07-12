@@ -4,12 +4,12 @@ import math
 import time
 import uuid
 from collections.abc import Callable, Iterable
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from .config import Settings
-from .models import Bar, Quote, TradeRequest
+from .models import Bar, MarketSession, Quote, TradeRequest
 
 
 class BrokerError(RuntimeError):
@@ -84,6 +84,66 @@ class IbkrBroker:
         if not isinstance(value, datetime):
             raise BrokerError("IBKR heartbeat returned an invalid server time")
         return value
+
+    def market_session(self, symbol: str, session_date: date) -> MarketSession | None:
+        """Return IBKR's regular/liquid session, or None for an explicit closure."""
+        contract = self._stock_contract(symbol)
+        details = self._ib.reqContractDetails(contract)
+        if not details:
+            raise BrokerError(f"IBKR returned no contract details for {symbol}")
+        detail = details[0]
+        liquid_hours = str(getattr(detail, "liquidHours", "") or "")
+        timezone_id = str(getattr(detail, "timeZoneId", "") or "")
+        try:
+            session_timezone = ZoneInfo(timezone_id or "America/New_York")
+        except Exception as exc:
+            raise BrokerError(
+                f"unsupported IBKR trading-hours timezone for {symbol}: {timezone_id!r}"
+            ) from exc
+
+        day_key = session_date.strftime("%Y%m%d")
+        matching = [
+            item for item in liquid_hours.split(";") if item.startswith(f"{day_key}:")
+        ]
+        if not matching:
+            raise BrokerError(
+                f"IBKR liquid-hours calendar has no {session_date.isoformat()} entry for {symbol}"
+            )
+        if all(value.split(":", 1)[1].upper() == "CLOSED" for value in matching):
+            return None
+
+        intervals: list[tuple[datetime, datetime]] = []
+        for value in matching:
+            payload = value.split(":", 1)[1]
+            if payload.upper() == "CLOSED":
+                continue
+            for interval in payload.split(","):
+                try:
+                    start_text, end_text = interval.split("-", 1)
+                    if ":" not in start_text:
+                        start_text = f"{day_key}:{start_text}"
+                    if ":" not in end_text:
+                        end_text = f"{day_key}:{end_text}"
+                    start = datetime.strptime(start_text, "%Y%m%d:%H%M").replace(
+                        tzinfo=session_timezone
+                    )
+                    end = datetime.strptime(end_text, "%Y%m%d:%H%M").replace(
+                        tzinfo=session_timezone
+                    )
+                except ValueError as exc:
+                    raise BrokerError(
+                        f"invalid IBKR liquid-hours entry for {symbol}: {interval!r}"
+                    ) from exc
+                intervals.append((start, end))
+        if not intervals:
+            raise BrokerError(
+                f"IBKR liquid-hours calendar has no usable session for {symbol} on {session_date.isoformat()}"
+            )
+        return MarketSession(
+            session_date=session_date,
+            opens_at=min(start for start, _ in intervals),
+            closes_at=max(end for _, end in intervals),
+        )
 
     def _stock_contract(
         self, symbol: str, exchange: str = "SMART", currency: str = "USD"

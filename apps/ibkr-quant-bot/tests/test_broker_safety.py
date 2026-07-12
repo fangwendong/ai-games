@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
 from ibkr_quant_bot.broker import BrokerError, IbkrBroker
@@ -72,6 +72,39 @@ class BrokerSafetyTest(unittest.TestCase):
             datetime(2026, 7, 11, 5, 0, tzinfo=timezone.utc),
             broker.server_time(),
         )
+
+    def test_market_session_detects_holiday(self) -> None:
+        broker = object.__new__(IbkrBroker)
+        broker._stock_contract = lambda symbol: object()
+        broker._ib = SimpleNamespace(
+            reqContractDetails=lambda _: [
+                SimpleNamespace(
+                    liquidHours="20261126:CLOSED;20261127:0930-20261127:1300",
+                    timeZoneId="America/New_York",
+                )
+            ]
+        )
+
+        self.assertIsNone(broker.market_session("QQQ", date(2026, 11, 26)))
+
+    def test_market_session_uses_ibkr_early_close(self) -> None:
+        broker = object.__new__(IbkrBroker)
+        broker._stock_contract = lambda symbol: object()
+        broker._ib = SimpleNamespace(
+            reqContractDetails=lambda _: [
+                SimpleNamespace(
+                    liquidHours="20261126:CLOSED;20261127:0930-20261127:1300",
+                    timeZoneId="America/New_York",
+                )
+            ]
+        )
+
+        session = broker.market_session("QQQ", date(2026, 11, 27))
+
+        self.assertIsNotNone(session)
+        self.assertEqual(9, session.opens_at.hour)
+        self.assertEqual(30, session.opens_at.minute)
+        self.assertEqual(13, session.closes_at.hour)
 
     def test_historical_pagination_moves_end_time_backward_and_deduplicates(
         self,
