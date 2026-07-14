@@ -262,6 +262,14 @@ rollback baseline in [docs/strategy-baseline-v1.md](docs/strategy-baseline-v1.md
 Long intraday backtests persist every completed IBKR history page as daily
 JSON files under `.ibkr_bot_data/historical/` by default:
 
+Before any momentum backtest starts, a fail-closed historical-data preflight
+checks that all strategy symbols and the benchmark share the same latest
+session. It also verifies that the newest two sessions have aligned 5-minute
+timelines and contain either 78 regular-session bars or 42 early-close bars.
+Refresh missing history before retrying; the backtest will not silently run on
+inconsistent or partial recent sessions. The scheduled daily refresh handles
+whole-session cache staleness before this structural preflight runs.
+
 ```text
 .ibkr_bot_data/historical/
 ├── 2026-07-08/
@@ -329,7 +337,7 @@ set -a
 source .env
 set +a
 ibkr-bot backtest-momentum \
-  --profile rotation-hysteresis \
+  --profile rotation-hysteresis-v2 \
   --capital 4000 \
   --max-notional 4000 \
   --commission-per-order 1.00 \

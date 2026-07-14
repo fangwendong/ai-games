@@ -9,6 +9,7 @@ from ibkr_quant_bot.backtest import (
     evaluate_fixed_strategy_walk_forward,
     evaluate_parameter_stability,
     run_intraday_momentum_backtest,
+    validate_historical_bar_coverage,
 )
 from ibkr_quant_bot.models import Bar, Quote, StrategyDecision
 from ibkr_quant_bot.strategy import (
@@ -62,6 +63,47 @@ def make_benchmark_bars(start_price: float = 300.0) -> list[Bar]:
 
 
 class BacktestCostTest(unittest.TestCase):
+    def test_historical_preflight_accepts_two_complete_aligned_sessions(self) -> None:
+        start = datetime(2026, 7, 10, 13, 30, tzinfo=timezone.utc)
+        bars_by_symbol = {}
+        for symbol in ("SOXL", "SOXS", "QQQ"):
+            bars_by_symbol[symbol] = [
+                Bar(
+                    time=start + timedelta(days=day, minutes=5 * index),
+                    open=100,
+                    high=101,
+                    low=99,
+                    close=100,
+                    volume=1,
+                )
+                for day in (0, 3)
+                for index in range(78)
+            ]
+
+        report = validate_historical_bar_coverage(bars_by_symbol)
+
+        self.assertEqual("passed", report["status"])
+        self.assertEqual("2026-07-13", report["latest_common_session"])
+
+    def test_historical_preflight_rejects_missing_recent_bar(self) -> None:
+        start = datetime(2026, 7, 10, 13, 30, tzinfo=timezone.utc)
+        complete = [
+            Bar(
+                time=start + timedelta(days=day, minutes=5 * index),
+                open=100,
+                high=101,
+                low=99,
+                close=100,
+                volume=1,
+            )
+            for day in (0, 3)
+            for index in range(78)
+        ]
+        bars_by_symbol = {"SOXL": complete, "SOXS": complete, "QQQ": complete[:-1]}
+
+        with self.assertRaisesRegex(ValueError, "found 77"):
+            validate_historical_bar_coverage(bars_by_symbol)
+
     def test_per_share_commission_respects_minimum_and_sell_fee(self) -> None:
         model = BacktestCostModel(
             commission_per_order=0.0,

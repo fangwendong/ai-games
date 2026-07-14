@@ -21,6 +21,54 @@ ibkr-bot backtest-momentum --duration "120 D" --data-dir .ibkr_bot_data/historic
 ibkr-bot backtest-momentum --duration "120 D" --reuse-data --data-dir .ibkr_bot_data/historical
 ```
 
+## Mandatory historical-data preflight
+
+Do not start a backtest until recent history has been refreshed and validated.
+This is a correctness requirement, not an optional troubleshooting step.
+
+Use this order for every run:
+
+1. Refresh `SOXL`, `SOXS`, and `QQQ` from IBKR into the daily cache. The
+   refresh is timestamp-merged and is safe to repeat.
+2. Confirm that all three symbols have the same latest completed New York
+   trading session.
+3. Validate the newest two common sessions before calculating any strategy
+   result.
+4. Only after the preflight passes, select the requested trailing trading
+   sessions and run the backtest.
+
+The CLI enforces steps 2 and 3. For each of the newest two sessions it requires:
+
+- identical 5-minute timestamps across `SOXL`, `SOXS`, and `QQQ`
+- no duplicate timestamps
+- exactly five minutes between adjacent bars
+- 78 bars for a normal 09:30-16:00 session, or 42 bars for a standard
+  09:30-13:00 early close
+
+Any mismatch fails closed before the walk-forward or holdout calculation. Do
+not bypass the failure by deleting the latest date or shortening the requested
+window. Refresh the affected symbols, check the IBKR trading calendar for an
+early close, and rerun the preflight.
+
+An online `backtest-momentum` run requests history from IBKR and merges it into
+the cache before this validation. A `--reuse-data` run never downloads data; it
+only validates what is already on disk. Therefore the scheduled post-close
+refresh remains necessary even though the structural preflight is built into
+the command. The production schedule refreshes on Beijing time Tuesday through
+Saturday at 06:30, after the preceding US regular session has closed.
+
+When reporting a result, always include:
+
+- the first and last trading-session dates actually used
+- the number of trading sessions, not just a calendar-day label
+- the newest two sessions checked by the preflight and their bar counts
+- whether data came from a fresh IBKR request or `--reuse-data`
+
+For example, after the 2026-07-13 refresh the preflight should report both
+2026-07-10 and 2026-07-13 with 78 bars for each of the three symbols. This
+example is illustrative; agents must inspect the current cache rather than
+hard-code these dates.
+
 ## What to measure
 
 Do not judge a candidate only by raw net return percentage on the walk-forward
@@ -86,11 +134,12 @@ Treat those as observations from the current sample, not as permanent truths.
 ## Practical workflow
 
 1. Freeze the live-ish baseline you want to test.
-2. Run the chronological backtest with cached data.
-3. Change one family of parameters.
-4. Compare the deployable-capital-normalized result.
-5. Check OOS fold stability.
-6. Only then decide whether to keep the change.
+2. Refresh and pass the mandatory historical-data preflight.
+3. Run the chronological backtest with cached data.
+4. Change one family of parameters.
+5. Compare the deployable-capital-normalized result.
+6. Check OOS fold stability.
+7. Only then decide whether to keep the change.
 
 If you are comparing two candidates and one only wins by adding a lot more
 trading activity, prefer the one with the cleaner OOS profile unless the

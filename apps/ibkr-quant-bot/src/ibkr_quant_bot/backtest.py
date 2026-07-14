@@ -170,6 +170,90 @@ def _session_date(value: datetime) -> date:
     return value.astimezone(NEW_YORK).date()
 
 
+def validate_historical_bar_coverage(
+    bars_by_symbol: dict[str, list[Bar]], *, recent_sessions: int = 2
+) -> dict[str, object]:
+    """Fail closed when the newest cached 5-minute sessions are incomplete."""
+    if recent_sessions < 1:
+        raise ValueError("recent_sessions must be positive")
+    if not bars_by_symbol:
+        raise ValueError("historical preflight requires at least one symbol")
+
+    grouped: dict[str, dict[date, list[Bar]]] = {}
+    latest_by_symbol: dict[str, date] = {}
+    for raw_symbol, bars in bars_by_symbol.items():
+        symbol = raw_symbol.upper()
+        if not bars:
+            raise ValueError(f"historical preflight found no bars for {symbol}")
+        sessions: dict[date, list[Bar]] = defaultdict(list)
+        for bar in bars:
+            sessions[_session_date(bar.time)].append(bar)
+        grouped[symbol] = sessions
+        latest_by_symbol[symbol] = max(sessions)
+
+    latest_dates = set(latest_by_symbol.values())
+    if len(latest_dates) != 1:
+        detail = ", ".join(
+            f"{symbol}={session.isoformat()}"
+            for symbol, session in sorted(latest_by_symbol.items())
+        )
+        raise ValueError(f"historical preflight latest-session mismatch: {detail}")
+
+    common_sessions = sorted(
+        set.intersection(*(set(sessions) for sessions in grouped.values()))
+    )
+    if len(common_sessions) < recent_sessions:
+        raise ValueError(
+            "historical preflight needs at least "
+            f"{recent_sessions} common sessions; found {len(common_sessions)}"
+        )
+
+    checked = common_sessions[-recent_sessions:]
+    counts: dict[str, dict[str, int]] = {}
+    for session in checked:
+        session_key = session.isoformat()
+        timeline_by_symbol: dict[str, tuple[datetime, ...]] = {}
+        counts[session_key] = {}
+        for symbol, sessions in grouped.items():
+            bars = sessions[session]
+            timeline = tuple(sorted(_time_key(bar.time) for bar in bars))
+            if len(timeline) != len(set(timeline)):
+                raise ValueError(
+                    f"historical preflight found duplicate {symbol} bars on {session_key}"
+                )
+            if len(timeline) not in {42, 78}:
+                raise ValueError(
+                    "historical preflight expected 78 regular-session bars or 42 "
+                    f"early-close bars for {symbol} on {session_key}; found {len(timeline)}"
+                )
+            gaps = [
+                (later - earlier).total_seconds()
+                for earlier, later in zip(timeline, timeline[1:])
+            ]
+            if any(gap != 300 for gap in gaps):
+                raise ValueError(
+                    f"historical preflight found a non-5-minute gap for {symbol} on {session_key}"
+                )
+            timeline_by_symbol[symbol] = timeline
+            counts[session_key][symbol] = len(timeline)
+        reference_symbol = sorted(timeline_by_symbol)[0]
+        reference = timeline_by_symbol[reference_symbol]
+        for symbol, timeline in timeline_by_symbol.items():
+            if timeline != reference:
+                raise ValueError(
+                    "historical preflight timeline mismatch on "
+                    f"{session_key}: {reference_symbol} versus {symbol}"
+                )
+
+    latest = next(iter(latest_dates))
+    return {
+        "status": "passed",
+        "latest_common_session": latest.isoformat(),
+        "checked_sessions": [session.isoformat() for session in checked],
+        "bar_counts": counts,
+    }
+
+
 def _prefix_at(bars: list[Bar], current_time: datetime) -> list[Bar]:
     return [bar for bar in bars if _time_key(bar.time) <= current_time]
 

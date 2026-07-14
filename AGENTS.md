@@ -109,6 +109,12 @@ Recent strategy facts worth knowing:
 - Live strategy uses fresh 5-minute bars and live quote checks.
 - Backtest exits are intentionally aligned with live behavior: stop/take exits
   are close-based via `exit_decide()`, not optimistic intrabar high/low fills.
+- Every backtest must refresh recent `SOXL`/`SOXS`/`QQQ` history first, then
+  pass the fail-closed preflight for the newest two common sessions. The
+  preflight requires aligned 5-minute timelines and 78 normal-session bars or
+  42 standard early-close bars per symbol. `--reuse-data` validates the cache
+  but never refreshes it. See
+  `apps/ibkr-quant-bot/docs/backtest-parameter-tuning.md`.
 - Daily entry limit has been used as a risk control; tests showed looser
   intraday re-entry significantly worsened recent backtests.
 - The real-time market data issue was resolved by ensuring the right IBKR

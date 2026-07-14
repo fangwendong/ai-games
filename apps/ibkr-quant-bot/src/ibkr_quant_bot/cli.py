@@ -13,6 +13,7 @@ from .backtest import (
     BacktestCostModel,
     evaluate_fixed_strategy_walk_forward,
     evaluate_parameter_stability,
+    validate_historical_bar_coverage,
 )
 from .config import Settings, load_settings
 from .historical_cache import load_bars, save_bars_by_day
@@ -1460,6 +1461,15 @@ def main(argv: list[str] | None = None) -> int:
                 raise BrokerError(
                     "no historical bars available for " + ", ".join(sorted(missing))
                 )
+            try:
+                historical_preflight = validate_historical_bar_coverage(
+                    bars_by_symbol, recent_sessions=2
+                )
+            except ValueError as exc:
+                raise BrokerError(
+                    f"historical data preflight failed; refresh the cache before backtesting: {exc}"
+                ) from exc
+            report["historical_preflight"] = historical_preflight
             evaluation = evaluate_fixed_strategy_walk_forward(
                 bars_by_symbol,
                 strategy,
