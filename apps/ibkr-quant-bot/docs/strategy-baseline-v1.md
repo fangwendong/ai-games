@@ -3,6 +3,9 @@
 `rotation-hysteresis-v1` is the frozen live signal baseline as of 2026-07-12.
 It exists to stop repeated optimization on already inspected historical data.
 
+V1 remains the rollback profile after `rotation-hysteresis-v2` was adopted on
+2026-07-14. V2 is documented in [strategy-baseline-v2.md](strategy-baseline-v2.md).
+
 ## Frozen Signal Definition
 
 | Group | Parameter | Value |

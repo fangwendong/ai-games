@@ -26,7 +26,7 @@ from .strategy import (
 )
 
 NEW_YORK = ZoneInfo("America/New_York")
-DEFAULT_MOMENTUM_PROFILE = "rotation-hysteresis"
+DEFAULT_MOMENTUM_PROFILE = "rotation-hysteresis-v2"
 FROZEN_ROTATION_HYSTERESIS_VERSION = "rotation-hysteresis-v1"
 FROZEN_ROTATION_HYSTERESIS_PARAMETERS: dict[str, object] = {
     "symbols": ("SOXL", "SOXS"),
@@ -60,6 +60,21 @@ FROZEN_ROTATION_HYSTERESIS_PARAMETERS: dict[str, object] = {
     "benchmark_exit_confirm_bars": 3,
     "exit_reversal_votes": 2,
 }
+ROTATION_HYSTERESIS_V2_VERSION = "rotation-hysteresis-v2"
+ROTATION_HYSTERESIS_V2_PARAMETERS: dict[str, object] = {
+    **FROZEN_ROTATION_HYSTERESIS_PARAMETERS,
+    "profit_lock_activation_pct": 0.03,
+    "profit_lock_drawdown_pct": 0.006,
+    "entry_fill_cutoff_et_minutes": 13 * 60 + 30,
+}
+MOMENTUM_PROFILE_CHOICES = [
+    "balanced",
+    "high-frequency",
+    "rotation",
+    "rotation-hysteresis",
+    "rotation-hysteresis-v1",
+    "rotation-hysteresis-v2",
+]
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -119,9 +134,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     momentum.add_argument(
         "--profile",
-        choices=["balanced", "high-frequency", "rotation", "rotation-hysteresis"],
+        choices=MOMENTUM_PROFILE_CHOICES,
         default=DEFAULT_MOMENTUM_PROFILE,
-        help="strategy preset; rotation-hysteresis is the current default live profile",
+        help="strategy preset; rotation-hysteresis-v2 is the current live profile",
     )
     momentum.add_argument(
         "--benchmark-symbol",
@@ -201,9 +216,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     backtest.add_argument(
         "--profile",
-        choices=["balanced", "high-frequency", "rotation", "rotation-hysteresis"],
+        choices=MOMENTUM_PROFILE_CHOICES,
         default=DEFAULT_MOMENTUM_PROFILE,
-        help="strategy preset; rotation-hysteresis is the current default live profile",
+        help="strategy preset; rotation-hysteresis-v2 is the current live profile",
     )
     backtest.add_argument(
         "--benchmark-symbol",
@@ -557,6 +572,8 @@ def _record_daily_entry(
     request: TradeRequest,
     now: datetime | None = None,
     filled_quantity: float | None = None,
+    average_fill_price: float | None = None,
+    strategy_version: str | None = None,
 ) -> None:
     now = now or datetime.now(NEW_YORK)
     path = _entry_state_path(settings, now)
@@ -570,6 +587,8 @@ def _record_daily_entry(
             "symbol": request.symbol.upper(),
             "quantity": request.quantity,
             "filled_quantity": filled_quantity,
+            "average_fill_price": average_fill_price,
+            "strategy_version": strategy_version,
             "order_type": request.order_type,
             "limit_price": request.limit_price,
             "time_in_force": request.time_in_force,
@@ -581,6 +600,48 @@ def _record_daily_entry(
     state["entries"] = entries
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(state, indent=2, sort_keys=True))
+
+
+def _latest_entry_time(
+    settings: Settings, symbol: str, now: datetime | None = None
+) -> datetime | None:
+    now = now or datetime.now(NEW_YORK)
+    entries = _load_entry_state(settings, now).get("entries", [])
+    if not isinstance(entries, list):
+        return None
+    for entry in reversed(entries):
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("symbol", "")).upper() != symbol.upper():
+            continue
+        try:
+            timestamp = datetime.fromisoformat(str(entry["time"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=NEW_YORK)
+        return timestamp.astimezone(NEW_YORK)
+    return None
+
+
+def _completed_bars_since_entry(
+    bars: list[Bar], entry_time: datetime, now: datetime, *, bar_minutes: int = 5
+) -> list[Bar]:
+    entry_time = entry_time.astimezone(NEW_YORK)
+    entry_bar_start = entry_time.replace(
+        minute=(entry_time.minute // bar_minutes) * bar_minutes,
+        second=0,
+        microsecond=0,
+    )
+    completed: list[Bar] = []
+    for bar in bars:
+        bar_time = _normalize_bar_time(bar.time)
+        if bar_time < entry_bar_start:
+            continue
+        if bar_time + timedelta(minutes=bar_minutes) > now:
+            continue
+        completed.append(bar)
+    return completed
 
 
 def _record_order_state(
@@ -687,17 +748,27 @@ def _momentum_kwargs(args: argparse.Namespace) -> dict[str, object]:
 
 def _build_momentum_strategy(args: argparse.Namespace, settings: Settings):
     profile = getattr(args, "profile", "balanced")
-    if profile in {"rotation", "rotation-hysteresis"}:
-        hysteresis = profile == "rotation-hysteresis"
+    if profile in {
+        "rotation",
+        "rotation-hysteresis",
+        "rotation-hysteresis-v1",
+        "rotation-hysteresis-v2",
+    }:
+        hysteresis = profile != "rotation"
         if hysteresis:
             benchmark_symbol = str(args.benchmark_symbol).upper()
             if benchmark_symbol != FROZEN_ROTATION_HYSTERESIS_PARAMETERS["benchmark_symbol"]:
                 raise ValueError(
-                    f"{FROZEN_ROTATION_HYSTERESIS_VERSION} freezes benchmark_symbol=QQQ; "
+                    f"{profile} freezes benchmark_symbol=QQQ; "
                     "create a new candidate profile instead of overriding the baseline"
                 )
+            parameters = (
+                ROTATION_HYSTERESIS_V2_PARAMETERS
+                if profile == ROTATION_HYSTERESIS_V2_VERSION
+                else FROZEN_ROTATION_HYSTERESIS_PARAMETERS
+            )
             return SemiconductorRotationStrategy(
-                **FROZEN_ROTATION_HYSTERESIS_PARAMETERS,
+                **parameters,
                 max_notional=args.max_notional or settings.max_order_notional,
                 max_risk_per_trade=settings.max_risk_per_trade,
             )
@@ -970,6 +1041,25 @@ def main(argv: list[str] | None = None) -> int:
                             float(position_row["avgCost"]),
                             benchmark_bars=benchmark_bars,
                         )
+                        if (
+                            not decision.signal
+                            and getattr(strategy, "profit_lock_activation_pct", None)
+                            is not None
+                        ):
+                            entry_time = _latest_entry_time(settings, symbol, now)
+                            if entry_time is not None:
+                                completed_bars = _completed_bars_since_entry(
+                                    bars, entry_time, now
+                                )
+                                lock_decision = strategy.profit_lock_decide(
+                                    symbol,
+                                    quote,
+                                    completed_bars,
+                                    quantity,
+                                    float(position_row["avgCost"]),
+                                )
+                                if lock_decision.signal:
+                                    decision = lock_decision
                 else:
                     decision = strategy.decide(
                         symbol, quote, bars, benchmark_bars=benchmark_bars
@@ -1204,10 +1294,20 @@ def main(argv: list[str] | None = None) -> int:
                         raise BrokerError(
                             f"entry cancellation unresolved for {decision.symbol}; refusing to size protection"
                         )
-                    _record_daily_entry(settings, request, filled_quantity=filled)
-                    print(f"entry filled quantity={filled}; daily entry state recorded")
                     filled_quantity = int(filled)
                     average_fill_price = _trade_average_fill_price(trade) or limit_price
+                    _record_daily_entry(
+                        settings,
+                        request,
+                        filled_quantity=filled,
+                        average_fill_price=average_fill_price,
+                        strategy_version=(
+                            ROTATION_HYSTERESIS_V2_VERSION
+                            if args.profile == ROTATION_HYSTERESIS_V2_VERSION
+                            else args.profile
+                        ),
+                    )
+                    print(f"entry filled quantity={filled}; daily entry state recorded")
                     if filled_quantity > 0:
                         bars = _fresh_historical_bars(
                             broker,
@@ -1262,6 +1362,9 @@ def main(argv: list[str] | None = None) -> int:
                     "exit_confirm_bars": strategy.exit_confirm_bars,
                     "benchmark_exit_confirm_bars": strategy.benchmark_exit_confirm_bars,
                     "exit_reversal_votes": strategy.exit_reversal_votes,
+                    "profit_lock_activation_pct": strategy.profit_lock_activation_pct,
+                    "profit_lock_drawdown_pct": strategy.profit_lock_drawdown_pct,
+                    "entry_fill_cutoff_et_minutes": strategy.entry_fill_cutoff_et_minutes,
                     "max_notional": strategy.max_notional,
                     "long": {
                         "stop_loss_pct": strategy.long_stop_loss_pct,

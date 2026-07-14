@@ -12,13 +12,17 @@ from ibkr_quant_bot.cli import (
     FROZEN_ROTATION_HYSTERESIS_PARAMETERS,
     FROZEN_ROTATION_HYSTERESIS_VERSION,
     NEW_YORK,
+    ROTATION_HYSTERESIS_V2_PARAMETERS,
+    ROTATION_HYSTERESIS_V2_VERSION,
     _build_momentum_strategy,
     _build_parser,
+    _completed_bars_since_entry,
     _daily_entry_count,
     _daily_entry_limit_reached,
     _fresh_historical_bars,
     _has_price_scale_discontinuity,
     _is_market_hours,
+    _latest_entry_time,
     _marketable_buy_limit_price,
     _orders_state_path,
     _record_daily_entry,
@@ -76,9 +80,14 @@ class LiveDataGuardsTest(unittest.TestCase):
         self.assertEqual(3, strategy.exit_confirm_bars)
         self.assertEqual(3, strategy.benchmark_exit_confirm_bars)
         self.assertEqual(0.0375, strategy.long_take_profit_pct)
+        self.assertEqual(0.03, strategy.profit_lock_activation_pct)
+        self.assertEqual(0.006, strategy.profit_lock_drawdown_pct)
+        self.assertEqual(13 * 60 + 30, strategy.entry_fill_cutoff_et_minutes)
 
     def test_frozen_hysteresis_profile_matches_versioned_baseline(self) -> None:
-        args = _build_parser().parse_args(["intraday-momentum"])
+        args = _build_parser().parse_args(
+            ["intraday-momentum", "--profile", "rotation-hysteresis-v1"]
+        )
         strategy = _build_momentum_strategy(
             args, Settings(max_order_notional=4000, max_risk_per_trade=120)
         )
@@ -88,6 +97,17 @@ class LiveDataGuardsTest(unittest.TestCase):
             self.assertEqual(expected, getattr(strategy, name), name)
         self.assertEqual(4000, strategy.max_notional)
         self.assertEqual(120, strategy.max_risk_per_trade)
+        self.assertIsNone(strategy.profit_lock_activation_pct)
+
+    def test_v2_profile_adds_frozen_profit_lock_and_entry_cutoff(self) -> None:
+        args = _build_parser().parse_args(
+            ["intraday-momentum", "--profile", "rotation-hysteresis-v2"]
+        )
+        strategy = _build_momentum_strategy(args, Settings())
+
+        self.assertEqual("rotation-hysteresis-v2", ROTATION_HYSTERESIS_V2_VERSION)
+        for name, expected in ROTATION_HYSTERESIS_V2_PARAMETERS.items():
+            self.assertEqual(expected, getattr(strategy, name), name)
 
     def test_frozen_hysteresis_rejects_benchmark_override(self) -> None:
         args = _build_parser().parse_args(
@@ -113,6 +133,7 @@ class LiveDataGuardsTest(unittest.TestCase):
 
         self.assertTrue(strategy.use_exit_hysteresis)
         self.assertEqual(0.0375, strategy.long_take_profit_pct)
+        self.assertEqual(0.03, strategy.profit_lock_activation_pct)
 
     def test_live_strategy_rejects_stale_bars(self) -> None:
         settings = Settings(trading_mode="live", live_bar_max_age_seconds=420)
@@ -273,12 +294,44 @@ class LiveDataGuardsTest(unittest.TestCase):
                 time_in_force="DAY",
             )
 
-            _record_daily_entry(settings, request, filled_quantity=3.0)
+            now = datetime(2026, 7, 10, 12, 5, tzinfo=NEW_YORK)
+            _record_daily_entry(
+                settings,
+                request,
+                now=now,
+                filled_quantity=3.0,
+                average_fill_price=101.25,
+                strategy_version="rotation-hysteresis-v2",
+            )
 
             path = next(Path(tmpdir).glob("entries-*.json"))
             row = loads(path.read_text())["entries"][0]
             self.assertEqual(3.0, row["filled_quantity"])
+            self.assertEqual(101.25, row["average_fill_price"])
+            self.assertEqual("rotation-hysteresis-v2", row["strategy_version"])
             self.assertEqual("DAY", row["time_in_force"])
+            self.assertEqual(now, _latest_entry_time(settings, "SOXL", now))
+
+    def test_completed_bars_since_entry_excludes_forming_and_pre_entry_bars(
+        self,
+    ) -> None:
+        entry = datetime(2026, 7, 10, 12, 5, 11, tzinfo=NEW_YORK)
+        now = datetime(2026, 7, 10, 12, 16, tzinfo=NEW_YORK)
+        bars = [
+            Bar(
+                time=datetime(2026, 7, 10, 12, minute, tzinfo=NEW_YORK),
+                open=100,
+                high=101,
+                low=99,
+                close=100 + minute / 100,
+                volume=1,
+            )
+            for minute in (0, 5, 10, 15)
+        ]
+
+        completed = _completed_bars_since_entry(bars, entry, now)
+
+        self.assertEqual([bars[1], bars[2]], completed)
 
     def test_marketable_buy_limit_uses_offset_and_rounds_up(self) -> None:
         settings = Settings(entry_order_price_offset_bps=5)

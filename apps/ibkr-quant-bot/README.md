@@ -165,7 +165,7 @@ intraday setup in this branch is the momentum rotation rule:
 - one open position at a time across `SOXL`, `TQQQ`, and `TECL`
 
 Run the scanner and exit manager with the current default
-`rotation-hysteresis` profile:
+`rotation-hysteresis-v2` profile:
 
 ```bash
 ibkr-bot intraday-momentum
@@ -221,23 +221,29 @@ The legacy `rotation` research parameters are:
 `min_confirm_bars=1`, `min_trend_gap=0.001`, `min_vwap_gap=0.00025`,
 `min_score=0.006`, `take_profit_pct=0.035`.
 
-The default `rotation-hysteresis` profile can be selected explicitly with:
+The current `rotation-hysteresis-v2` profile can be selected explicitly with:
 
 ```bash
-ibkr-bot intraday-momentum --profile rotation-hysteresis
-ibkr-bot backtest-momentum --profile rotation-hysteresis
+ibkr-bot intraday-momentum --profile rotation-hysteresis-v2
+ibkr-bot backtest-momentum --profile rotation-hysteresis-v2
 ```
 
-It keeps the same entries and risk budget but requires three consecutive bars
-to confirm a technical reversal, three consecutive benchmark states to confirm
-a regime reversal, and uses a 4.5% take-profit. The ordinary `rotation` profile
-is intentionally kept available as a rollback path. In the 2025-07-10 through
-2026-07-09 research run,
+V2 keeps the frozen V1 entries, risk budget, 0.60% stop, and 3.75% hard
+take-profit. It adds a close-based profit lock: after a completed 5-minute
+close reaches 3% above average cost, a 0.6% drawdown from the highest completed
+post-entry close triggers the normal reduce-only software exit. V2 also stops
+opening new positions at 13:30 America/New_York; positions already open keep
+their normal stop, take-profit, profit-lock, reversal, and session-close exits.
+The explicit `rotation-hysteresis-v1` profile and its `rotation-hysteresis`
+compatibility alias remain available for rollback. See
+[docs/strategy-baseline-v2.md](docs/strategy-baseline-v2.md).
+
+In the 2025-07-10 through 2026-07-09 research run,
 28 candidates were compared on 209 development sessions before opening a final
 42-session holdout. The hysteresis profile improved the holdout net return from
 3.52% to 8.74%, but two of four development blocks remained negative and a
-double-cost development stress test remained negative. Treat it as a paper-
-trading candidate, not a proven production edge.
+double-cost development stress test remained negative. That evidence does not
+establish a proven production edge; v1 remains available for rollback.
 
 Backtest the same rule with a built-in transaction-cost model:
 
@@ -247,8 +253,9 @@ ibkr-bot backtest-momentum
 
 The tuning workflow used for this branch is documented in
 [docs/backtest-parameter-tuning.md](docs/backtest-parameter-tuning.md).
-The versioned parameters and change-control rules for the frozen live baseline
-are documented in [docs/strategy-baseline-v1.md](docs/strategy-baseline-v1.md).
+The versioned parameters and change-control rules are documented in
+[docs/strategy-baseline-v2.md](docs/strategy-baseline-v2.md), with the frozen
+rollback baseline in [docs/strategy-baseline-v1.md](docs/strategy-baseline-v1.md).
 
 ### Historical Data Cache
 

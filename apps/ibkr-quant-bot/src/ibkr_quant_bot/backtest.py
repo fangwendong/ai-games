@@ -17,6 +17,9 @@ class BacktestCostModel:
     commission_per_order: float = 1.0
     slippage_bps: float = 1.0
     spread_bps: float = 1.0
+    commission_per_share: float = 0.0
+    minimum_commission_per_order: float = 0.0
+    sell_fee_per_share: float = 0.0
 
     @property
     def per_side_bps(self) -> float:
@@ -27,6 +30,31 @@ class BacktestCostModel:
 
     def sell_fill(self, raw_price: float) -> float:
         return raw_price * (1.0 - self.per_side_bps / 10_000.0)
+
+    def commission(self, shares: int, *, side: str) -> float:
+        variable = self.commission_per_share * shares
+        base = max(
+            self.commission_per_order,
+            self.minimum_commission_per_order,
+            variable,
+        )
+        if side.upper() == "SELL":
+            base += self.sell_fee_per_share * shares
+        return base
+
+
+@dataclass(frozen=True)
+class ProfitLockRule:
+    """Close-based trailing profit lock used only when explicitly enabled."""
+
+    activation_pct: float
+    drawdown_pct: float
+
+    def __post_init__(self) -> None:
+        if self.activation_pct <= 0:
+            raise ValueError("activation_pct must be positive")
+        if self.drawdown_pct <= 0:
+            raise ValueError("drawdown_pct must be positive")
 
 
 @dataclass(frozen=True)
@@ -124,6 +152,7 @@ class _OpenPosition:
     entry_price: float
     entry_time: datetime
     entry_date: date
+    entry_commission: float
 
 
 NEW_YORK = ZoneInfo("America/New_York")
@@ -230,9 +259,15 @@ def run_intraday_momentum_backtest(
     strategy: IntradayMomentumStrategy | None = None,
     cost_model: BacktestCostModel | None = None,
     initial_capital: float = 1_000.0,
+    profit_lock_rule: ProfitLockRule | None = None,
 ) -> BacktestResult:
     strategy = strategy or IntradayMomentumStrategy()
     cost_model = cost_model or BacktestCostModel()
+    if profit_lock_rule is None:
+        activation_pct = getattr(strategy, "profit_lock_activation_pct", None)
+        drawdown_pct = getattr(strategy, "profit_lock_drawdown_pct", None)
+        if activation_pct is not None and drawdown_pct is not None:
+            profit_lock_rule = ProfitLockRule(activation_pct, drawdown_pct)
     grouped = _group_bars_by_day(bars_by_symbol)
     all_days = sorted({day for daily in grouped.values() for day in daily})
 
@@ -252,9 +287,9 @@ def run_intraday_momentum_backtest(
         nonlocal gross_cash, net_cash, trade_count, win_count, loss_count
         nonlocal total_commission, total_slippage_cost, total_spread_cost
         gross_cash += position.quantity * raw_exit_price
+        exit_commission = cost_model.commission(position.quantity, side="SELL")
         net_cash += (
-            position.quantity * cost_model.sell_fill(raw_exit_price)
-            - cost_model.commission_per_order
+            position.quantity * cost_model.sell_fill(raw_exit_price) - exit_commission
         )
         gross_entry = position.entry_price
         net_entry = cost_model.buy_fill(position.entry_price)
@@ -263,14 +298,15 @@ def run_intraday_momentum_backtest(
         gross_pnl = position.quantity * (gross_exit - gross_entry)
         net_pnl = (
             position.quantity * (net_exit - net_entry)
-            - 2 * cost_model.commission_per_order
+            - position.entry_commission
+            - exit_commission
         )
         trade_count += 1
         if net_pnl >= 0:
             win_count += 1
         else:
             loss_count += 1
-        total_commission += cost_model.commission_per_order
+        total_commission += exit_commission
         total_spread_cost += (
             position.quantity * raw_exit_price * (cost_model.spread_bps / 10_000.0)
         )
@@ -309,6 +345,7 @@ def run_intraday_momentum_backtest(
         pending_order: _PendingOrder | None = None
         pending_exit: _PendingExit | None = None
         open_position: _OpenPosition | None = None
+        peak_close: float | None = None
         day_closed = False
 
         for current_time in timeline:
@@ -326,6 +363,7 @@ def run_intraday_momentum_backtest(
                         pending_exit.reason,
                     )
                     open_position = None
+                    peak_close = None
                     day_closed = True
                 pending_exit = None
 
@@ -339,12 +377,13 @@ def run_intraday_momentum_backtest(
                         int(gross_cash // raw_entry_price),
                     )
                     if shares > 0:
+                        entry_commission = cost_model.commission(shares, side="BUY")
                         gross_cash -= shares * raw_entry_price
                         net_cash -= (
                             shares * cost_model.buy_fill(raw_entry_price)
-                            + cost_model.commission_per_order
+                            + entry_commission
                         )
-                        total_commission += cost_model.commission_per_order
+                        total_commission += entry_commission
                         total_spread_cost += (
                             shares
                             * raw_entry_price
@@ -361,13 +400,16 @@ def run_intraday_momentum_backtest(
                             entry_price=raw_entry_price,
                             entry_time=current_time,
                             entry_date=_session_date(fill_bar.time),
+                            entry_commission=entry_commission,
                         )
+                        peak_close = max(raw_entry_price, fill_bar.close)
                 pending_order = None
 
             if open_position is not None and pending_exit is None:
                 bars = daily_bars_by_symbol.get(open_position.symbol, [])
                 bar = bars_by_time.get(open_position.symbol, {}).get(current_time)
                 if bar is not None:
+                    peak_close = max(peak_close or open_position.entry_price, bar.close)
                     prefix = _prefix_at(bars, current_time)
                     benchmark_prefix = _prefix_at(benchmark_daily_bars, current_time)
                     quote = Quote(
@@ -393,6 +435,21 @@ def run_intraday_momentum_backtest(
                                 signal_time=current_time,
                                 fill_time=fill_time,
                                 reason=_exit_reason_from_decision(exit_decision.meta),
+                            )
+                    elif (
+                        profit_lock_rule is not None
+                        and peak_close
+                        >= open_position.entry_price
+                        * (1.0 + profit_lock_rule.activation_pct)
+                        and bar.close
+                        <= peak_close * (1.0 - profit_lock_rule.drawdown_pct)
+                    ):
+                        fill_time = _next_bar_time(bars, current_time)
+                        if fill_time is not None:
+                            pending_exit = _PendingExit(
+                                signal_time=current_time,
+                                fill_time=fill_time,
+                                reason="profit_lock",
                             )
 
             if day_closed:
