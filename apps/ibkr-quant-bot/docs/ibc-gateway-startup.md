@@ -103,7 +103,28 @@ watchdog script once per minute:
 
 The watchdog uses a lock to avoid concurrent starts, checks for the Java
 `ibcalpha.ibc.IbcGateway` process or the IBC startup script, and starts Gateway
-only when neither is running:
+only when neither is running. When the process exists it also checks port
+`4001` every minute and performs a read-only IBKR server-time round trip every
+five minutes with client ID `97`.
+
+The health check deliberately does not restart a process that is waiting for
+login or 2FA. Restart loops cannot bypass IBKR authentication and can trigger
+the "too many failed login attempts" cooldown. A missing port is logged so the
+operator knows to approve 2FA; an open port with a failed API heartbeat is also
+logged and retried on the next interval.
+
+The background IBC launcher explicitly closes the watchdog lock descriptor.
+Without that close, Gateway inherits the descriptor and every later cron
+heartbeat exits because the original lock appears to remain held.
+
+The canonical watchdog script is tracked at
+`scripts/ibkr-gateway-watchdog` and installed to
+`/home/fwd/.local/bin/ibkr-gateway-watchdog`.
+See [ibkr-api-heartbeat.md](ibkr-api-heartbeat.md) for the success stamp,
+manual verification commands, bounded log retention, failure interpretation,
+and safety boundary.
+
+The original process-only version was:
 
 ```bash
 #!/usr/bin/env bash

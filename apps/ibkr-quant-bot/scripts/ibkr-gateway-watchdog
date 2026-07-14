@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+DISPLAY="${DISPLAY:-:1}"
+export DISPLAY
+
+# The previous launcher allowed the background Gateway process to inherit the
+# lock descriptor. Use a new lock path so an already-running legacy process
+# cannot keep every future health check locked out.
+lock_file=/tmp/ibkr-gateway-watchdog-v2.lock
+heartbeat_stamp=/tmp/ibkr-gateway-heartbeat.stamp
+log_dir=/home/fwd/ibc/logs
+watchdog_log="$log_dir/ibkr-gateway-watchdog.log"
+bot_dir=/home/fwd/work/ai-games-wt-codex-live/apps/ibkr-quant-bot
+log_retention_days=14
+watchdog_log_max_bytes=1048576
+
+mkdir -p "$log_dir"
+
+exec 9>"$lock_file"
+if ! flock -n 9; then
+  exit 0
+fi
+
+# Keep only recent operational diagnostics. Use copy-and-truncate for the
+# watchdog log because an IBC/Gateway process may still hold its file
+# descriptor after startup. This does not touch order, fill, or account data.
+if [[ -f "$watchdog_log" ]]; then
+  watchdog_log_size=$(stat -c %s "$watchdog_log" 2>/dev/null || printf '0')
+  if (( watchdog_log_size >= watchdog_log_max_bytes )); then
+    cp "$watchdog_log" "$watchdog_log.1"
+    : >"$watchdog_log"
+  fi
+fi
+find "$log_dir" -maxdepth 1 -type f \
+  \( -name 'ibc-*_GATEWAY-*.txt' -o -name 'gateway-restart-*.log' \) \
+  -mtime "+$log_retention_days" -delete
+
+gateway_running=false
+if pgrep -f 'ibcalpha\.ibc\.IbcGateway /home/fwd/ibc/config\.ini' >/dev/null; then
+  gateway_running=true
+fi
+
+startup_running=false
+if pgrep -f '/opt/ibc/scripts/ibcstart\.sh 1045 .*--ibc-ini=/home/fwd/ibc/config\.ini' >/dev/null; then
+  startup_running=true
+fi
+
+if [[ "$gateway_running" == false && "$startup_running" == false ]]; then
+  {
+    printf '[%s] IB Gateway not running; starting via IBC\n' "$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    nohup /opt/ibc/gatewaystart.sh -inline 9>&- >>"$watchdog_log" 2>&1 &
+  } >>"$watchdog_log" 2>&1
+  exit 0
+fi
+
+# A running Java process may still be waiting for login or 2FA. Do not restart
+# it in a loop: that creates more login attempts and cannot bypass IBKR 2FA.
+if ! timeout 2 bash -c '</dev/tcp/127.0.0.1/4001' 2>/dev/null; then
+  printf '[%s] Gateway process exists but API port 4001 is unavailable; waiting for login/2FA\n' \
+    "$(date '+%Y-%m-%d %H:%M:%S %Z')" >>"$watchdog_log"
+  exit 0
+fi
+
+# The cron runs every minute, while the API round-trip is limited to once every
+# five minutes. This verifies the authenticated API session without needless
+# connection churn.
+now=$(date +%s)
+last=0
+if [[ -f "$heartbeat_stamp" ]]; then
+  read -r last <"$heartbeat_stamp" || last=0
+fi
+if (( now - last < 300 )); then
+  exit 0
+fi
+
+if (
+  cd "$bot_dir"
+  set -a
+  source .env
+  set +a
+  IBKR_READONLY=true \
+  IBKR_DRY_RUN=true \
+  IBKR_CLIENT_ID=97 \
+  PYTHONPATH=src \
+    timeout 45 python -m ibkr_quant_bot.cli heartbeat >/dev/null
+); then
+  printf '%s\n' "$now" >"$heartbeat_stamp"
+else
+  printf '[%s] API heartbeat failed while port 4001 was open; leaving Gateway running for the next check\n' \
+    "$(date '+%Y-%m-%d %H:%M:%S %Z')" >>"$watchdog_log"
+fi

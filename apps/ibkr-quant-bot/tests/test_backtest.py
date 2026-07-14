@@ -5,9 +5,11 @@ from datetime import datetime, timedelta, timezone
 
 from ibkr_quant_bot.backtest import (
     BacktestCostModel,
+    ProfitLockRule,
     evaluate_fixed_strategy_walk_forward,
     evaluate_parameter_stability,
     run_intraday_momentum_backtest,
+    validate_historical_bar_coverage,
 )
 from ibkr_quant_bot.models import Bar, Quote, StrategyDecision
 from ibkr_quant_bot.strategy import (
@@ -61,6 +63,102 @@ def make_benchmark_bars(start_price: float = 300.0) -> list[Bar]:
 
 
 class BacktestCostTest(unittest.TestCase):
+    def test_historical_preflight_accepts_two_complete_aligned_sessions(self) -> None:
+        start = datetime(2026, 7, 10, 13, 30, tzinfo=timezone.utc)
+        bars_by_symbol = {}
+        for symbol in ("SOXL", "SOXS", "QQQ"):
+            bars_by_symbol[symbol] = [
+                Bar(
+                    time=start + timedelta(days=day, minutes=5 * index),
+                    open=100,
+                    high=101,
+                    low=99,
+                    close=100,
+                    volume=1,
+                )
+                for day in (0, 3)
+                for index in range(78)
+            ]
+
+        report = validate_historical_bar_coverage(bars_by_symbol)
+
+        self.assertEqual("passed", report["status"])
+        self.assertEqual("2026-07-13", report["latest_common_session"])
+
+    def test_historical_preflight_rejects_missing_recent_bar(self) -> None:
+        start = datetime(2026, 7, 10, 13, 30, tzinfo=timezone.utc)
+        complete = [
+            Bar(
+                time=start + timedelta(days=day, minutes=5 * index),
+                open=100,
+                high=101,
+                low=99,
+                close=100,
+                volume=1,
+            )
+            for day in (0, 3)
+            for index in range(78)
+        ]
+        bars_by_symbol = {"SOXL": complete, "SOXS": complete, "QQQ": complete[:-1]}
+
+        with self.assertRaisesRegex(ValueError, "found 77"):
+            validate_historical_bar_coverage(bars_by_symbol)
+
+    def test_per_share_commission_respects_minimum_and_sell_fee(self) -> None:
+        model = BacktestCostModel(
+            commission_per_order=0.0,
+            commission_per_share=0.005,
+            minimum_commission_per_order=1.0,
+            sell_fee_per_share=0.0003,
+        )
+
+        self.assertEqual(1.0, model.commission(100, side="BUY"))
+        self.assertAlmostEqual(5.3, model.commission(1000, side="SELL"))
+
+    def test_profit_lock_exits_at_next_bar_open_after_close_drawdown(self) -> None:
+        class HoldStrategy:
+            symbols = ("SOXL",)
+            benchmark_symbol = "QQQ"
+            min_bars = 1
+
+            def decide(self, symbol, quote, bars, benchmark_bars=None):
+                signal = len(bars) == 1
+                return StrategyDecision(
+                    symbol, "BUY" if signal else "HOLD", 1 if signal else 0,
+                    quote.reference_price, None, "entry", signal, {"score": 1.0}
+                )
+
+            def exit_decide(
+                self, symbol, quote, bars, quantity, average_cost, benchmark_bars=None
+            ):
+                return StrategyDecision(
+                    symbol, "HOLD", 0, quote.reference_price, None, "hold", False
+                )
+
+        start = datetime(2026, 7, 8, 9, 30, tzinfo=timezone.utc)
+        prices = [(100, 100), (100, 103), (103, 104), (102, 102), (101, 101)]
+        bars = [
+            Bar(
+                time=start + timedelta(minutes=5 * index),
+                open=open_price,
+                high=max(open_price, close_price),
+                low=min(open_price, close_price),
+                close=close_price,
+                volume=1,
+            )
+            for index, (open_price, close_price) in enumerate(prices)
+        ]
+
+        result = run_intraday_momentum_backtest(
+            {"SOXL": bars, "QQQ": bars},
+            strategy=HoldStrategy(),
+            cost_model=BacktestCostModel(0, 0, 0),
+            profit_lock_rule=ProfitLockRule(activation_pct=0.03, drawdown_pct=0.01),
+        )
+
+        self.assertEqual("profit_lock", result.trades[0].exit_reason)
+        self.assertEqual(101, result.trades[0].gross_exit_price)
+
     def test_exit_signal_fills_at_next_bar_open(self) -> None:
         class NextOpenStrategy:
             symbols = ("SOXL",)

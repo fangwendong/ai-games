@@ -13,10 +13,11 @@ from .backtest import (
     BacktestCostModel,
     evaluate_fixed_strategy_walk_forward,
     evaluate_parameter_stability,
+    validate_historical_bar_coverage,
 )
 from .config import Settings, load_settings
 from .historical_cache import load_bars, save_bars_by_day
-from .models import Bar, StrategyDecision, TradeRequest
+from .models import Bar, MarketSession, StrategyDecision, TradeRequest
 from .risk import RiskManager
 from .strategy import (
     IntradayMomentumStrategy,
@@ -26,7 +27,55 @@ from .strategy import (
 )
 
 NEW_YORK = ZoneInfo("America/New_York")
-DEFAULT_MOMENTUM_PROFILE = "rotation-hysteresis"
+DEFAULT_MOMENTUM_PROFILE = "rotation-hysteresis-v2"
+FROZEN_ROTATION_HYSTERESIS_VERSION = "rotation-hysteresis-v1"
+FROZEN_ROTATION_HYSTERESIS_PARAMETERS: dict[str, object] = {
+    "symbols": ("SOXL", "SOXS"),
+    "benchmark_symbol": "QQQ",
+    "fast_window": 13,
+    "slow_window": 21,
+    "trend_window": 34,
+    "trend_lookback": 5,
+    "benchmark_fast_window": 13,
+    "benchmark_slow_window": 21,
+    "benchmark_trend_lookback": 5,
+    "min_bars": 30,
+    "long_stop_loss_pct": 0.006,
+    "long_take_profit_pct": 0.0375,
+    "long_min_confirm_bars": 1,
+    "long_min_trend_gap": 0.001,
+    "long_min_vwap_gap": 0.00025,
+    "long_min_score": 0.006,
+    "short_stop_loss_pct": 0.006,
+    "short_take_profit_pct": 0.0375,
+    "short_min_confirm_bars": 2,
+    "short_min_trend_gap": 0.0015,
+    "short_min_vwap_gap": 0.00025,
+    "short_min_score": 0.006,
+    "require_vwap_confirmation": True,
+    "require_benchmark_confirmation": True,
+    "atr_window": 14,
+    "atr_stop_multiple": 2.0,
+    "use_exit_hysteresis": True,
+    "exit_confirm_bars": 3,
+    "benchmark_exit_confirm_bars": 3,
+    "exit_reversal_votes": 2,
+}
+ROTATION_HYSTERESIS_V2_VERSION = "rotation-hysteresis-v2"
+ROTATION_HYSTERESIS_V2_PARAMETERS: dict[str, object] = {
+    **FROZEN_ROTATION_HYSTERESIS_PARAMETERS,
+    "profit_lock_activation_pct": 0.03,
+    "profit_lock_drawdown_pct": 0.006,
+    "entry_fill_cutoff_et_minutes": 13 * 60 + 30,
+}
+MOMENTUM_PROFILE_CHOICES = [
+    "balanced",
+    "high-frequency",
+    "rotation",
+    "rotation-hysteresis",
+    "rotation-hysteresis-v1",
+    "rotation-hysteresis-v2",
+]
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -35,6 +84,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser(
         "doctor", help="show local configuration and dependency status"
+    )
+    subparsers.add_parser(
+        "heartbeat", help="verify the Gateway API with a server-time round trip"
     )
 
     quote = subparsers.add_parser("quote", help="fetch a market data snapshot")
@@ -83,9 +135,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     momentum.add_argument(
         "--profile",
-        choices=["balanced", "high-frequency", "rotation", "rotation-hysteresis"],
+        choices=MOMENTUM_PROFILE_CHOICES,
         default=DEFAULT_MOMENTUM_PROFILE,
-        help="strategy preset; rotation-hysteresis is the current default live profile",
+        help="strategy preset; rotation-hysteresis-v2 is the current live profile",
     )
     momentum.add_argument(
         "--benchmark-symbol",
@@ -165,9 +217,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     backtest.add_argument(
         "--profile",
-        choices=["balanced", "high-frequency", "rotation", "rotation-hysteresis"],
+        choices=MOMENTUM_PROFILE_CHOICES,
         default=DEFAULT_MOMENTUM_PROFILE,
-        help="strategy preset; rotation-hysteresis is the current default live profile",
+        help="strategy preset; rotation-hysteresis-v2 is the current live profile",
     )
     backtest.add_argument(
         "--benchmark-symbol",
@@ -338,15 +390,27 @@ def _marketable_buy_limit_price(
     return math.ceil(adjusted * 100.0) / 100.0
 
 
-def _is_market_hours(now: datetime | None = None) -> bool:
+def _is_market_hours(
+    now: datetime | None = None, session: MarketSession | None = None
+) -> bool:
     now = now or datetime.now(NEW_YORK)
+    if session is not None:
+        return session.opens_at <= now < session.closes_at
     current = now.timetz().replace(tzinfo=None)
     return now.weekday() < 5 and time(9, 30) <= current < time(16, 0)
 
 
-def _should_flatten(settings: Settings, now: datetime | None = None) -> bool:
+def _should_flatten(
+    settings: Settings,
+    now: datetime | None = None,
+    session: MarketSession | None = None,
+) -> bool:
     now = now or datetime.now(NEW_YORK)
-    close = datetime.combine(now.date(), time(16, 0), tzinfo=NEW_YORK)
+    close = (
+        session.closes_at
+        if session is not None
+        else datetime.combine(now.date(), time(16, 0), tzinfo=NEW_YORK)
+    )
     cutoff = close - timedelta(minutes=max(0, settings.flatten_before_close_minutes))
     return now.weekday() < 5 and cutoff <= now < close
 
@@ -386,6 +450,7 @@ def _fresh_historical_bars(
     bar_size: str = "1 min",
     what_to_show: str = "TRADES",
     session_only: bool = False,
+    session: MarketSession | None = None,
     now: datetime | None = None,
 ) -> list[Bar]:
     bars = broker.historical_bars(
@@ -393,11 +458,19 @@ def _fresh_historical_bars(
     )
     now = now or datetime.now(NEW_YORK)
     if session_only:
+        session_open = session.opens_at if session is not None else None
+        session_close = session.closes_at if session is not None else None
         bars = [
             bar
             for bar in bars
             if (normalized := _normalize_bar_time(bar.time)).date() == now.date()
-            and time(9, 30) <= normalized.timetz().replace(tzinfo=None) < time(16, 0)
+            and (
+                session_open <= normalized < session_close
+                if session_open is not None and session_close is not None
+                else time(9, 30)
+                <= normalized.timetz().replace(tzinfo=None)
+                < time(16, 0)
+            )
         ]
     if not settings.is_live:
         return bars
@@ -427,6 +500,17 @@ def _strategy_quote(broker: IbkrBroker, settings: Settings, symbol: str):
     if settings.is_live:
         return broker.live_quote(symbol)
     return broker.quote(symbol)
+
+
+def _has_price_scale_discontinuity(
+    quote, bars: list[Bar], *, maximum_ratio: float = 1.8
+) -> bool:
+    """Catch unadjusted split/reverse-split data before opening a new position."""
+    prices = [bar.open for bar in bars] + [bar.close for bar in bars]
+    if quote.close is not None:
+        prices.append(float(quote.close))
+    prices = [price for price in prices if price > 0]
+    return bool(prices) and max(prices) / min(prices) >= maximum_ratio
 
 
 def _entry_state_path(settings: Settings, now: datetime | None = None) -> Path:
@@ -489,6 +573,8 @@ def _record_daily_entry(
     request: TradeRequest,
     now: datetime | None = None,
     filled_quantity: float | None = None,
+    average_fill_price: float | None = None,
+    strategy_version: str | None = None,
 ) -> None:
     now = now or datetime.now(NEW_YORK)
     path = _entry_state_path(settings, now)
@@ -502,6 +588,8 @@ def _record_daily_entry(
             "symbol": request.symbol.upper(),
             "quantity": request.quantity,
             "filled_quantity": filled_quantity,
+            "average_fill_price": average_fill_price,
+            "strategy_version": strategy_version,
             "order_type": request.order_type,
             "limit_price": request.limit_price,
             "time_in_force": request.time_in_force,
@@ -513,6 +601,48 @@ def _record_daily_entry(
     state["entries"] = entries
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(state, indent=2, sort_keys=True))
+
+
+def _latest_entry_time(
+    settings: Settings, symbol: str, now: datetime | None = None
+) -> datetime | None:
+    now = now or datetime.now(NEW_YORK)
+    entries = _load_entry_state(settings, now).get("entries", [])
+    if not isinstance(entries, list):
+        return None
+    for entry in reversed(entries):
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("symbol", "")).upper() != symbol.upper():
+            continue
+        try:
+            timestamp = datetime.fromisoformat(str(entry["time"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=NEW_YORK)
+        return timestamp.astimezone(NEW_YORK)
+    return None
+
+
+def _completed_bars_since_entry(
+    bars: list[Bar], entry_time: datetime, now: datetime, *, bar_minutes: int = 5
+) -> list[Bar]:
+    entry_time = entry_time.astimezone(NEW_YORK)
+    entry_bar_start = entry_time.replace(
+        minute=(entry_time.minute // bar_minutes) * bar_minutes,
+        second=0,
+        microsecond=0,
+    )
+    completed: list[Bar] = []
+    for bar in bars:
+        bar_time = _normalize_bar_time(bar.time)
+        if bar_time < entry_bar_start:
+            continue
+        if bar_time + timedelta(minutes=bar_minutes) > now:
+            continue
+        completed.append(bar)
+    return completed
 
 
 def _record_order_state(
@@ -619,21 +749,43 @@ def _momentum_kwargs(args: argparse.Namespace) -> dict[str, object]:
 
 def _build_momentum_strategy(args: argparse.Namespace, settings: Settings):
     profile = getattr(args, "profile", "balanced")
-    if profile in {"rotation", "rotation-hysteresis"}:
-        hysteresis = profile == "rotation-hysteresis"
+    if profile in {
+        "rotation",
+        "rotation-hysteresis",
+        "rotation-hysteresis-v1",
+        "rotation-hysteresis-v2",
+    }:
+        hysteresis = profile != "rotation"
+        if hysteresis:
+            benchmark_symbol = str(args.benchmark_symbol).upper()
+            if benchmark_symbol != FROZEN_ROTATION_HYSTERESIS_PARAMETERS["benchmark_symbol"]:
+                raise ValueError(
+                    f"{profile} freezes benchmark_symbol=QQQ; "
+                    "create a new candidate profile instead of overriding the baseline"
+                )
+            parameters = (
+                ROTATION_HYSTERESIS_V2_PARAMETERS
+                if profile == ROTATION_HYSTERESIS_V2_VERSION
+                else FROZEN_ROTATION_HYSTERESIS_PARAMETERS
+            )
+            return SemiconductorRotationStrategy(
+                **parameters,
+                max_notional=args.max_notional or settings.max_order_notional,
+                max_risk_per_trade=settings.max_risk_per_trade,
+            )
         return SemiconductorRotationStrategy(
             benchmark_symbol=args.benchmark_symbol,
             max_notional=args.max_notional or settings.max_order_notional,
             max_risk_per_trade=settings.max_risk_per_trade,
             atr_window=settings.atr_window,
             atr_stop_multiple=settings.atr_stop_multiple,
-            long_stop_loss_pct=0.006 if hysteresis else 0.012,
-            short_stop_loss_pct=0.006 if hysteresis else 0.012,
-            long_take_profit_pct=0.0375 if hysteresis else 0.035,
-            short_take_profit_pct=0.0375 if hysteresis else 0.035,
-            use_exit_hysteresis=hysteresis,
+            long_stop_loss_pct=0.012,
+            short_stop_loss_pct=0.012,
+            long_take_profit_pct=0.035,
+            short_take_profit_pct=0.035,
+            use_exit_hysteresis=False,
             exit_confirm_bars=3,
-            benchmark_exit_confirm_bars=3 if hysteresis else 1,
+            benchmark_exit_confirm_bars=1,
             exit_reversal_votes=2,
         )
     return IntradayMomentumStrategy(
@@ -660,6 +812,10 @@ def main(argv: list[str] | None = None) -> int:
     if not (args.command == "backtest-momentum" and args.reuse_data):
         broker = _with_broker(settings)
     try:
+        if args.command == "heartbeat":
+            print(broker.server_time().isoformat())
+            return 0
+
         if args.command == "quote":
             print(
                 json.dumps(asdict(broker.quote(args.symbol)), indent=2, sort_keys=True)
@@ -745,14 +901,18 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "vwap-pullback":
-            if not _is_market_hours():
-                print("market closed: skipping vwap_pullback scan")
-                return 0
-
             strategy = VwapPullbackStrategy(
                 symbols=settings.vwap_symbols,
                 max_notional=args.max_notional or settings.max_order_notional,
             )
+            now = datetime.now(NEW_YORK)
+            session = broker.market_session(strategy.symbols[0], now.date())
+            if session is None:
+                print("exchange holiday: skipping vwap_pullback scan")
+                return 0
+            if not _is_market_hours(now, session):
+                print("market closed: skipping vwap_pullback scan")
+                return 0
             scan_rows: list[dict[str, object]] = []
             signal_decisions: list[tuple[str, object]] = []
             for symbol in strategy.symbols:
@@ -814,34 +974,55 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "intraday-momentum":
-            if not _is_market_hours():
+            strategy = _build_momentum_strategy(args, settings)
+            now = datetime.now(NEW_YORK)
+            session = broker.market_session(strategy.benchmark_symbol, now.date())
+            if session is None:
+                print("exchange holiday: skipping intraday_momentum scan")
+                return 0
+            if not _is_market_hours(now, session):
                 print("market closed: skipping intraday_momentum scan")
                 return 0
-
-            strategy = _build_momentum_strategy(args, settings)
             benchmark_bars = _fresh_historical_bars(
                 broker,
                 settings,
                 strategy.benchmark_symbol,
                 bar_size="5 mins",
                 session_only=True,
+                session=session,
+                now=now,
             )
 
             current_positions = _parse_position_rows(
                 broker.positions(), strategy.symbols
             )
+            for symbol, position_row in current_positions.items():
+                position = float(position_row["position"])
+                if not math.isclose(position, round(position), abs_tol=1e-6):
+                    raise BrokerError(
+                        f"fractional {symbol} strategy position {position:g}; possible corporate action; refusing automation"
+                    )
             scan_rows: list[dict[str, object]] = []
             decisions: dict[str, object] = {}
+            price_scale_discontinuities: set[str] = set()
 
             for symbol in strategy.symbols:
                 quote = _strategy_quote(broker, settings, symbol)
                 bars = _fresh_historical_bars(
-                    broker, settings, symbol, bar_size="5 mins", session_only=True
+                    broker,
+                    settings,
+                    symbol,
+                    bar_size="5 mins",
+                    session_only=True,
+                    session=session,
+                    now=now,
                 )
+                if _has_price_scale_discontinuity(quote, bars):
+                    price_scale_discontinuities.add(symbol)
                 if symbol in current_positions:
                     position_row = current_positions[symbol]
                     quantity = int(float(position_row["position"]))
-                    if _should_flatten(settings):
+                    if _should_flatten(settings, now, session):
                         decision = StrategyDecision(
                             symbol=symbol,
                             action="SELL",
@@ -861,6 +1042,25 @@ def main(argv: list[str] | None = None) -> int:
                             float(position_row["avgCost"]),
                             benchmark_bars=benchmark_bars,
                         )
+                        if (
+                            not decision.signal
+                            and getattr(strategy, "profit_lock_activation_pct", None)
+                            is not None
+                        ):
+                            entry_time = _latest_entry_time(settings, symbol, now)
+                            if entry_time is not None:
+                                completed_bars = _completed_bars_since_entry(
+                                    bars, entry_time, now
+                                )
+                                lock_decision = strategy.profit_lock_decide(
+                                    symbol,
+                                    quote,
+                                    completed_bars,
+                                    quantity,
+                                    float(position_row["avgCost"]),
+                                )
+                                if lock_decision.signal:
+                                    decision = lock_decision
                 else:
                     decision = strategy.decide(
                         symbol, quote, bars, benchmark_bars=benchmark_bars
@@ -957,6 +1157,8 @@ def main(argv: list[str] | None = None) -> int:
                             symbol,
                             bar_size="5 mins",
                             session_only=True,
+                            session=session,
+                            now=now,
                         )
                         stop_price, take_price = strategy.protective_prices(
                             symbol, average_cost, bars
@@ -996,13 +1198,19 @@ def main(argv: list[str] | None = None) -> int:
             if not buy_candidates:
                 print("no signal: no order")
                 return 0
+            if price_scale_discontinuities:
+                print(
+                    "possible split/reverse-split or unadjusted price discontinuity for "
+                    f"{','.join(sorted(price_scale_discontinuities))}; no new entry"
+                )
+                return 0
             if settings.is_live and _daily_entry_limit_reached(settings):
                 print(
                     f"daily entry limit reached: "
                     f"{_daily_entry_count(settings)}/{settings.max_daily_entries}; no new entry"
                 )
                 return 0
-            if _should_flatten(settings):
+            if _should_flatten(settings, now, session):
                 print("end-of-day flatten window: no new entry")
                 return 0
             entry_order_ref = (
@@ -1087,10 +1295,20 @@ def main(argv: list[str] | None = None) -> int:
                         raise BrokerError(
                             f"entry cancellation unresolved for {decision.symbol}; refusing to size protection"
                         )
-                    _record_daily_entry(settings, request, filled_quantity=filled)
-                    print(f"entry filled quantity={filled}; daily entry state recorded")
                     filled_quantity = int(filled)
                     average_fill_price = _trade_average_fill_price(trade) or limit_price
+                    _record_daily_entry(
+                        settings,
+                        request,
+                        filled_quantity=filled,
+                        average_fill_price=average_fill_price,
+                        strategy_version=(
+                            ROTATION_HYSTERESIS_V2_VERSION
+                            if args.profile == ROTATION_HYSTERESIS_V2_VERSION
+                            else args.profile
+                        ),
+                    )
+                    print(f"entry filled quantity={filled}; daily entry state recorded")
                     if filled_quantity > 0:
                         bars = _fresh_historical_bars(
                             broker,
@@ -1145,6 +1363,9 @@ def main(argv: list[str] | None = None) -> int:
                     "exit_confirm_bars": strategy.exit_confirm_bars,
                     "benchmark_exit_confirm_bars": strategy.benchmark_exit_confirm_bars,
                     "exit_reversal_votes": strategy.exit_reversal_votes,
+                    "profit_lock_activation_pct": strategy.profit_lock_activation_pct,
+                    "profit_lock_drawdown_pct": strategy.profit_lock_drawdown_pct,
+                    "entry_fill_cutoff_et_minutes": strategy.entry_fill_cutoff_et_minutes,
                     "max_notional": strategy.max_notional,
                     "long": {
                         "stop_loss_pct": strategy.long_stop_loss_pct,
@@ -1240,6 +1461,15 @@ def main(argv: list[str] | None = None) -> int:
                 raise BrokerError(
                     "no historical bars available for " + ", ".join(sorted(missing))
                 )
+            try:
+                historical_preflight = validate_historical_bar_coverage(
+                    bars_by_symbol, recent_sessions=2
+                )
+            except ValueError as exc:
+                raise BrokerError(
+                    f"historical data preflight failed; refresh the cache before backtesting: {exc}"
+                ) from exc
+            report["historical_preflight"] = historical_preflight
             evaluation = evaluate_fixed_strategy_walk_forward(
                 bars_by_symbol,
                 strategy,

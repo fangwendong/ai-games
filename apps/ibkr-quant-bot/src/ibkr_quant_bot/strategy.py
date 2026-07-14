@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import timedelta
 from statistics import fmean
+from zoneinfo import ZoneInfo
 
 from .models import Bar, Quote, StrategyDecision
+
+
+NEW_YORK = ZoneInfo("America/New_York")
 
 
 def _sma(values: list[float], window: int) -> float:
@@ -563,6 +568,9 @@ class SemiconductorRotationStrategy:
     exit_confirm_bars: int = 3
     benchmark_exit_confirm_bars: int = 1
     exit_reversal_votes: int = 2
+    profit_lock_activation_pct: float | None = None
+    profit_lock_drawdown_pct: float | None = None
+    entry_fill_cutoff_et_minutes: int | None = None
     long_strategy: IntradayMomentumStrategy = field(init=False, repr=False)
     short_strategy: IntradayMomentumStrategy = field(init=False, repr=False)
 
@@ -628,6 +636,17 @@ class SemiconductorRotationStrategy:
     def _benchmark_bullish(self, bars: list[Bar]) -> bool:
         return self.long_strategy._benchmark_bullish(bars)
 
+    def _entry_fill_cutoff_reached(self, bars: list[Bar]) -> bool:
+        cutoff = self.entry_fill_cutoff_et_minutes
+        if cutoff is None or not bars:
+            return False
+        bar_time = bars[-1].time
+        if bar_time.tzinfo is None:
+            bar_time = bar_time.replace(tzinfo=NEW_YORK)
+        estimated_fill_time = bar_time.astimezone(NEW_YORK) + timedelta(minutes=5)
+        fill_minutes = estimated_fill_time.hour * 60 + estimated_fill_time.minute
+        return fill_minutes >= cutoff
+
     def stop_loss_pct_for(self, symbol: str) -> float:
         symbol = symbol.upper()
         if symbol == self.long_symbol:
@@ -655,6 +674,63 @@ class SemiconductorRotationStrategy:
         else:
             raise ValueError(f"symbol not traded: {symbol}")
         return strategy.protective_prices(symbol, average_cost, bars)
+
+    def profit_lock_decide(
+        self,
+        symbol: str,
+        quote: Quote,
+        bars_since_entry: list[Bar],
+        quantity: int,
+        average_cost: float,
+    ) -> StrategyDecision:
+        activation_pct = self.profit_lock_activation_pct
+        drawdown_pct = self.profit_lock_drawdown_pct
+        enabled = (
+            activation_pct is not None
+            and activation_pct > 0
+            and drawdown_pct is not None
+            and drawdown_pct > 0
+        )
+        if not enabled or not bars_since_entry:
+            return StrategyDecision(
+                symbol=symbol.upper(),
+                action="HOLD",
+                quantity=0,
+                reference_price=quote.reference_price,
+                limit_price=None,
+                reason="profit lock disabled or waiting for completed post-entry bars",
+                signal=False,
+                meta={"profit_lock_enabled": enabled},
+            )
+
+        peak_close = max(average_cost, *(bar.close for bar in bars_since_entry))
+        current_close = bars_since_entry[-1].close
+        activation_price = average_cost * (1.0 + activation_pct)
+        lock_price = peak_close * (1.0 - drawdown_pct)
+        activated = peak_close >= activation_price
+        lock_hit = activated and current_close <= lock_price
+        return StrategyDecision(
+            symbol=symbol.upper(),
+            action="SELL" if lock_hit else "HOLD",
+            quantity=quantity if lock_hit else 0,
+            reference_price=quote.reference_price,
+            limit_price=None,
+            reason=(
+                f"profit lock peak_close={peak_close:.4f} current_close={current_close:.4f} "
+                f"activation={activation_price:.4f} lock={lock_price:.4f} "
+                f"activated={activated} hit={lock_hit}"
+            ),
+            signal=lock_hit,
+            meta={
+                "profit_lock_enabled": True,
+                "profit_lock_activated": activated,
+                "profit_lock_hit": lock_hit,
+                "profit_lock_peak_close": peak_close,
+                "profit_lock_current_close": current_close,
+                "profit_lock_activation_price": activation_price,
+                "profit_lock_price": lock_price,
+            },
+        )
 
     def _benchmark_reversal_confirmed(
         self, symbol: str, benchmark_bars: list[Bar] | None
@@ -700,6 +776,26 @@ class SemiconductorRotationStrategy:
                 reason="need benchmark bars",
                 signal=False,
                 meta={"bars": len(bars)},
+            )
+        if self._entry_fill_cutoff_reached(bars):
+            cutoff = self.entry_fill_cutoff_et_minutes
+            assert cutoff is not None
+            return StrategyDecision(
+                symbol=symbol,
+                action="HOLD",
+                quantity=0,
+                reference_price=quote.reference_price,
+                limit_price=None,
+                reason=(
+                    "entry window closed before "
+                    f"{cutoff // 60:02d}:{cutoff % 60:02d} America/New_York"
+                ),
+                signal=False,
+                meta={
+                    "bars": len(bars),
+                    "entry_fill_cutoff_et_minutes": cutoff,
+                    "entry_window_closed": True,
+                },
             )
 
         bullish = self._benchmark_bullish(benchmark_bars)
