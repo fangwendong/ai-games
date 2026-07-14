@@ -150,6 +150,60 @@ class LiveDataGuardsTest(unittest.TestCase):
 
         self.assertEqual(1, len(bars))
 
+    def test_completed_only_excludes_forming_live_bar(self) -> None:
+        now = datetime(2026, 7, 10, 12, 1, tzinfo=NEW_YORK)
+        completed = Bar(
+            time=datetime(2026, 7, 10, 11, 55, tzinfo=NEW_YORK),
+            open=1,
+            high=1,
+            low=1,
+            close=1,
+            volume=1,
+        )
+        forming = Bar(
+            time=datetime(2026, 7, 10, 12, 0, tzinfo=NEW_YORK),
+            open=2,
+            high=2,
+            low=2,
+            close=2,
+            volume=1,
+        )
+        broker = FakeBroker([completed, forming])
+
+        bars = _fresh_historical_bars(
+            broker,
+            Settings(trading_mode="live"),
+            "SOXL",
+            bar_size="5 mins",
+            completed_only=True,
+            now=now,
+        )
+
+        self.assertEqual([completed], bars)
+
+    def test_completed_only_includes_bar_at_close_boundary(self) -> None:
+        now = datetime(2026, 7, 10, 12, 5, tzinfo=NEW_YORK)
+        closed = Bar(
+            time=datetime(2026, 7, 10, 12, 0, tzinfo=NEW_YORK),
+            open=1,
+            high=1,
+            low=1,
+            close=1,
+            volume=1,
+        )
+        broker = FakeBroker([closed])
+
+        bars = _fresh_historical_bars(
+            broker,
+            Settings(trading_mode="live"),
+            "SOXL",
+            bar_size="5 mins",
+            completed_only=True,
+            now=now,
+        )
+
+        self.assertEqual([closed], bars)
+
     def test_session_filter_excludes_previous_day_bars(self) -> None:
         now = datetime(2026, 7, 10, 12, 0, tzinfo=NEW_YORK)
         previous = Bar(

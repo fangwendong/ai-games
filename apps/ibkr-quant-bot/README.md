@@ -182,6 +182,9 @@ In live trading mode, the intraday scanners refuse delayed market data:
 - Historical bars must be fresh. By default the latest bar may be at most
   `IBKR_LIVE_BAR_MAX_AGE_SECONDS=420` seconds old, which allows normal
   completed 5-minute bars but rejects 15-20 minute delayed data.
+- Entry, technical-exit, benchmark-regime, and protective-price calculations
+  use completed 5-minute bars only. A bar whose five-minute interval has not
+  ended is excluded so live decisions match the backtest close-bar convention.
 - Strategy bars are restricted to the current New York regular session, so the
   opening signal cannot inherit the prior day's EMA or VWAP history.
 - A large mismatch between the prior close and current-session prices blocks

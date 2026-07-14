@@ -450,6 +450,7 @@ def _fresh_historical_bars(
     bar_size: str = "1 min",
     what_to_show: str = "TRADES",
     session_only: bool = False,
+    completed_only: bool = False,
     session: MarketSession | None = None,
     now: datetime | None = None,
 ) -> list[Bar]:
@@ -472,27 +473,34 @@ def _fresh_historical_bars(
                 < time(16, 0)
             )
         ]
-    if not settings.is_live:
-        return bars
-    if not bars:
-        raise BrokerError(f"no live bars returned for {symbol}")
+    if settings.is_live:
+        if not bars:
+            raise BrokerError(f"no live bars returned for {symbol}")
 
-    last_bar_time = _normalize_bar_time(bars[-1].time)
-    age_seconds = (now - last_bar_time).total_seconds()
-    max_age_seconds = max(
-        settings.live_bar_max_age_seconds, _bar_size_seconds(bar_size) + 120
-    )
-    if age_seconds < -60:
-        raise BrokerError(
-            f"latest bar for {symbol} is in the future: {last_bar_time.isoformat()}"
+        last_bar_time = _normalize_bar_time(bars[-1].time)
+        age_seconds = (now - last_bar_time).total_seconds()
+        max_age_seconds = max(
+            settings.live_bar_max_age_seconds, _bar_size_seconds(bar_size) + 120
         )
-    if age_seconds > max_age_seconds:
-        age_minutes = age_seconds / 60
-        max_minutes = max_age_seconds / 60
-        raise BrokerError(
-            f"latest bar for {symbol} is stale: {last_bar_time.isoformat()} "
-            f"({age_minutes:.1f} min old; max {max_minutes:.1f}); refusing delayed data"
-        )
+        if age_seconds < -60:
+            raise BrokerError(
+                f"latest bar for {symbol} is in the future: {last_bar_time.isoformat()}"
+            )
+        if age_seconds > max_age_seconds:
+            age_minutes = age_seconds / 60
+            max_minutes = max_age_seconds / 60
+            raise BrokerError(
+                f"latest bar for {symbol} is stale: {last_bar_time.isoformat()} "
+                f"({age_minutes:.1f} min old; max {max_minutes:.1f}); refusing delayed data"
+            )
+
+    if completed_only:
+        bar_duration = timedelta(seconds=_bar_size_seconds(bar_size))
+        bars = [
+            bar
+            for bar in bars
+            if _normalize_bar_time(bar.time) + bar_duration <= now
+        ]
     return bars
 
 
@@ -989,6 +997,7 @@ def main(argv: list[str] | None = None) -> int:
                 strategy.benchmark_symbol,
                 bar_size="5 mins",
                 session_only=True,
+                completed_only=True,
                 session=session,
                 now=now,
             )
@@ -1014,6 +1023,7 @@ def main(argv: list[str] | None = None) -> int:
                     symbol,
                     bar_size="5 mins",
                     session_only=True,
+                    completed_only=True,
                     session=session,
                     now=now,
                 )
@@ -1157,6 +1167,7 @@ def main(argv: list[str] | None = None) -> int:
                             symbol,
                             bar_size="5 mins",
                             session_only=True,
+                            completed_only=True,
                             session=session,
                             now=now,
                         )
@@ -1316,6 +1327,7 @@ def main(argv: list[str] | None = None) -> int:
                             decision.symbol,
                             bar_size="5 mins",
                             session_only=True,
+                            completed_only=True,
                         )
                         stop_price, take_price = strategy.protective_prices(
                             decision.symbol, average_fill_price, bars
