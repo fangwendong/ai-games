@@ -5,6 +5,13 @@ from datetime import date, datetime, timedelta, timezone
 from .models import Bar, MarketSession
 
 
+def schedule_lookback_days(recent_sessions: int) -> int:
+    """Bound the IBKR schedule request to the recent validation window."""
+    if recent_sessions < 1:
+        raise ValueError("recent_sessions must be positive")
+    return max(10, recent_sessions * 4)
+
+
 def _utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)

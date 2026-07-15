@@ -17,7 +17,7 @@ from .backtest import (
 )
 from .config import Settings, load_settings
 from .historical_cache import load_bars, save_bars_by_day
-from .history_refresh import validate_recent_cached_sessions
+from .history_refresh import schedule_lookback_days, validate_recent_cached_sessions
 from .models import Bar, MarketSession, StrategyDecision, TradeRequest
 from .risk import RiskManager
 from .strategy import (
@@ -865,7 +865,11 @@ def main(argv: list[str] | None = None) -> int:
 
             sessions = broker.historical_market_sessions(
                 "QQQ",
-                num_days=max(10, broker._duration_days(args.duration)),
+                # This schedule is only used to validate the newest cached
+                # sessions. Requesting a 730-day schedule as "730 D" is
+                # rejected by IBKR because durations over 365 days must use
+                # year units, and the old history is irrelevant here.
+                num_days=schedule_lookback_days(args.recent_sessions),
                 end_datetime=now,
             )
             cached = {

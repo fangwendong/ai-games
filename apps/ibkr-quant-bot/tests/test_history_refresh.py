@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from ibkr_quant_bot.history_refresh import (
     expected_session_timestamps,
+    schedule_lookback_days,
     validate_recent_cached_sessions,
 )
 from ibkr_quant_bot.models import Bar, MarketSession
@@ -18,6 +19,10 @@ def bars_for(session: MarketSession) -> list[Bar]:
 
 
 class HistoryRefreshTest(unittest.TestCase):
+    def test_schedule_lookback_is_bounded_for_multi_year_bar_downloads(self) -> None:
+        self.assertEqual(10, schedule_lookback_days(2))
+        self.assertEqual(12, schedule_lookback_days(3))
+
     def test_expected_timestamps_follow_early_close_schedule(self) -> None:
         session = MarketSession(
             session_date=date(2026, 11, 27),

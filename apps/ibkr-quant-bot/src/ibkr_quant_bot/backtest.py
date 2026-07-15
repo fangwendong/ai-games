@@ -70,6 +70,7 @@ class BacktestTrade:
     exit_reason: str
     gross_pnl: float
     net_pnl: float
+    entry_time: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -410,6 +411,7 @@ def run_intraday_momentum_backtest(
                 exit_reason=reason,
                 gross_pnl=gross_pnl,
                 net_pnl=net_pnl,
+                entry_time=position.entry_time,
             )
         )
 

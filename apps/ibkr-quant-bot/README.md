@@ -78,6 +78,17 @@ that live quotes are unavailable, use
 That runbook also documents how to enable real-time market data in IBKR Client
 Portal and the required Market Data API acknowledgement.
 
+All worktrees should reuse the data-disk historical cache documented in
+[docs/historical-market-data.md](docs/historical-market-data.md). It includes
+the canonical path plus download, read, completeness-audit, and daily refresh
+commands.
+
+The isolated long gap-down/VWAP recovery experiment and its same-period
+comparison with live v2 are documented in
+[docs/gap-reversion-research.md](docs/gap-reversion-research.md).
+The research-only **GapGuard Fusion v1** causal state machine is documented in
+[docs/hybrid-state-research.md](docs/hybrid-state-research.md).
+
 ```bash
 cd apps/ibkr-quant-bot
 export IBKR_HOST=127.0.0.1
