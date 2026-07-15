@@ -50,6 +50,14 @@ not bypass the failure by deleting the latest date or shortening the requested
 window. Refresh the affected symbols, check the IBKR trading calendar for an
 early close, and rerun the preflight.
 
+For past dates, use `IbkrBroker.historical_market_sessions()` to obtain the
+regular-session schedule. It calls IBKR's dedicated `reqHistoricalSchedule`
+API with `useRTH=True`. Do not use `market_session()` for historical cache
+validation: that live guard reads contract `liquidHours`, which may omit past
+dates even when valid bars exist. Validate each cached timeline against the
+historical session's open-inclusive, close-exclusive 5-minute grid; this also
+handles early-close days without hard-coding a date.
+
 An online `backtest-momentum` run requests history from IBKR and merges it into
 the cache before this validation. A `--reuse-data` run never downloads data; it
 only validates what is already on disk. Therefore the scheduled post-close

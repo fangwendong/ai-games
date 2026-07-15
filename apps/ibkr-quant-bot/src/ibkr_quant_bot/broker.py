@@ -145,6 +145,77 @@ class IbkrBroker:
             closes_at=max(end for _, end in intervals),
         )
 
+    def historical_market_sessions(
+        self,
+        symbol: str,
+        *,
+        num_days: int,
+        end_datetime: datetime | date | str | None = None,
+    ) -> dict[date, MarketSession]:
+        """Return IBKR's historical regular-session schedule keyed by date.
+
+        Contract ``liquidHours`` is intended for the current trading calendar and
+        may omit past dates. Historical cache validation must use IBKR's dedicated
+        historical schedule request instead.
+        """
+        if num_days < 1:
+            raise ValueError("num_days must be positive")
+
+        contract = self._stock_contract(symbol)
+        schedule = self._ib.reqHistoricalSchedule(
+            contract,
+            numDays=num_days,
+            endDateTime=end_datetime or "",
+            useRTH=True,
+        )
+        timezone_id = str(getattr(schedule, "timeZone", "") or "America/New_York")
+        try:
+            session_timezone = ZoneInfo(timezone_id)
+        except Exception as exc:
+            raise BrokerError(
+                f"unsupported IBKR historical-schedule timezone for {symbol}: {timezone_id!r}"
+            ) from exc
+
+        def parse_timestamp(value: object) -> datetime:
+            if isinstance(value, datetime):
+                parsed = value
+            else:
+                try:
+                    parsed = datetime.strptime(str(value), "%Y%m%d-%H:%M:%S")
+                except ValueError as exc:
+                    raise BrokerError(
+                        f"invalid IBKR historical-schedule timestamp for {symbol}: {value!r}"
+                    ) from exc
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=session_timezone)
+            return parsed.astimezone(session_timezone)
+
+        sessions: dict[date, MarketSession] = {}
+        for row in list(getattr(schedule, "sessions", []) or []):
+            try:
+                session_date = datetime.strptime(str(row.refDate), "%Y%m%d").date()
+            except (AttributeError, ValueError) as exc:
+                raise BrokerError(
+                    f"invalid IBKR historical-schedule date for {symbol}: "
+                    f"{getattr(row, 'refDate', None)!r}"
+                ) from exc
+            opens_at = parse_timestamp(getattr(row, "startDateTime", None))
+            closes_at = parse_timestamp(getattr(row, "endDateTime", None))
+            if closes_at <= opens_at:
+                raise BrokerError(
+                    f"invalid IBKR historical session for {symbol} on "
+                    f"{session_date.isoformat()}: close is not after open"
+                )
+            sessions[session_date] = MarketSession(
+                session_date=session_date,
+                opens_at=opens_at,
+                closes_at=closes_at,
+            )
+
+        if not sessions:
+            raise BrokerError(f"IBKR returned no historical sessions for {symbol}")
+        return sessions
+
     def _stock_contract(
         self, symbol: str, exchange: str = "SMART", currency: str = "USD"
     ) -> Any:
