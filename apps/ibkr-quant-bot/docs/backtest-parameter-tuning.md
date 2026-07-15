@@ -65,6 +65,19 @@ refresh remains necessary even though the structural preflight is built into
 the command. The production schedule refreshes on Beijing time Tuesday through
 Saturday at 06:30, after the preceding US regular session has closed.
 
+The scheduled job runs a fixed command instead of generating an ad-hoc
+validator:
+
+```bash
+PYTHONPATH=src python -m ibkr_quant_bot.cli refresh-history
+```
+
+Run it with `IBKR_READONLY=true`, `IBKR_DRY_RUN=true`, and
+`IBKR_ALLOW_LIVE_TRADING=false`. An empty HMDS response for one refresh request
+does not by itself invalidate an existing cache. The command keeps previously
+merged bars and then fails closed unless every symbol contains the complete
+latest IBKR historical session and the preceding session.
+
 When reporting a result, always include:
 
 - the first and last trading-session dates actually used

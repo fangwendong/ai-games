@@ -4,7 +4,7 @@ import argparse
 import json
 import math
 from dataclasses import asdict, replace
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -17,6 +17,7 @@ from .backtest import (
 )
 from .config import Settings, load_settings
 from .historical_cache import load_bars, save_bars_by_day
+from .history_refresh import validate_recent_cached_sessions
 from .models import Bar, MarketSession, StrategyDecision, TradeRequest
 from .risk import RiskManager
 from .strategy import (
@@ -88,6 +89,18 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser(
         "heartbeat", help="verify the Gateway API with a server-time round trip"
     )
+
+    refresh = subparsers.add_parser(
+        "refresh-history",
+        help="refresh recent history and validate IBKR's historical RTH schedule",
+    )
+    refresh.add_argument(
+        "--symbols", nargs="+", default=["SOXL", "SOXS", "QQQ"]
+    )
+    refresh.add_argument("--duration", default="10 D")
+    refresh.add_argument("--bar-size", default="5 mins")
+    refresh.add_argument("--recent-sessions", type=int, default=2)
+    refresh.add_argument("--data-dir", default=".ibkr_bot_data/historical")
 
     quote = subparsers.add_parser("quote", help="fetch a market data snapshot")
     quote.add_argument("symbol")
@@ -822,6 +835,56 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "heartbeat":
             print(broker.server_time().isoformat())
+            return 0
+
+        if args.command == "refresh-history":
+            if not settings.readonly or not settings.dry_run:
+                raise BrokerError(
+                    "refresh-history requires IBKR_READONLY=true and IBKR_DRY_RUN=true"
+                )
+            if settings.allow_live_trading:
+                raise BrokerError(
+                    "refresh-history requires IBKR_ALLOW_LIVE_TRADING=false"
+                )
+            broker.server_time()
+            now = datetime.now(timezone.utc)
+            symbols = tuple(dict.fromkeys(item.upper() for item in args.symbols))
+            fetched_counts: dict[str, int] = {}
+            for symbol in symbols:
+                rows = broker.historical_bars_paged(
+                    symbol,
+                    args.duration,
+                    bar_size=args.bar_size,
+                    what_to_show="TRADES",
+                    end_time=now,
+                    page_callback=lambda page, cached_symbol=symbol: save_bars_by_day(
+                        args.data_dir, cached_symbol, args.bar_size, page
+                    ),
+                )
+                fetched_counts[symbol] = len(rows)
+
+            sessions = broker.historical_market_sessions(
+                "QQQ",
+                num_days=max(10, broker._duration_days(args.duration)),
+                end_datetime=now,
+            )
+            cached = {
+                symbol: load_bars(args.data_dir, symbol, args.bar_size)
+                for symbol in symbols
+            }
+            validation = validate_recent_cached_sessions(
+                cached,
+                sessions,
+                now=now,
+                recent_sessions=args.recent_sessions,
+            )
+            print(
+                json.dumps(
+                    {"fetched_counts": fetched_counts, "validation": validation},
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
             return 0
 
         if args.command == "quote":
