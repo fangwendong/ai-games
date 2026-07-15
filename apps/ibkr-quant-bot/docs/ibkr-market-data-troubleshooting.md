@@ -313,20 +313,21 @@ or delayed. For live trading, both quote availability and bar freshness matter.
 ## SMART To ARCA Failover
 
 ARCA failover is an explicit, disabled-by-default safety feature controlled by
-`IBKR_ARCA_FALLBACK_ENABLED`. When enabled, the intraday strategy first loads
-and validates QQQ, SOXL, and SOXS bars and quotes from SMART. If any member of
-that group fails, it discards the entire SMART attempt and retries the complete
-group on ARCA.
+`IBKR_ARCA_FALLBACK_ENABLED`. Quotes for QQQ, SOXL, and SOXS must first pass as
+one complete SMART group. The strategy then loads and validates the three bar
+series from SMART. If any bar series fails, it discards the entire SMART bar
+attempt and retries the complete bar group on ARCA. Quotes and order routing
+remain SMART.
 
 The selected exchange is persisted for the trading date under
 `.ibkr_bot_state/market-data-source-YYYY-MM-DD.json`. Every later poll must use
-that pinned source. It does not switch back to SMART during the session. If
-neither complete group passes validation, the strategy fails closed and does
-not submit an order.
+that pinned bar source. It does not switch bar sources during the session. If
+the complete SMART quote group or both candidate bar groups fail validation,
+the strategy fails closed and does not submit an order.
 
-Backtests used to approve this behavior must use a cache carrying the same
-source metadata. See `docs/historical-market-data.md`; do not compare an ARCA
-live decision with a SMART historical result.
+Backtests used to approve this behavior must generate signals from a cache
+carrying the same bar-source metadata. See `docs/historical-market-data.md`;
+do not compare an ARCA-bar live decision with a SMART-bar historical result.
 
 ## Code Paths To Inspect
 

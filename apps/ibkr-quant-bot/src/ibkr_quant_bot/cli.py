@@ -636,7 +636,9 @@ def _load_market_data_exchange(
         payload = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as exc:
         raise BrokerError(f"invalid market-data source state: {path}") from exc
-    exchange = str(payload.get("exchange", "")).upper()
+    exchange = str(
+        payload.get("bar_exchange", payload.get("exchange", ""))
+    ).upper()
     if exchange not in {"SMART", "ARCA"}:
         raise BrokerError(f"invalid pinned market-data exchange: {exchange!r}")
     return exchange
@@ -658,7 +660,11 @@ def _record_market_data_exchange(
     path.write_text(
         json.dumps(
             {
+                # Keep exchange for compatibility with the first source-pin
+                # format. It has always represented the historical-bar source.
                 "exchange": normalized,
+                "bar_exchange": normalized,
+                "quote_exchange": "SMART",
                 "reason": reason,
                 "recorded_at": now.isoformat(),
                 "session_date": now.date().isoformat(),
@@ -676,7 +682,7 @@ def _load_intraday_market_data(
     session: MarketSession,
     now: datetime,
 ) -> tuple[str, dict[str, list[Bar]], dict[str, Quote]]:
-    """Load one exchange for every symbol and pin it for the whole session."""
+    """Pin one bar source for all symbols while keeping quotes on SMART."""
 
     symbols = tuple(
         dict.fromkeys((strategy.benchmark_symbol, *strategy.symbols))
@@ -696,6 +702,18 @@ def _load_intraday_market_data(
     else:
         exchanges = ("SMART",)
 
+    try:
+        quotes_by_symbol = {
+            symbol: _strategy_quote(
+                broker, settings, symbol, exchange="SMART"
+            )
+            for symbol in symbols
+        }
+    except BrokerError as exc:
+        raise BrokerError(
+            f"complete SMART live quote group unavailable: {exc}"
+        ) from exc
+
     failures: list[str] = []
     for exchange in exchanges:
         try:
@@ -713,12 +731,6 @@ def _load_intraday_market_data(
                 )
                 for symbol in symbols
             }
-            quotes_by_symbol = {
-                symbol: _strategy_quote(
-                    broker, settings, symbol, exchange=exchange
-                )
-                for symbol in symbols
-            }
         except BrokerError as exc:
             failures.append(f"{exchange}: {exc}")
             if pinned is not None:
@@ -729,7 +741,7 @@ def _load_intraday_market_data(
             reason = (
                 "all strategy symbols passed SMART validation"
                 if exchange == "SMART"
-                else f"SMART validation failed; all symbols passed ARCA: {failures[0]}"
+                else f"SMART bar validation failed; all symbols passed ARCA: {failures[0]}"
             )
             _record_market_data_exchange(
                 settings, exchange, reason=reason, now=now
@@ -1302,6 +1314,8 @@ def main(argv: list[str] | None = None) -> int:
                         "score": round(float(decision.meta.get("score", 0.0)), 6),
                         "reason": decision.reason,
                         "market_data_exchange": market_data_exchange,
+                        "bar_data_exchange": market_data_exchange,
+                        "quote_data_exchange": "SMART",
                     }
                 )
 

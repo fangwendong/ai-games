@@ -65,8 +65,13 @@ class FakeBroker:
 
 
 class ExchangeBroker:
-    def __init__(self, missing: set[tuple[str, str]] | None = None):
+    def __init__(
+        self,
+        missing: set[tuple[str, str]] | None = None,
+        quote_missing: set[tuple[str, str]] | None = None,
+    ):
         self.missing = missing or set()
+        self.quote_missing = quote_missing or set()
         self.bar_calls: list[tuple[str, str]] = []
         self.quote_calls: list[tuple[str, str]] = []
 
@@ -94,6 +99,8 @@ class ExchangeBroker:
 
     def live_quote(self, symbol: str, *, exchange: str = "SMART") -> Quote:
         self.quote_calls.append((exchange, symbol))
+        if (exchange, symbol) in self.quote_missing:
+            raise BrokerError(f"live quote unavailable for {symbol}")
         return Quote(symbol, bid=10.0, ask=10.1, last=10.05, close=10.0)
 
 
@@ -393,7 +400,7 @@ class LiveDataGuardsTest(unittest.TestCase):
             self.assertEqual("ARCA", exchange)
             self.assertEqual({"QQQ", "SOXL", "SOXS"}, set(bars))
             self.assertEqual(
-                {("ARCA", "QQQ"), ("ARCA", "SOXL"), ("ARCA", "SOXS")},
+                {("SMART", "QQQ"), ("SMART", "SOXL"), ("SMART", "SOXS")},
                 set(broker.quote_calls),
             )
             self.assertEqual("ARCA", _load_market_data_exchange(settings, now))
@@ -411,6 +418,36 @@ class LiveDataGuardsTest(unittest.TestCase):
                 set(broker.bar_calls),
             )
             self.assertNotIn("SMART", {value for value, _ in broker.bar_calls})
+            self.assertEqual(
+                {("SMART", "QQQ"), ("SMART", "SOXL"), ("SMART", "SOXS")},
+                set(broker.quote_calls),
+            )
+
+    def test_intraday_market_data_never_falls_back_smart_quotes(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            settings = Settings(
+                trading_mode="live",
+                state_dir=tmpdir,
+                arca_fallback_enabled=True,
+            )
+            strategy = _build_momentum_strategy(
+                _build_parser().parse_args(["intraday-momentum"]), settings
+            )
+            now = datetime(2026, 7, 15, 12, 0, tzinfo=NEW_YORK)
+            session = MarketSession(
+                now.date(),
+                now.replace(hour=9, minute=30),
+                now.replace(hour=16, minute=0),
+            )
+            broker = ExchangeBroker(quote_missing={("SMART", "SOXS")})
+
+            with self.assertRaisesRegex(BrokerError, "SMART live quote group"):
+                _load_intraday_market_data(
+                    broker, settings, strategy, session, now
+                )
+
+            self.assertEqual([], broker.bar_calls)
+            self.assertNotIn("ARCA", {value for value, _ in broker.quote_calls})
 
     def test_intraday_market_data_does_not_fallback_when_disabled(self) -> None:
         with TemporaryDirectory() as tmpdir:

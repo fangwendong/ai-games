@@ -18,16 +18,22 @@ write SMART and ARCA bars into the same cache directory.
 
 ## Source Parity Rule
 
-Historical backtests and live execution of a strategy must use the same market
-data source. A live session also uses exactly one source for QQQ, SOXL, and
-SOXS: all SMART or all ARCA. Do not mix symbols or switch sources after the
-session source has been pinned.
+Historical backtests and live signal generation must use the same bar source.
+A live session uses exactly one bar source for QQQ, SOXL, and SOXS: all SMART
+or all ARCA. Do not mix symbols or switch bar sources after the session source
+has been pinned. Live bid/ask/last used for execution always remains SMART; an
+ARCA bar fallback never changes the quote source or order route.
 
 Each cache root contains `market-data-source.json`. `refresh-history` records
 the selected source, refuses to merge another source into that directory, and
 `backtest-momentum --reuse-data` fails closed when `--market-data-exchange`
 does not match the cache metadata. A cache without this metadata is treated as
 source-unknown and is not valid for a frozen-strategy comparison.
+
+A hybrid validation uses ARCA bars for indicators and historical SMART prices
+as the fill proxy. This reproduces the signal/execution split but remains an
+approximation until timestamped SMART quote snapshots are archived. Report
+that limitation with the result.
 
 ## Cache Layout
 
