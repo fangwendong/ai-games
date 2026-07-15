@@ -7,6 +7,64 @@ from pathlib import Path
 from .models import Bar
 
 SCHEMA_VERSION = 1
+SOURCE_METADATA_FILENAME = "market-data-source.json"
+SUPPORTED_EXCHANGES = {"SMART", "ARCA"}
+
+
+def _normalize_exchange(exchange: str) -> str:
+    normalized = exchange.upper()
+    if normalized not in SUPPORTED_EXCHANGES:
+        raise ValueError(f"unsupported market-data exchange: {exchange}")
+    return normalized
+
+
+def load_market_data_source(data_dir: str | Path) -> str | None:
+    path = Path(data_dir) / SOURCE_METADATA_FILENAME
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return _normalize_exchange(str(payload["exchange"]))
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
+        raise ValueError(f"invalid historical market-data source metadata: {path}") from exc
+
+
+def record_market_data_source(data_dir: str | Path, exchange: str) -> str:
+    root = Path(data_dir)
+    normalized = _normalize_exchange(exchange)
+    existing = load_market_data_source(root)
+    if existing is not None and existing != normalized:
+        raise ValueError(
+            f"historical cache source mismatch: {root} is {existing}, "
+            f"cannot write {normalized} data"
+        )
+    path = root / SOURCE_METADATA_FILENAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {"schema_version": SCHEMA_VERSION, "exchange": normalized},
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return normalized
+
+
+def require_market_data_source(data_dir: str | Path, exchange: str) -> str:
+    normalized = _normalize_exchange(exchange)
+    actual = load_market_data_source(data_dir)
+    if actual is None:
+        raise ValueError(
+            f"historical cache has no source metadata: "
+            f"{Path(data_dir) / SOURCE_METADATA_FILENAME}"
+        )
+    if actual != normalized:
+        raise ValueError(
+            f"historical cache source mismatch: expected {normalized}, found {actual}"
+        )
+    return actual
 
 
 def _utc(value: datetime) -> datetime:
@@ -41,8 +99,17 @@ def _bar_from_payload(payload: dict[str, object]) -> Bar:
     )
 
 
-def save_bars_by_day(data_dir: str | Path, symbol: str, bar_size: str, bars: list[Bar]) -> None:
+def save_bars_by_day(
+    data_dir: str | Path,
+    symbol: str,
+    bar_size: str,
+    bars: list[Bar],
+    *,
+    exchange: str | None = None,
+) -> None:
     root = Path(data_dir)
+    if exchange is not None:
+        record_market_data_source(root, exchange)
     grouped: dict[date, list[Bar]] = {}
     for bar in bars:
         grouped.setdefault(_utc(bar.time).date(), []).append(bar)

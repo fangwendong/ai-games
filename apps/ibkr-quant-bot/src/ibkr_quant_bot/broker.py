@@ -225,9 +225,15 @@ class IbkrBroker:
             raise BrokerError(f"could not qualify stock contract for {symbol}")
         return qualified[0]
 
-    def _quote_with_type(self, symbol: str, market_data_type: str) -> Quote:
+    def _quote_with_type(
+        self,
+        symbol: str,
+        market_data_type: str,
+        *,
+        exchange: str = "SMART",
+    ) -> Quote:
         self._set_market_data_type(market_data_type)
-        contract = self._stock_contract(symbol)
+        contract = self._stock_contract(symbol, exchange=exchange)
         ticker = self._ib.reqMktData(contract, "", False, False)
         self._ib.sleep(2)
         self._ib.cancelMktData(contract)
@@ -239,21 +245,21 @@ class IbkrBroker:
             close=_clean_number(ticker.close),
         )
 
-    def quote(self, symbol: str) -> Quote:
+    def quote(self, symbol: str, *, exchange: str = "SMART") -> Quote:
         mode = (self.settings.market_data_type or "auto").strip().lower()
         if mode == "auto":
-            live_quote = self._quote_with_type(symbol, "live")
+            live_quote = self._quote_with_type(symbol, "live", exchange=exchange)
             if (
                 live_quote.bid is not None
                 or live_quote.ask is not None
                 or live_quote.last is not None
             ):
                 return live_quote
-            return self._quote_with_type(symbol, "delayed")
-        return self._quote_with_type(symbol, mode)
+            return self._quote_with_type(symbol, "delayed", exchange=exchange)
+        return self._quote_with_type(symbol, mode, exchange=exchange)
 
-    def live_quote(self, symbol: str) -> Quote:
-        quote = self._quote_with_type(symbol, "live")
+    def live_quote(self, symbol: str, *, exchange: str = "SMART") -> Quote:
+        quote = self._quote_with_type(symbol, "live", exchange=exchange)
         if quote.bid is None and quote.ask is None and quote.last is None:
             raise BrokerError(
                 f"live quote unavailable for {symbol}; refusing to use delayed data"
@@ -267,8 +273,9 @@ class IbkrBroker:
         bar_size: str = "1 min",
         what_to_show: str = "TRADES",
         end_time: datetime | str | None = None,
+        exchange: str = "SMART",
     ) -> list[Bar]:
-        contract = self._stock_contract(symbol)
+        contract = self._stock_contract(symbol, exchange=exchange)
         rows = self._ib.reqHistoricalData(
             contract,
             endDateTime=end_time or "",
@@ -317,6 +324,7 @@ class IbkrBroker:
         chunk_duration: str = "1 W",
         end_time: datetime | None = None,
         page_callback: Callable[[list[Bar]], None] | None = None,
+        exchange: str = "SMART",
     ) -> list[Bar]:
         """Page backward with explicit end times for long intraday histories."""
         end = end_time or datetime.now(timezone.utc)
@@ -336,6 +344,7 @@ class IbkrBroker:
                 bar_size=bar_size,
                 what_to_show=what_to_show,
                 end_time=cursor,
+                exchange=exchange,
             )
             if not rows:
                 break

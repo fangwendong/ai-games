@@ -1,10 +1,11 @@
 # Shared Historical Market Data
 
-All agents and worktrees on this host must use one canonical IBKR historical
-cache:
+All agents and worktrees on this host must use the canonical cache for the
+required market-data source:
 
 ```text
-/home/fwd/data/ibkr-quant-bot/historical/5-min-rth
+SMART: /home/fwd/data/ibkr-quant-bot/historical/5-min-rth
+ARCA:  /home/fwd/data/ibkr-quant-bot/historical/5-min-rth-arca
 ```
 
 `/home` is mounted from the data disk (`/dev/vdb1`), not the system disk. Do
@@ -12,7 +13,21 @@ not create a second multi-year cache under an individual worktree. Pass the
 canonical path explicitly with `--data-dir` or create a local symlink that
 points to it.
 
-The directory is generated state and must never be committed to Git.
+The directories are generated state and must never be committed to Git. Never
+write SMART and ARCA bars into the same cache directory.
+
+## Source Parity Rule
+
+Historical backtests and live execution of a strategy must use the same market
+data source. A live session also uses exactly one source for QQQ, SOXL, and
+SOXS: all SMART or all ARCA. Do not mix symbols or switch sources after the
+session source has been pinned.
+
+Each cache root contains `market-data-source.json`. `refresh-history` records
+the selected source, refuses to merge another source into that directory, and
+`backtest-momentum --reuse-data` fails closed when `--market-data-exchange`
+does not match the cache metadata. A cache without this metadata is treated as
+source-unknown and is not valid for a frozen-strategy comparison.
 
 ## Cache Layout
 
@@ -72,7 +87,21 @@ nice -n 10 taskset -c 0 \
   --duration "2 Y" \
   --bar-size "5 mins" \
   --recent-sessions 2 \
+  --market-data-exchange SMART \
   --data-dir /home/fwd/data/ibkr-quant-bot/historical/5-min-rth
+```
+
+For an ARCA-only validation, change both the exchange and directory:
+
+```bash
+nice -n 10 taskset -c 0 \
+  python -m ibkr_quant_bot.cli refresh-history \
+  --symbols SOXL SOXS QQQ \
+  --duration "2 M" \
+  --bar-size "5 mins" \
+  --recent-sessions 2 \
+  --market-data-exchange ARCA \
+  --data-dir /home/fwd/data/ibkr-quant-bot/historical/5-min-rth-arca
 ```
 
 The tracked wrapper is preferred for unattended work because it processes one
@@ -93,7 +122,6 @@ core. Default to one worker. For a large one-time bootstrap, cap concurrency at
 symbol list so workers never request the same symbol. IBKR can still throttle
 historical requests; if throttling or Gateway instability appears, return to
 one worker. Never let historical-download concurrency exceed the machine's CPU
-count.
 
 If a long download is interrupted, already written days remain valid. Restart
 with only the unfinished symbols. Re-running a symbol is safe but will request
@@ -126,6 +154,17 @@ PYTHONPATH=src python -m ibkr_quant_bot.orb_research \
   --config config/orb-stocks-in-play-v1.json \
   --data-dir /home/fwd/data/ibkr-quant-bot/historical/5-min-rth \
   --chronological-split
+```
+
+For the frozen v2 CLI, make the source explicit:
+
+```bash
+PYTHONPATH=src python -m ibkr_quant_bot.cli backtest-momentum \
+  --profile rotation-hysteresis-v2 \
+  --duration "2 M" \
+  --reuse-data \
+  --market-data-exchange ARCA \
+  --data-dir /home/fwd/data/ibkr-quant-bot/historical/5-min-rth-arca
 ```
 
 ## Confirm Completeness
@@ -181,6 +220,7 @@ nice -n 10 taskset -c 0 \
   --duration "10 D" \
   --bar-size "5 mins" \
   --recent-sessions 2 \
+  --market-data-exchange SMART \
   --data-dir /home/fwd/data/ibkr-quant-bot/historical/5-min-rth
 ```
 

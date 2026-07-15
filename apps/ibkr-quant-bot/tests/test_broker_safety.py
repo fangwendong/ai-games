@@ -175,7 +175,14 @@ class BrokerSafetyTest(unittest.TestCase):
             [],
         ]
 
-        def historical(symbol, duration, bar_size, what_to_show, end_time):
+        def historical(
+            symbol,
+            duration,
+            bar_size,
+            what_to_show,
+            end_time,
+            exchange="SMART",
+        ):
             calls.append(end_time)
             return responses.pop(0)
 
