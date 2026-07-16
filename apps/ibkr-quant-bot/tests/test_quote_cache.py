@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -135,6 +136,78 @@ class QuoteCacheTest(unittest.TestCase):
                     max_age_seconds=3.0,
                     now=now,
                 )
+
+    def test_reader_rejects_corrupt_metadata_future_and_invalid_prices(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "live-quotes.json"
+            symbols = ("QQQ", "SOXL", "SOXS")
+            now = datetime(2026, 7, 16, 14, 0, tzinfo=timezone.utc)
+            path.write_text('{"version":')
+            with self.assertRaisesRegex(QuoteCacheError, "unavailable"):
+                load_fresh_quotes(path, symbols, max_age_seconds=3, now=now)
+
+            writer = QuoteCacheWriter(path, symbols)
+            writer.update(
+                {
+                    symbol: Quote(symbol, 10.0, 10.1, 10.05, 10.0)
+                    for symbol in symbols
+                },
+                observed_at=now + timedelta(seconds=2),
+                force=True,
+            )
+            with self.assertRaisesRegex(QuoteCacheError, "stale"):
+                load_fresh_quotes(path, symbols, max_age_seconds=3, now=now)
+
+            payload = json.loads(path.read_text())
+            payload["symbols"]["SOXL"][-1].update(
+                {"bid": "not-a-number", "ask": None, "last": None}
+            )
+            for rows in payload["symbols"].values():
+                rows[-1]["observed_at"] = now.isoformat()
+            path.write_text(json.dumps(payload))
+            with self.assertRaisesRegex(QuoteCacheError, "non-numeric"):
+                load_fresh_quotes(path, symbols, max_age_seconds=3, now=now)
+
+            payload["source"] = "ARCA"
+            path.write_text(json.dumps(payload))
+            with self.assertRaisesRegex(QuoteCacheError, "invalid metadata"):
+                load_fresh_quotes(path, symbols, max_age_seconds=3, now=now)
+
+    def test_atomic_replacement_never_exposes_partial_json(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "live-quotes.json"
+            symbols = ("QQQ", "SOXL", "SOXS")
+            writer = QuoteCacheWriter(path, symbols, max_samples_per_symbol=100)
+            errors: list[Exception] = []
+
+            def publish() -> None:
+                for index in range(300):
+                    writer.update(
+                        {
+                            symbol: Quote(symbol, 10, 10.1, 10.05, 10)
+                            for symbol in symbols
+                        },
+                        monotonic_now=float(index),
+                        force=True,
+                    )
+
+            worker = threading.Thread(target=publish)
+            worker.start()
+            while worker.is_alive():
+                if not path.exists():
+                    continue
+                try:
+                    payload = json.loads(path.read_text())
+                    self.assertEqual(1, payload["version"])
+                    self.assertTrue(
+                        all(len(rows) <= 100 for rows in payload["symbols"].values())
+                    )
+                except Exception as exc:  # pragma: no cover - assertion captured below
+                    errors.append(exc)
+                    break
+            worker.join()
+            self.assertEqual([], errors)
+            self.assertEqual([], list(path.parent.glob(".*.tmp")))
 
 
 if __name__ == "__main__":

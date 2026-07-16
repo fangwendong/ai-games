@@ -4,6 +4,7 @@ import json
 import math
 import os
 import time
+import uuid
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
@@ -120,9 +121,14 @@ class QuoteCacheWriter:
                 symbol: list(self.samples[symbol]) for symbol in self.symbols
             },
         }
-        temporary = self.path.with_name(f".{self.path.name}.{os.getpid()}.tmp")
+        temporary = self.path.with_name(
+            f".{self.path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+        )
         try:
-            temporary.write_text(json.dumps(payload, separators=(",", ":")))
+            with temporary.open("w") as handle:
+                json.dump(payload, handle, separators=(",", ":"))
+                handle.flush()
+                os.fsync(handle.fileno())
             os.replace(temporary, self.path)
         finally:
             try:

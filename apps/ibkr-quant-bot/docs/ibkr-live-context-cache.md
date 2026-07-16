@@ -19,8 +19,9 @@ health reports.
 - calendar refresh: once per New York trading date
 - file/bar refresh: once per completed 5-minute bucket
 - consumer stale threshold: 420 seconds
+- singleton guard: a non-blocking advisory lock rejects a second writer
 
-The file is atomically replaced and contains one current-session bar array per
+The file is flushed, `fsync`ed, and atomically replaced and contains one current-session bar array per
 symbol. It does not grow across days. The strategy accepts the cache only when
 the version, date, source, bar size, complete symbol group, file age, per-bar
 timestamps, and normal live freshness checks all pass.
@@ -93,7 +94,8 @@ tmux has-session -t ibkr-live-context-cache 2>/dev/null \
   && echo 'still running' || echo 'stopped'
 ```
 
-Do not start a second copy to repair a stale file. Inspect the existing tmux
+Do not start a second copy to repair a stale file. The second writer is rejected
+by the advisory lock. Inspect the existing tmux
 pane and IB heartbeat first, then perform one controlled restart if needed.
 After a machine reboot, restore Gateway first, then the quote cache and context
 cache, and only then enable the live polling task.
