@@ -160,7 +160,7 @@ class BrokerSafetyTest(unittest.TestCase):
         with self.assertRaises(StopStreaming):
             broker.stream_live_quotes(
                 ["QQQ", "SOXL", "SOXS"],
-                lambda quotes, observed_at: updates.append(quotes),
+                lambda quotes, market_times, observed_at: updates.append(quotes),
                 poll_interval_seconds=0.001,
             )
 

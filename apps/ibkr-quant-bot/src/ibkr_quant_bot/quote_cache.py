@@ -46,6 +46,7 @@ class QuoteCacheWriter:
         self,
         quotes: dict[str, Quote],
         *,
+        market_times: dict[str, datetime | None] | None = None,
         observed_at: datetime | None = None,
         monotonic_now: float | None = None,
         force: bool = False,
@@ -54,14 +55,23 @@ class QuoteCacheWriter:
         if observed_at.tzinfo is None:
             observed_at = observed_at.replace(tzinfo=timezone.utc)
         observed_at = observed_at.astimezone(timezone.utc)
+        market_times = market_times or {}
         for symbol, quote in quotes.items():
             normalized = symbol.upper()
             if normalized not in self.samples:
                 continue
             if quote.bid is None and quote.ask is None and quote.last is None:
                 continue
+            market_time = market_times.get(normalized)
+            if market_time is not None:
+                if market_time.tzinfo is None:
+                    market_time = market_time.replace(tzinfo=timezone.utc)
+                market_time_value = market_time.astimezone(timezone.utc).isoformat()
+            else:
+                market_time_value = None
             self.samples[normalized].append(
                 {
+                    "market_time": market_time_value,
                     "observed_at": observed_at.isoformat(),
                     **asdict(quote),
                     "symbol": normalized,
@@ -76,12 +86,13 @@ class QuoteCacheWriter:
             )
         if not should_flush or not any(self.samples.values()):
             return False
-        self._write_atomic(observed_at)
+        self._write_atomic()
         self._last_flush_monotonic = now
         return True
 
-    def _write_atomic(self, generated_at: datetime) -> None:
+    def _write_atomic(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        generated_at = datetime.now(timezone.utc)
         payload = {
             "version": 1,
             "source": "SMART",
