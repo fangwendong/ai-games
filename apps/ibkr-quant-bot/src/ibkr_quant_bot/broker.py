@@ -36,6 +36,20 @@ def _datetime_iso(value: Any) -> str | None:
     return value.astimezone(timezone.utc).isoformat()
 
 
+def _require_live_ticker(ticker: Any, symbol: str) -> None:
+    try:
+        market_data_type = int(getattr(ticker, "marketDataType"))
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise BrokerError(
+            f"IBKR did not confirm live market-data type for {symbol}"
+        ) from exc
+    if market_data_type != 1:
+        raise BrokerError(
+            f"IBKR returned market-data type {market_data_type} for {symbol}; "
+            "refusing non-live data"
+        )
+
+
 class IbkrBroker:
     BALANCE_TAGS = (
         "NetLiquidation",
@@ -302,6 +316,7 @@ class IbkrBroker:
         if len(tickers) != len(normalized_symbols):
             raise BrokerError("IBKR returned an incomplete live quote snapshot group")
         for symbol, ticker in zip(normalized_symbols, tickers, strict=True):
+            _require_live_ticker(ticker, symbol)
             observed_at = datetime.now(timezone.utc).isoformat()
             quote = Quote(
                 symbol=symbol,
@@ -388,6 +403,7 @@ class IbkrBroker:
                     )
                     if quote.bid is None and quote.ask is None and quote.last is None:
                         continue
+                    _require_live_ticker(ticker, symbol)
                     signature = (
                         getattr(ticker, "time", None),
                         quote.bid,
@@ -648,6 +664,84 @@ class IbkrBroker:
             for trade in self.active_trades()
             if self._trade_symbol(trade) == symbol
             and self._trade_action(trade) == action
+        )
+
+    def active_trades_for(self, symbol: str, action: str) -> list[Any]:
+        symbol = symbol.upper()
+        action = action.upper()
+        return [
+            trade
+            for trade in self.active_trades()
+            if self._trade_symbol(trade) == symbol
+            and self._trade_action(trade) == action
+            and self._trade_remaining(trade) > 0
+        ]
+
+    def filled_order_ref_prefix_exists(self, order_ref_prefix: str) -> bool:
+        return self.filled_order_ref_prefix_count(order_ref_prefix) > 0
+
+    def filled_order_ref_prefix_count(self, order_ref_prefix: str) -> int:
+        count = 0
+        seen_refs: set[str] = set()
+        for trade in [*self.active_trades(), *self.completed_trades()]:
+            order = getattr(trade, "order", None)
+            order_ref = str(getattr(order, "orderRef", "") or "")
+            if not order_ref.startswith(order_ref_prefix):
+                continue
+            if order_ref in seen_refs:
+                continue
+            seen_refs.add(order_ref)
+            order_status = getattr(trade, "orderStatus", None)
+            try:
+                filled = float(getattr(order_status, "filled", 0) or 0)
+            except (TypeError, ValueError):
+                filled = 0.0
+            if filled > 0 or bool(getattr(trade, "fills", None)):
+                count += 1
+        return count
+
+    def protective_oca_is_complete(
+        self,
+        symbol: str,
+        quantity: int,
+        *,
+        order_ref_prefix: str,
+    ) -> bool:
+        trades = [
+            trade
+            for trade in self.active_trades_for(symbol, "SELL")
+            if str(
+                getattr(getattr(trade, "order", None), "orderRef", "") or ""
+            ).startswith(order_ref_prefix)
+        ]
+        if len(trades) != 2:
+            return False
+        expected_refs = {
+            f"{order_ref_prefix}-stop",
+            f"{order_ref_prefix}-take",
+        }
+        refs = {
+            str(getattr(getattr(trade, "order", None), "orderRef", "") or "")
+            for trade in trades
+        }
+        order_types = {
+            str(getattr(getattr(trade, "order", None), "orderType", "") or "").upper()
+            for trade in trades
+        }
+        groups = {
+            str(getattr(getattr(trade, "order", None), "ocaGroup", "") or "")
+            for trade in trades
+        }
+        quantities_match = all(
+            math.isclose(self._trade_remaining(trade), float(quantity), abs_tol=1e-6)
+            for trade in trades
+        )
+        return (
+            refs == expected_refs
+            and order_types == {"STP", "LMT"}
+            and len(groups) == 1
+            and "" not in groups
+            and quantities_match
         )
 
     def cancel_active_orders(

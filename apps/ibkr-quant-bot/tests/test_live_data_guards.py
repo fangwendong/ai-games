@@ -21,6 +21,8 @@ from ibkr_quant_bot.cli import (
     _daily_entry_count,
     _daily_entry_limit_reached,
     _fresh_historical_bars,
+    _flatten_strategy_positions_if_due,
+    _ensure_protective_oca,
     _has_price_scale_discontinuity,
     _is_market_hours,
     _latest_entry_time,
@@ -210,6 +212,289 @@ class LiveDataGuardsTest(unittest.TestCase):
         self.assertEqual("rotation-hysteresis-v2", ROTATION_HYSTERESIS_V2_VERSION)
         for name, expected in ROTATION_HYSTERESIS_V2_PARAMETERS.items():
             self.assertEqual(expected, getattr(strategy, name), name)
+
+    def test_insufficient_bars_still_report_available_fast_slow_diagnostics(self) -> None:
+        strategy = _build_momentum_strategy(
+            _build_parser().parse_args(
+                ["intraday-momentum", "--profile", "rotation-hysteresis-v2"]
+            ),
+            Settings(),
+        )
+        bars = [
+            Bar(
+                time=datetime(2026, 7, 16, 9, 30, tzinfo=NEW_YORK)
+                + timedelta(minutes=5 * index),
+                open=100 + index,
+                high=101 + index,
+                low=99 + index,
+                close=100 + index,
+                volume=100,
+            )
+            for index in range(21)
+        ]
+
+        decision = strategy.decide(
+            "SOXL",
+            Quote("SOXL", bid=120, ask=121, last=120.5, close=119),
+            bars,
+            benchmark_bars=bars,
+        )
+
+        self.assertEqual("need at least 30 bars", decision.reason)
+        self.assertIn("fast_ema", decision.meta)
+        self.assertIn("slow_ema", decision.meta)
+
+    def test_mandatory_flatten_does_not_require_signal_market_data(self) -> None:
+        class FlattenBroker:
+            def __init__(self):
+                self.placed = []
+
+            def positions(self):
+                return [
+                    {
+                        "symbol": "SOXL",
+                        "position": "5",
+                        "avgCost": "100",
+                    }
+                ]
+
+            def active_trades_for(self, symbol, action):
+                return []
+
+            def active_order_quantity(self, symbol, action):
+                return 0.0
+
+            def place_order(self, request):
+                self.placed.append(request)
+                return SimpleNamespace()
+
+        broker = FlattenBroker()
+        settings = Settings(readonly=False, dry_run=False, trading_mode="paper")
+        strategy = _build_momentum_strategy(
+            _build_parser().parse_args(
+                ["intraday-momentum", "--profile", "rotation-hysteresis-v2"]
+            ),
+            settings,
+        )
+        now = datetime(2026, 7, 16, 15, 50, tzinfo=NEW_YORK)
+        session = MarketSession(
+            now.date(),
+            now.replace(hour=9, minute=30),
+            now.replace(hour=16, minute=0),
+        )
+
+        handled = _flatten_strategy_positions_if_due(
+            broker, settings, strategy, now, session
+        )
+
+        self.assertTrue(handled)
+        self.assertEqual(1, len(broker.placed))
+        self.assertEqual("SELL", broker.placed[0].action)
+        self.assertTrue(broker.placed[0].reduce_only)
+
+    def test_mandatory_flatten_does_not_cancel_or_duplicate_eod_sell(self) -> None:
+        existing = SimpleNamespace(
+            order=SimpleNamespace(
+                orderRef="momentum-2026-07-16-SOXL-eod-exit",
+                action="SELL",
+            ),
+            orderStatus=SimpleNamespace(
+                status="Submitted",
+                filled=0,
+                remaining=5,
+            ),
+        )
+
+        class FlattenBroker:
+            def __init__(self):
+                self.cancelled = []
+                self.placed = []
+
+            def positions(self):
+                return [
+                    {
+                        "symbol": "SOXL",
+                        "position": "5",
+                        "avgCost": "100",
+                    }
+                ]
+
+            def active_trades_for(self, symbol, action):
+                return [existing]
+
+            def cancel_order(self, trade):
+                self.cancelled.append(trade)
+
+            def active_order_quantity(self, symbol, action):
+                return 5.0
+
+            def place_order(self, request):
+                self.placed.append(request)
+                return SimpleNamespace()
+
+        broker = FlattenBroker()
+        settings = Settings(readonly=False, dry_run=False, trading_mode="paper")
+        strategy = _build_momentum_strategy(
+            _build_parser().parse_args(
+                ["intraday-momentum", "--profile", "rotation-hysteresis-v2"]
+            ),
+            settings,
+        )
+        now = datetime(2026, 7, 16, 15, 50, tzinfo=NEW_YORK)
+        session = MarketSession(
+            now.date(),
+            now.replace(hour=9, minute=30),
+            now.replace(hour=16, minute=0),
+        )
+
+        handled = _flatten_strategy_positions_if_due(
+            broker, settings, strategy, now, session
+        )
+
+        self.assertTrue(handled)
+        self.assertEqual([], broker.cancelled)
+        self.assertEqual([], broker.placed)
+
+    def test_incomplete_protective_oca_is_cancelled_and_rebuilt(self) -> None:
+        def trade(order_ref, order_type, remaining=5):
+            return SimpleNamespace(
+                order=SimpleNamespace(
+                    orderRef=order_ref,
+                    orderType=order_type,
+                    totalQuantity=5,
+                    action="SELL",
+                    tif="GTC",
+                    lmtPrice=110 if order_type == "LMT" else None,
+                ),
+                orderStatus=SimpleNamespace(
+                    status="Submitted",
+                    filled=0,
+                    remaining=remaining,
+                ),
+                fills=[],
+                log=[],
+            )
+
+        class ProtectionBroker:
+            def __init__(self, existing):
+                self.existing = existing
+                self.cancelled = []
+                self.created = []
+
+            def protective_oca_is_complete(self, *args, **kwargs):
+                return False
+
+            def active_trades_for(self, symbol, action):
+                return [
+                    item
+                    for item in self.existing
+                    if float(item.orderStatus.remaining) > 0
+                ]
+
+            def cancel_order(self, item):
+                item.orderStatus.status = "Cancelled"
+                item.orderStatus.remaining = 0
+                self.cancelled.append(item)
+
+            def active_order_quantity(self, symbol, action):
+                return sum(
+                    float(item.orderStatus.remaining) for item in self.existing
+                )
+
+            def place_protective_oca(
+                self, symbol, quantity, stop_price, take_price, *, order_ref
+            ):
+                created = (
+                    trade(f"{order_ref}-stop", "STP"),
+                    trade(f"{order_ref}-take", "LMT"),
+                )
+                self.created.append(created)
+                return created
+
+        now = datetime(2026, 7, 16, 12, 0, tzinfo=NEW_YORK)
+        prefix = f"momentum-{now.date()}-SOXL-protect"
+        broker = ProtectionBroker([trade(f"{prefix}-stop", "STP")])
+        strategy = _build_momentum_strategy(
+            _build_parser().parse_args(
+                ["intraday-momentum", "--profile", "rotation-hysteresis-v2"]
+            ),
+            Settings(),
+        )
+        bars = [
+            Bar(
+                time=now - timedelta(minutes=5 * (30 - index)),
+                open=100,
+                high=101,
+                low=99,
+                close=100,
+                volume=100,
+            )
+            for index in range(30)
+        ]
+        with TemporaryDirectory() as tmpdir:
+            status = _ensure_protective_oca(
+                broker,
+                Settings(state_dir=tmpdir),
+                strategy,
+                "SOXL",
+                {"position": "5", "avgCost": "100"},
+                bars,
+                now,
+            )
+
+        self.assertEqual("recreated", status)
+        self.assertEqual(1, len(broker.cancelled))
+        self.assertEqual(1, len(broker.created))
+
+    def test_incomplete_protection_does_not_cancel_unrelated_sell(self) -> None:
+        unrelated = SimpleNamespace(
+            order=SimpleNamespace(
+                orderRef="manual-exit",
+                orderType="LMT",
+                totalQuantity=5,
+                action="SELL",
+            ),
+            orderStatus=SimpleNamespace(
+                status="Submitted",
+                filled=0,
+                remaining=5,
+            ),
+        )
+
+        class ProtectionBroker:
+            def __init__(self):
+                self.cancelled = []
+
+            def protective_oca_is_complete(self, *args, **kwargs):
+                return False
+
+            def active_trades_for(self, symbol, action):
+                return [unrelated]
+
+            def cancel_order(self, trade):
+                self.cancelled.append(trade)
+
+        now = datetime(2026, 7, 16, 12, 0, tzinfo=NEW_YORK)
+        broker = ProtectionBroker()
+        strategy = _build_momentum_strategy(
+            _build_parser().parse_args(
+                ["intraday-momentum", "--profile", "rotation-hysteresis-v2"]
+            ),
+            Settings(),
+        )
+
+        with self.assertRaisesRegex(BrokerError, "non-protective SELL"):
+            _ensure_protective_oca(
+                broker,
+                Settings(),
+                strategy,
+                "SOXL",
+                {"position": "5", "avgCost": "100"},
+                [],
+                now,
+            )
+
+        self.assertEqual([], broker.cancelled)
 
     def test_frozen_hysteresis_rejects_benchmark_override(self) -> None:
         args = _build_parser().parse_args(

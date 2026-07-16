@@ -110,6 +110,7 @@ Healthy during an active market-data session means:
 - exactly one subscription process is running;
 - `source=SMART`;
 - all three symbols are present;
+- every accepted ticker explicitly reports IBKR market-data type `1` (live);
 - no symbol exceeds 100 samples;
 - the file and every latest sample are normally less than three seconds old;
 - the pane is not repeating reconnect or client-ID errors; and
@@ -129,6 +130,10 @@ SOXS remain in the strategy decision list.
 If the file is stale, the strategy requests a concurrent SMART snapshot with
 no fixed sleep. If that complete fallback group also fails, the strategy fails
 closed and does not submit an order.
+
+Both the streaming writer and snapshot fallback reject ticker objects whose
+IBKR `marketDataType` is missing or is not `1`. Requesting live mode is not
+treated as proof that the returned data is live.
 
 ## Latency Check
 

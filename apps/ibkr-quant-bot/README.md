@@ -214,6 +214,13 @@ In live trading mode, the intraday scanners refuse delayed market data:
 - The scanner stops entering and liquidates positions during the final
   `IBKR_FLATTEN_BEFORE_CLOSE_MINUTES=10` minutes. Run the command on a schedule
   that includes this window; no software can flatten a position if it is not running.
+- The mandatory flatten path runs before signal-bar and quote loading. A stale
+  or incomplete three-symbol signal group therefore cannot prevent a known
+  strategy position from reaching the reduce-only end-of-day exit path.
+- Existing protection is considered healthy only when both expected GTC OCA
+  legs are active, use the same non-empty OCA group, and cover the full current
+  position. A partial strategy-owned pair is cancelled and rebuilt; an
+  unrelated active sell order fails closed instead of being cancelled.
 
 The market data troubleshooting runbook is
 [docs/ibkr-market-data-troubleshooting.md](docs/ibkr-market-data-troubleshooting.md).
@@ -249,6 +256,12 @@ The current `rotation-hysteresis-v2` profile can be selected explicitly with:
 ibkr-bot intraday-momentum --profile rotation-hysteresis-v2
 ibkr-bot backtest-momentum --profile rotation-hysteresis-v2
 ```
+
+Each live scan prints `core_decisions` first. For SOXL and SOXS it includes
+the action/signal, entry status, available fast and slow EMA values, completed
+bar count, bars still required, and the direct reason no entry was created.
+An EMA remains `null` until its configured window is available. Benchmark and
+full market-data diagnostics follow this core block.
 
 V2 keeps the frozen V1 entries, risk budget, 0.60% stop, and 3.75% hard
 take-profit. It adds a close-based profit lock: after a completed 5-minute
@@ -399,6 +412,10 @@ scanner queries active and completed IBKR orders by deterministic order ref,
 rebuilds missing protection for an open position, and refuses duplicate entry
 tasks. Order snapshots distinguish active, partial, filled, cancelled, and
 rejected/inactive states.
+
+The daily-entry state file is published with an atomic replacement. The live
+scanner also checks filled IBKR entry order references for the current session,
+so a process failure after a fill cannot silently reset the one-entry limit.
 
 SOXL and SOXS are execution instruments with a daily 3x/-3x objective, not a
 promise of three times the index's cumulative multi-day return. See the
