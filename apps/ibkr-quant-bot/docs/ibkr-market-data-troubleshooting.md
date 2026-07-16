@@ -310,6 +310,22 @@ Do not confuse these:
 It is possible for historical bars to be returned while live quotes are empty
 or delayed. For live trading, both quote availability and bar freshness matter.
 
+### Bounded Live Quote Window
+
+The live rotation strategy subscribes to the QQQ, SOXL, and SOXS SMART streams
+as one concurrent group. Each poll collects until either three seconds elapse
+or every symbol reaches 100 changed quote samples. A per-symbol
+`deque(maxlen=100)` evicts the oldest sample at the count limit, and samples
+older than the three-second window are also pruned. The default bounds can be
+changed with `IBKR_LIVE_QUOTE_WINDOW_SECONDS` and
+`IBKR_LIVE_QUOTE_MAX_SAMPLES_PER_SYMBOL`.
+
+With the default three-symbol profile, at most 300 quote samples are retained.
+The subscriptions are always cancelled in a `finally` block, including missing
+data and exception paths. This is a short bounded subscription opened by each
+scheduled CLI poll, not a process-wide cache. If any symbol lacks a current
+bid, ask, or last value, the whole quote group fails closed.
+
 ## SMART To ARCA Failover
 
 ARCA failover is an explicit, disabled-by-default safety feature controlled by
@@ -337,6 +353,7 @@ Relevant files:
   - `_set_market_data_type()`
   - `quote()`
   - `live_quote()`
+  - `live_quotes()`
   - `historical_bars()`
 - `src/ibkr_quant_bot/cli.py`
   - `intraday-momentum`

@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import time
 import uuid
+from collections import deque
 from collections.abc import Callable, Iterable
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -265,6 +266,127 @@ class IbkrBroker:
                 f"live quote unavailable for {symbol}; refusing to use delayed data"
             )
         return quote
+
+    def live_quotes(
+        self,
+        symbols: Iterable[str],
+        *,
+        exchange: str = "SMART",
+        window_seconds: float = 3.0,
+        max_samples_per_symbol: int = 100,
+        poll_interval_seconds: float = 0.02,
+    ) -> dict[str, Quote]:
+        """Collect one bounded concurrent streaming window for several symbols.
+
+        Each per-symbol buffer retains only samples newer than ``window_seconds``
+        and is also capped by ``max_samples_per_symbol``. Collection stops when
+        the time window expires or every symbol reaches the sample cap. All
+        subscriptions are cancelled before returning or raising.
+        """
+        normalized_symbols = tuple(
+            dict.fromkeys(symbol.strip().upper() for symbol in symbols if symbol.strip())
+        )
+        if not normalized_symbols:
+            raise ValueError("symbols must not be empty")
+        if window_seconds <= 0:
+            raise ValueError("window_seconds must be positive")
+        if max_samples_per_symbol <= 0:
+            raise ValueError("max_samples_per_symbol must be positive")
+        if poll_interval_seconds <= 0:
+            raise ValueError("poll_interval_seconds must be positive")
+
+        self._set_market_data_type("live")
+        requested = [
+            self._stock(symbol, exchange, "USD") for symbol in normalized_symbols
+        ]
+        qualified = self._ib.qualifyContracts(*requested)
+        if len(qualified) != len(requested):
+            raise BrokerError(
+                "could not qualify complete live quote group: "
+                + ", ".join(normalized_symbols)
+            )
+        contracts = dict(zip(normalized_symbols, qualified, strict=True))
+        buffers: dict[str, deque[tuple[float, Quote]]] = {
+            symbol: deque(maxlen=max_samples_per_symbol)
+            for symbol in normalized_symbols
+        }
+        signatures: dict[str, tuple[object, ...]] = {}
+        tickers: dict[str, Any] = {}
+        subscribed: list[Any] = []
+        deadline = time.monotonic() + window_seconds
+
+        try:
+            for symbol, contract in contracts.items():
+                tickers[symbol] = self._ib.reqMktData(
+                    contract, "", snapshot=False, regulatorySnapshot=False
+                )
+                subscribed.append(contract)
+
+            while True:
+                now = time.monotonic()
+                cutoff = now - window_seconds
+                for symbol, ticker in tickers.items():
+                    buffer = buffers[symbol]
+                    while buffer and buffer[0][0] < cutoff:
+                        buffer.popleft()
+                    quote = Quote(
+                        symbol=symbol,
+                        bid=_clean_number(ticker.bid),
+                        ask=_clean_number(ticker.ask),
+                        last=_clean_number(ticker.last),
+                        close=_clean_number(ticker.close),
+                    )
+                    signature = (
+                        getattr(ticker, "time", None),
+                        quote.bid,
+                        quote.ask,
+                        quote.last,
+                        quote.close,
+                    )
+                    if signature != signatures.get(symbol):
+                        buffer.append((now, quote))
+                        signatures[symbol] = signature
+
+                if all(
+                    len(buffer) >= max_samples_per_symbol
+                    for buffer in buffers.values()
+                ):
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self._ib.sleep(min(poll_interval_seconds, remaining))
+        finally:
+            for contract in subscribed:
+                try:
+                    self._ib.cancelMktData(contract)
+                except Exception:
+                    pass
+
+        quotes: dict[str, Quote] = {}
+        missing: list[str] = []
+        for symbol, buffer in buffers.items():
+            quote = next(
+                (
+                    sample
+                    for _, sample in reversed(buffer)
+                    if sample.bid is not None
+                    or sample.ask is not None
+                    or sample.last is not None
+                ),
+                None,
+            )
+            if quote is None:
+                missing.append(symbol)
+            else:
+                quotes[symbol] = quote
+        if missing:
+            raise BrokerError(
+                "live quote unavailable for "
+                + ", ".join(missing)
+                + "; refusing to use delayed data"
+            )
+        return quotes
 
     def historical_bars(
         self,

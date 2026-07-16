@@ -703,12 +703,20 @@ def _load_intraday_market_data(
         exchanges = ("SMART",)
 
     try:
-        quotes_by_symbol = {
-            symbol: _strategy_quote(
-                broker, settings, symbol, exchange="SMART"
+        if settings.is_live:
+            quotes_by_symbol = broker.live_quotes(
+                symbols,
+                exchange="SMART",
+                window_seconds=settings.live_quote_window_seconds,
+                max_samples_per_symbol=settings.live_quote_max_samples_per_symbol,
             )
-            for symbol in symbols
-        }
+        else:
+            quotes_by_symbol = {
+                symbol: _strategy_quote(
+                    broker, settings, symbol, exchange="SMART"
+                )
+                for symbol in symbols
+            }
     except BrokerError as exc:
         raise BrokerError(
             f"complete SMART live quote group unavailable: {exc}"

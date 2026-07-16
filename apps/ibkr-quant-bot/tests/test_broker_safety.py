@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import unittest
+from collections import deque as real_deque
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from ibkr_quant_bot.broker import BrokerError, IbkrBroker
 from ibkr_quant_bot.config import Settings
@@ -57,6 +59,61 @@ class FakeIB:
         return datetime(2026, 7, 11, 5, 0, tzinfo=timezone.utc)
 
 
+class StreamingIB:
+    def __init__(self, missing: set[str] | None = None):
+        self.missing = missing or set()
+        self.cancelled: list[str] = []
+        self.market_data_types: list[int] = []
+        self.requests: list[tuple[str, bool]] = []
+        self.tickers: dict[str, SimpleNamespace] = {}
+        self.update = 0
+
+    def reqMarketDataType(self, market_data_type: int) -> None:
+        self.market_data_types.append(market_data_type)
+
+    def qualifyContracts(self, *contracts):
+        return list(contracts)
+
+    def reqMktData(
+        self,
+        contract,
+        genericTickList,
+        snapshot,
+        regulatorySnapshot,
+    ):
+        self.requests.append((contract.symbol, snapshot))
+        missing = contract.symbol in self.missing
+        ticker = SimpleNamespace(
+            time=datetime.now(timezone.utc),
+            bid=None if missing else 10.0,
+            ask=None if missing else 10.1,
+            last=None if missing else 10.05,
+            close=10.0,
+        )
+        self.tickers[contract.symbol] = ticker
+        return ticker
+
+    def sleep(self, seconds: float) -> None:
+        self.update += 1
+        for ticker in self.tickers.values():
+            ticker.time = datetime.now(timezone.utc)
+            if ticker.last is not None:
+                ticker.last += 0.001
+
+    def cancelMktData(self, contract) -> None:
+        self.cancelled.append(contract.symbol)
+
+
+def make_streaming_broker(fake_ib: StreamingIB) -> IbkrBroker:
+    broker = object.__new__(IbkrBroker)
+    broker.settings = Settings()
+    broker._ib = fake_ib
+    broker._stock = lambda symbol, exchange, currency: SimpleNamespace(
+        symbol=symbol, exchange=exchange, currency=currency
+    )
+    return broker
+
+
 def make_broker(settings: Settings, fake_ib: FakeIB) -> IbkrBroker:
     broker = object.__new__(IbkrBroker)
     broker.settings = settings
@@ -65,6 +122,71 @@ def make_broker(settings: Settings, fake_ib: FakeIB) -> IbkrBroker:
 
 
 class BrokerSafetyTest(unittest.TestCase):
+    def test_live_quotes_stream_concurrently_and_cancel_every_subscription(
+        self,
+    ) -> None:
+        fake_ib = StreamingIB()
+        broker = make_streaming_broker(fake_ib)
+
+        quotes = broker.live_quotes(
+            ["QQQ", "SOXL", "SOXS"],
+            window_seconds=0.02,
+            max_samples_per_symbol=3,
+            poll_interval_seconds=0.001,
+        )
+
+        self.assertEqual({"QQQ", "SOXL", "SOXS"}, set(quotes))
+        self.assertEqual([1], fake_ib.market_data_types)
+        self.assertEqual(
+            [("QQQ", False), ("SOXL", False), ("SOXS", False)],
+            fake_ib.requests,
+        )
+        self.assertEqual(["QQQ", "SOXL", "SOXS"], fake_ib.cancelled)
+
+    def test_live_quotes_buffers_are_strictly_bounded(self) -> None:
+        fake_ib = StreamingIB()
+        broker = make_streaming_broker(fake_ib)
+        buffers = []
+
+        def recording_deque(*args, **kwargs):
+            buffer = real_deque(*args, **kwargs)
+            buffers.append(buffer)
+            return buffer
+
+        with patch("ibkr_quant_bot.broker.deque", side_effect=recording_deque):
+            broker.live_quotes(
+                ["QQQ", "SOXL", "SOXS"],
+                window_seconds=0.02,
+                max_samples_per_symbol=3,
+                poll_interval_seconds=0.001,
+            )
+
+        self.assertEqual(3, len(buffers))
+        self.assertTrue(all(buffer.maxlen == 3 for buffer in buffers))
+        self.assertTrue(all(len(buffer) <= 3 for buffer in buffers))
+
+    def test_live_quotes_fail_closed_and_cancel_on_missing_symbol(self) -> None:
+        fake_ib = StreamingIB({"SOXS"})
+        broker = make_streaming_broker(fake_ib)
+
+        with self.assertRaisesRegex(BrokerError, "SOXS"):
+            broker.live_quotes(
+                ["QQQ", "SOXL", "SOXS"],
+                window_seconds=0.002,
+                max_samples_per_symbol=3,
+                poll_interval_seconds=0.001,
+            )
+
+        self.assertEqual(["QQQ", "SOXL", "SOXS"], fake_ib.cancelled)
+
+    def test_live_quotes_reject_unbounded_parameters(self) -> None:
+        broker = make_streaming_broker(StreamingIB())
+
+        with self.assertRaisesRegex(ValueError, "window_seconds"):
+            broker.live_quotes(["QQQ"], window_seconds=0)
+        with self.assertRaisesRegex(ValueError, "max_samples_per_symbol"):
+            broker.live_quotes(["QQQ"], max_samples_per_symbol=0)
+
     def test_heartbeat_returns_gateway_server_time(self) -> None:
         broker = make_broker(Settings(), FakeIB("DU123456"))
 

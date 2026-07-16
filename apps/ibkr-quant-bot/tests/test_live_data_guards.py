@@ -74,6 +74,7 @@ class ExchangeBroker:
         self.quote_missing = quote_missing or set()
         self.bar_calls: list[tuple[str, str]] = []
         self.quote_calls: list[tuple[str, str]] = []
+        self.quote_group_calls: list[tuple[tuple[str, ...], str, float, int]] = []
 
     def historical_bars(
         self,
@@ -102,6 +103,23 @@ class ExchangeBroker:
         if (exchange, symbol) in self.quote_missing:
             raise BrokerError(f"live quote unavailable for {symbol}")
         return Quote(symbol, bid=10.0, ask=10.1, last=10.05, close=10.0)
+
+    def live_quotes(
+        self,
+        symbols,
+        *,
+        exchange: str = "SMART",
+        window_seconds: float = 3.0,
+        max_samples_per_symbol: int = 100,
+    ) -> dict[str, Quote]:
+        normalized = tuple(symbols)
+        self.quote_group_calls.append(
+            (normalized, exchange, window_seconds, max_samples_per_symbol)
+        )
+        return {
+            symbol: self.live_quote(symbol, exchange=exchange)
+            for symbol in normalized
+        }
 
 
 def make_bar(age: timedelta) -> Bar:
@@ -372,6 +390,10 @@ class LiveDataGuardsTest(unittest.TestCase):
             self.assertEqual("SMART", _load_market_data_exchange(settings, now))
             self.assertTrue(_market_data_exchange_state_path(settings, now).exists())
             self.assertNotIn("ARCA", {value for value, _ in broker.bar_calls})
+            self.assertEqual(
+                [(("QQQ", "SOXL", "SOXS"), "SMART", 3.0, 100)],
+                broker.quote_group_calls,
+            )
 
     def test_intraday_market_data_falls_back_as_one_group_and_stays_pinned(
         self,
