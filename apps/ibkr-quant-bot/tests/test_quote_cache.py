@@ -63,6 +63,9 @@ class QuoteCacheTest(unittest.TestCase):
                 )
             )
             self.assertTrue(
+                all(rows[-1]["published_at"] for rows in payload["symbols"].values())
+            )
+            self.assertTrue(
                 all(
                     rows[-1]["market_time"].startswith("2026-07-16T14:00:00")
                     for rows in payload["symbols"].values()

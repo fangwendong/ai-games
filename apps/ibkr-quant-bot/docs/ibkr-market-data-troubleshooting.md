@@ -331,8 +331,9 @@ with `IBKR_LIVE_QUOTE_CACHE_PATH`,
 `IBKR_LIVE_QUOTE_MAX_SAMPLES_PER_SYMBOL`.
 
 The subscription requests IB generic tick 233. Every sample records its
-exchange last-trade `market_time`, ib-insync callback `received_at`, and local
-loop `observed_at`; the file records atomic publication time as `generated_at`.
+exchange last-trade `market_time`, ib-insync callback `received_at`, local loop
+`observed_at`, and its first atomic write as `published_at`; the file also
+records its most recent atomic replacement as `generated_at`.
 Operational latency can therefore be split into market-to-receive,
 receive-to-file, and market-to-file intervals without exposing account data.
 Because `market_time` is a last-trade timestamp, calculate exchange latency only

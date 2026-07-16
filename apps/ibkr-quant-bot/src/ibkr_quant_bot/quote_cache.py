@@ -83,6 +83,7 @@ class QuoteCacheWriter:
                     "market_time": market_time_value,
                     "received_at": received_time_value,
                     "observed_at": observed_at.isoformat(),
+                    "published_at": None,
                     **asdict(quote),
                     "symbol": normalized,
                 }
@@ -103,10 +104,15 @@ class QuoteCacheWriter:
     def _write_atomic(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         generated_at = datetime.now(timezone.utc)
+        generated_at_value = generated_at.isoformat()
+        for rows in self.samples.values():
+            for row in rows:
+                if row["published_at"] is None:
+                    row["published_at"] = generated_at_value
         payload = {
             "version": 1,
             "source": "SMART",
-            "generated_at": generated_at.isoformat(),
+            "generated_at": generated_at_value,
             "max_samples_per_symbol": self.max_samples_per_symbol,
             "symbols": {
                 symbol: list(self.samples[symbol]) for symbol in self.symbols
