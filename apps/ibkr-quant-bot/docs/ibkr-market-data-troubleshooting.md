@@ -310,21 +310,36 @@ Do not confuse these:
 It is possible for historical bars to be returned while live quotes are empty
 or delayed. For live trading, both quote availability and bar freshness matter.
 
-### Bounded Live Quote Window
+### Standalone Bounded Live Quote Cache
 
-The live rotation strategy subscribes to the QQQ, SOXL, and SOXS SMART streams
-as one concurrent group. Each poll collects until either three seconds elapse
-or every symbol reaches 100 changed quote samples. A per-symbol
-`deque(maxlen=100)` evicts the oldest sample at the count limit, and samples
-older than the three-second window are also pruned. The default bounds can be
-changed with `IBKR_LIVE_QUOTE_WINDOW_SECONDS` and
+Run one read-only process that subscribes to QQQ, SOXL, and SOXS concurrently:
+
+```bash
+IBKR_READONLY=true \
+IBKR_DRY_RUN=true \
+IBKR_ALLOW_LIVE_TRADING=false \
+IBKR_MARKET_DATA_TYPE=live \
+PYTHONPATH=src python -m ibkr_quant_bot.cli stream-live-quotes
+```
+
+The process keeps a `deque(maxlen=100)` for each symbol, so the default
+three-symbol profile retains at most 300 samples in memory. It atomically
+replaces `live-quotes.json` every second; readers therefore see either the old
+complete file or the new complete file, never a partial write. Configure it
+with `IBKR_LIVE_QUOTE_CACHE_PATH`,
+`IBKR_LIVE_QUOTE_CACHE_REFRESH_SECONDS`, and
 `IBKR_LIVE_QUOTE_MAX_SAMPLES_PER_SYMBOL`.
 
-With the default three-symbol profile, at most 300 quote samples are retained.
-The subscriptions are always cancelled in a `finally` block, including missing
-data and exception paths. This is a short bounded subscription opened by each
-scheduled CLI poll, not a process-wide cache. If any symbol lacks a current
-bid, ask, or last value, the whole quote group fails closed.
+Each scheduled strategy poll reads the newest sample for all three symbols
+without waiting. Every symbol must be present, carry a bid, ask, or last value,
+and be no older than `IBKR_LIVE_QUOTE_CACHE_MAX_AGE_SECONDS` (three seconds by
+default). If the file is missing, malformed, incomplete, or stale, the strategy
+requests one concurrent live SMART snapshot group through `reqTickers`; this
+fallback has no fixed `sleep`. If that complete group is unavailable, the
+strategy fails closed. The streaming process cancels every subscription in a
+`finally` block when it exits and reconnects after transient Gateway or network
+failures. Strategy output records `live_quote_source=cache` or
+`live_quote_source=snapshot` so operators can confirm which path was used.
 
 ## SMART To ARCA Failover
 
@@ -353,8 +368,12 @@ Relevant files:
   - `_set_market_data_type()`
   - `quote()`
   - `live_quote()`
-  - `live_quotes()`
+  - `live_quote_snapshots()`
+  - `stream_live_quotes()`
   - `historical_bars()`
+- `src/ibkr_quant_bot/quote_cache.py`
+  - `QuoteCacheWriter`
+  - `load_fresh_quotes()`
 - `src/ibkr_quant_bot/cli.py`
   - `intraday-momentum`
   - live data freshness checks

@@ -3,9 +3,11 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import sys
 from dataclasses import asdict, replace
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
+from time import sleep as blocking_sleep
 from zoneinfo import ZoneInfo
 
 from .broker import BrokerError, IbkrBroker, format_table
@@ -23,6 +25,7 @@ from .historical_cache import (
 )
 from .history_refresh import schedule_lookback_days, validate_recent_cached_sessions
 from .models import Bar, MarketSession, Quote, StrategyDecision, TradeRequest
+from .quote_cache import QuoteCacheError, QuoteCacheWriter, load_fresh_quotes
 from .risk import RiskManager
 from .strategy import (
     IntradayMomentumStrategy,
@@ -114,6 +117,15 @@ def _build_parser() -> argparse.ArgumentParser:
 
     quote = subparsers.add_parser("quote", help="fetch a market data snapshot")
     quote.add_argument("symbol")
+
+    stream_quotes = subparsers.add_parser(
+        "stream-live-quotes",
+        help="maintain an atomic bounded SMART quote cache",
+    )
+    stream_quotes.add_argument(
+        "--symbols", nargs="+", default=["QQQ", "SOXL", "SOXS"]
+    )
+    stream_quotes.add_argument("--cache-path", default=None)
 
     subparsers.add_parser("account", help="show account summary")
     subparsers.add_parser(
@@ -573,6 +585,33 @@ def _orders_state_path(settings: Settings, now: datetime | None = None) -> Path:
     return state_dir / f"orders-{now.date().isoformat()}.jsonl"
 
 
+def _live_quote_cache_path(settings: Settings) -> Path:
+    if settings.live_quote_cache_path:
+        return Path(settings.live_quote_cache_path).expanduser()
+    return Path(settings.state_dir).expanduser() / "live-quotes.json"
+
+
+def _cached_or_snapshot_live_quotes(
+    broker: IbkrBroker,
+    settings: Settings,
+    symbols: tuple[str, ...],
+) -> dict[str, Quote]:
+    try:
+        quotes = load_fresh_quotes(
+            _live_quote_cache_path(settings),
+            symbols,
+            max_age_seconds=settings.live_quote_cache_max_age_seconds,
+        )
+        print("live_quote_source=cache", file=sys.stderr)
+        return quotes
+    except QuoteCacheError as exc:
+        print(
+            f"live_quote_source=snapshot cache_reason={exc}",
+            file=sys.stderr,
+        )
+        return broker.live_quote_snapshots(symbols, exchange="SMART")
+
+
 def _json_safe(value):
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
@@ -704,11 +743,8 @@ def _load_intraday_market_data(
 
     try:
         if settings.is_live:
-            quotes_by_symbol = broker.live_quotes(
-                symbols,
-                exchange="SMART",
-                window_seconds=settings.live_quote_window_seconds,
-                max_samples_per_symbol=settings.live_quote_max_samples_per_symbol,
+            quotes_by_symbol = _cached_or_snapshot_live_quotes(
+                broker, settings, symbols
             )
         else:
             quotes_by_symbol = {
@@ -993,12 +1029,77 @@ def _build_momentum_strategy(args: argparse.Namespace, settings: Settings):
     )
 
 
+def _run_live_quote_cache(settings: Settings, args: argparse.Namespace) -> int:
+    if not settings.readonly or not settings.dry_run:
+        raise BrokerError(
+            "stream-live-quotes requires IBKR_READONLY=true and IBKR_DRY_RUN=true"
+        )
+    if settings.allow_live_trading:
+        raise BrokerError(
+            "stream-live-quotes requires IBKR_ALLOW_LIVE_TRADING=false"
+        )
+    symbols = tuple(
+        dict.fromkeys(item.strip().upper() for item in args.symbols if item.strip())
+    )
+    cache_path = (
+        Path(args.cache_path).expanduser()
+        if args.cache_path
+        else _live_quote_cache_path(settings)
+    )
+    writer = QuoteCacheWriter(
+        cache_path,
+        symbols,
+        max_samples_per_symbol=settings.live_quote_max_samples_per_symbol,
+        refresh_seconds=settings.live_quote_cache_refresh_seconds,
+    )
+    print(
+        json.dumps(
+            {
+                "cache_path": str(cache_path),
+                "max_samples_per_symbol": settings.live_quote_max_samples_per_symbol,
+                "refresh_seconds": settings.live_quote_cache_refresh_seconds,
+                "symbols": symbols,
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+    while True:
+        broker = IbkrBroker(settings)
+        try:
+            broker.connect()
+            broker.stream_live_quotes(
+                symbols,
+                lambda quotes, observed_at: writer.update(
+                    quotes, observed_at=observed_at
+                ),
+                exchange="SMART",
+            )
+        except KeyboardInterrupt:
+            return 0
+        except (BrokerError, ConnectionError, TimeoutError, OSError) as exc:
+            print(
+                f"live quote stream reconnecting after {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+        finally:
+            broker.disconnect()
+        try:
+            blocking_sleep(5)
+        except KeyboardInterrupt:
+            return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     settings = load_settings()
 
     if args.command == "doctor":
         return _doctor(settings)
+
+    if args.command == "stream-live-quotes":
+        return _run_live_quote_cache(settings, args)
 
     broker = None
     if not (args.command == "backtest-momentum" and args.reuse_data):
