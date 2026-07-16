@@ -36,12 +36,13 @@ sanitized fields used below.
 | 2026-07-13 | V1-compatible | SMART / SMART | SOXS round trip | Mandatory 15:50 flatten | +$23.61 | +0.59% |
 | 2026-07-14 | `rotation-hysteresis-v2` | SMART / none | No entry | No signal before cutoff | $0.00 | N/A |
 | 2026-07-15 | `rotation-hysteresis-v2` | ARCA / SMART | SOXS round trip | Protective take | +$146.30 | +3.70% |
+| 2026-07-16 | `rotation-hysteresis-v2` | SMART / SMART | SOXS round trip | Protective take | +$145.93 | +3.69% |
 
-Across these four sessions, the strategy closed three attributable round
-trips for approximately $171.34 net realized PnL, or +2.06% of the three
+Across these five sessions, the strategy closed four attributable round
+trips for approximately $317.27 net realized PnL, or +2.59% of the four
 filled entry notionals pooled together. This pooled rate is descriptive and
-is not an account return or a compounded portfolio return. All three trades
-were profitable, but three trades are far too few to estimate a reliable win
+is not an account return or a compounded portfolio return. All four trades
+were profitable, but four trades are far too few to estimate a reliable win
 rate or expected return.
 
 The July 10 and July 13 entry journals predate persistence of an explicit
@@ -181,6 +182,54 @@ The execution-model fix is commit `a166ec6` on `wt/codex-6`. A 60-session
 check changed net return from 30.38% to 30.15% while preserving 55 trades and
 the same 27/28 win-loss count, which supports treating it as an execution
 semantics correction rather than a one-day parameter fit.
+
+## 2026-07-16
+
+### Market-Data Context
+
+QQQ, SOXL, and SOXS signal bars used SMART for the complete session. Live
+quotes and order routing also used SMART. The standalone quote subscription
+was active, while the strategy retained its fail-closed SMART snapshot path
+for stale-cache handling. No ARCA fallback or mixed signal source occurred.
+
+### Execution
+
+- The 30-bar warm-up completed at 12:00. QQQ was bearish, SOXL was rejected,
+  and SOXS passed its EMA, trend, VWAP, score, and benchmark-regime filters.
+- Entry: bought 77 SOXS at 12:01:46 in two SMART-routed fills, weighted average
+  price $51.387477. The entry limit was $51.40.
+- Protective stop: $50.23 for all 77 shares.
+- Protective take: $53.31 for all 77 shares.
+- While held, SOXS retained a bullish fast/slow/trend EMA structure and QQQ
+  remained in the bearish regime. No technical, benchmark, or profit-lock
+  software exit occurred before the protective take.
+- Exit: the $53.31 protective take filled all 77 shares at 13:45:45. The OCA
+  stop was cancelled and no strategy order remained active.
+- Gross PnL from sanitized fills: approximately $148.03.
+- Broker USD realized PnL after the round trip: $145.93, implying approximately
+  $2.10 of total transaction costs.
+- Net return on the $3,956.84 filled entry notional: approximately +3.69%.
+- End state: SOXS and SOXL were flat, with no active strategy order.
+
+The broker execution query returned only this SOXS strategy round trip for the
+session. The recorded USD realized PnL therefore reconciles to the trade after
+the approximately $2.10 difference between gross fill PnL and realized PnL.
+No account identifier, order identifier, execution identifier, balance, or
+unrelated holding is retained in this log.
+
+### Review
+
+This session exercised the intended V2 path: wait for 30 completed bars, select
+the inverse semiconductor ETF only under a bearish QQQ regime, create complete
+broker-hosted OCA protection after the fill, and allow the protective take to
+close the position without waiting for the next polling cycle. The entry was
+filled before the 13:30 cutoff; after the 13:45 exit, the one-entry-per-session
+guard continued to prevent re-entry.
+
+A same-source historical replay has not yet been appended for this session.
+When added, it must use the complete 2026-07-16 SMART bar set and the corrected
+protective-OCA execution model; it must not substitute ARCA bars or infer the
+two live entry fills from a favorable bar extreme.
 
 ## Follow-Up Items
 
