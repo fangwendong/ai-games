@@ -72,6 +72,7 @@ class Settings:
     atr_window: int = 14
     atr_stop_multiple: float = 2.0
     historical_request_pause_seconds: float = 0.25
+    arca_fallback_enabled: bool = False
 
     @property
     def is_live(self) -> bool:
@@ -119,4 +120,5 @@ def load_settings() -> Settings:
         historical_request_pause_seconds=float(
             os.getenv("IBKR_HISTORICAL_REQUEST_PAUSE_SECONDS", "0.25")
         ),
+        arca_fallback_enabled=_bool_env("IBKR_ARCA_FALLBACK_ENABLED", False),
     )

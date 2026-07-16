@@ -1,0 +1,29 @@
+{
+  "strategy_version": "gap-reversion-v1-research",
+  "symbols": [
+    "NVDA", "AMD", "INTC", "AAPL", "AMZN", "META", "MSFT", "PLTR",
+    "TSLA", "AVGO", "BAC", "C", "WFC", "JPM", "NU", "SOFI", "AAL",
+    "PATH", "ORCL", "LCID", "OPEN", "MRVL", "CRWD", "NBIS", "MARA"
+  ],
+  "bar_size": "5 mins",
+  "statistics_lookback": 14,
+  "observation_minutes": 15,
+  "minimum_gap_down_pct": 0.04,
+  "minimum_gap_atr": 0.4,
+  "minimum_average_daily_volume": 5000000,
+  "minimum_price": 10.0,
+  "maximum_ranked_candidates": 1,
+  "recovery_confirm_bars": 2,
+  "maximum_opening_relative_volume": 4.0,
+  "entry_cutoff_et_minutes": 615,
+  "exit_signal_et_minutes": 950,
+  "atr_stop_multiple": 0.5,
+  "benchmark_symbol": "QQQ",
+  "maximum_benchmark_gap_down_pct": 0.015,
+  "max_notional": 4000,
+  "max_risk_per_trade": 120,
+  "initial_capital": 4000,
+  "commission_per_order": 1.0,
+  "slippage_bps": 1.0,
+  "spread_bps": 1.0
+}

@@ -307,6 +307,141 @@ class BacktestCostTest(unittest.TestCase):
         self.assertEqual(result.trades[0].exit_reason, "eod")
         self.assertEqual(result.trades[0].gross_exit_price, 101.0)
 
+    def test_broker_protective_take_fills_intrabar_at_limit(self) -> None:
+        class ProtectiveStrategy:
+            symbols = ("SOXL",)
+            benchmark_symbol = "QQQ"
+            min_bars = 1
+
+            def decide(self, symbol, quote, bars, benchmark_bars=None):
+                signal = len(bars) == 1
+                return StrategyDecision(
+                    symbol,
+                    "BUY" if signal else "HOLD",
+                    1 if signal else 0,
+                    quote.reference_price,
+                    None,
+                    "entry",
+                    signal,
+                    {"score": 1.0},
+                )
+
+            def protective_prices(self, symbol, average_cost, bars):
+                return average_cost * 0.98, average_cost * 1.02
+
+            def exit_decide(
+                self, symbol, quote, bars, quantity, average_cost, benchmark_bars=None
+            ):
+                return StrategyDecision(
+                    symbol, "HOLD", 0, quote.reference_price, None, "hold", False
+                )
+
+        start = datetime(2026, 7, 8, 9, 30, tzinfo=timezone.utc)
+        bars = [
+            Bar(start, 100, 100, 100, 100, 1),
+            Bar(start + timedelta(minutes=5), 100, 101, 99, 100, 1),
+            Bar(start + timedelta(minutes=10), 100, 103, 99, 101, 1),
+        ]
+
+        result = run_intraday_momentum_backtest(
+            {"SOXL": bars, "QQQ": bars},
+            strategy=ProtectiveStrategy(),
+            cost_model=BacktestCostModel(0, 0, 0),
+        )
+
+        self.assertEqual("protective_take", result.trades[0].exit_reason)
+        self.assertEqual(102, result.trades[0].gross_exit_price)
+
+    def test_broker_protective_stop_uses_gap_open(self) -> None:
+        class ProtectiveStrategy:
+            symbols = ("SOXL",)
+            benchmark_symbol = "QQQ"
+            min_bars = 1
+
+            def decide(self, symbol, quote, bars, benchmark_bars=None):
+                signal = len(bars) == 1
+                return StrategyDecision(
+                    symbol,
+                    "BUY" if signal else "HOLD",
+                    1 if signal else 0,
+                    quote.reference_price,
+                    None,
+                    "entry",
+                    signal,
+                    {"score": 1.0},
+                )
+
+            def protective_prices(self, symbol, average_cost, bars):
+                return average_cost * 0.98, average_cost * 1.02
+
+            def exit_decide(
+                self, symbol, quote, bars, quantity, average_cost, benchmark_bars=None
+            ):
+                return StrategyDecision(
+                    symbol, "HOLD", 0, quote.reference_price, None, "hold", False
+                )
+
+        start = datetime(2026, 7, 8, 9, 30, tzinfo=timezone.utc)
+        bars = [
+            Bar(start, 100, 100, 100, 100, 1),
+            Bar(start + timedelta(minutes=5), 100, 101, 99, 100, 1),
+            Bar(start + timedelta(minutes=10), 95, 96, 94, 95, 1),
+        ]
+
+        result = run_intraday_momentum_backtest(
+            {"SOXL": bars, "QQQ": bars},
+            strategy=ProtectiveStrategy(),
+            cost_model=BacktestCostModel(0, 0, 0),
+        )
+
+        self.assertEqual("protective_stop", result.trades[0].exit_reason)
+        self.assertEqual(95, result.trades[0].gross_exit_price)
+
+    def test_ambiguous_protective_bar_uses_stop_first(self) -> None:
+        class ProtectiveStrategy:
+            symbols = ("SOXL",)
+            benchmark_symbol = "QQQ"
+            min_bars = 1
+
+            def decide(self, symbol, quote, bars, benchmark_bars=None):
+                signal = len(bars) == 1
+                return StrategyDecision(
+                    symbol,
+                    "BUY" if signal else "HOLD",
+                    1 if signal else 0,
+                    quote.reference_price,
+                    None,
+                    "entry",
+                    signal,
+                    {"score": 1.0},
+                )
+
+            def protective_prices(self, symbol, average_cost, bars):
+                return average_cost * 0.98, average_cost * 1.02
+
+            def exit_decide(
+                self, symbol, quote, bars, quantity, average_cost, benchmark_bars=None
+            ):
+                return StrategyDecision(
+                    symbol, "HOLD", 0, quote.reference_price, None, "hold", False
+                )
+
+        start = datetime(2026, 7, 8, 9, 30, tzinfo=timezone.utc)
+        bars = [
+            Bar(start, 100, 100, 100, 100, 1),
+            Bar(start + timedelta(minutes=5), 100, 101, 99, 100, 1),
+            Bar(start + timedelta(minutes=10), 100, 103, 97, 100, 1),
+        ]
+
+        result = run_intraday_momentum_backtest(
+            {"SOXL": bars, "QQQ": bars},
+            strategy=ProtectiveStrategy(),
+            cost_model=BacktestCostModel(0, 0, 0),
+        )
+
+        self.assertEqual("protective_stop", result.trades[0].exit_reason)
+        self.assertEqual(98, result.trades[0].gross_exit_price)
+
     def test_cost_model_worsens_net_return(self) -> None:
         strategy = IntradayMomentumStrategy(
             symbols=("SOXL",), require_vwap_confirmation=False

@@ -23,7 +23,10 @@ from ibkr_quant_bot.cli import (
     _has_price_scale_discontinuity,
     _is_market_hours,
     _latest_entry_time,
+    _load_intraday_market_data,
+    _load_market_data_exchange,
     _marketable_buy_limit_price,
+    _market_data_exchange_state_path,
     _orders_state_path,
     _record_daily_entry,
     _record_order_state,
@@ -48,16 +51,57 @@ class FakeBroker:
         duration: str = "1 D",
         bar_size: str = "1 min",
         what_to_show: str = "TRADES",
+        exchange: str = "SMART",
     ) -> list[Bar]:
         return self.bars
 
-    def live_quote(self, symbol: str) -> Quote:
+    def live_quote(self, symbol: str, *, exchange: str = "SMART") -> Quote:
         self.live_quote_called = True
         return Quote(symbol=symbol, bid=10.0, ask=10.1, last=10.05, close=10.0)
 
-    def quote(self, symbol: str) -> Quote:
+    def quote(self, symbol: str, *, exchange: str = "SMART") -> Quote:
         self.quote_called = True
         return Quote(symbol=symbol, bid=None, ask=None, last=9.9, close=9.8)
+
+
+class ExchangeBroker:
+    def __init__(
+        self,
+        missing: set[tuple[str, str]] | None = None,
+        quote_missing: set[tuple[str, str]] | None = None,
+    ):
+        self.missing = missing or set()
+        self.quote_missing = quote_missing or set()
+        self.bar_calls: list[tuple[str, str]] = []
+        self.quote_calls: list[tuple[str, str]] = []
+
+    def historical_bars(
+        self,
+        symbol: str,
+        duration: str = "1 D",
+        bar_size: str = "1 min",
+        what_to_show: str = "TRADES",
+        exchange: str = "SMART",
+    ) -> list[Bar]:
+        self.bar_calls.append((exchange, symbol))
+        if (exchange, symbol) in self.missing:
+            return []
+        return [
+            Bar(
+                time=datetime(2026, 7, 15, 11, 55, tzinfo=NEW_YORK),
+                open=10,
+                high=10.2,
+                low=9.9,
+                close=10.1,
+                volume=100,
+            )
+        ]
+
+    def live_quote(self, symbol: str, *, exchange: str = "SMART") -> Quote:
+        self.quote_calls.append((exchange, symbol))
+        if (exchange, symbol) in self.quote_missing:
+            raise BrokerError(f"live quote unavailable for {symbol}")
+        return Quote(symbol, bid=10.0, ask=10.1, last=10.05, close=10.0)
 
 
 def make_bar(age: timedelta) -> Bar:
@@ -149,6 +193,60 @@ class LiveDataGuardsTest(unittest.TestCase):
         bars = _fresh_historical_bars(broker, settings, "SOXL", bar_size="5 mins")
 
         self.assertEqual(1, len(bars))
+
+    def test_completed_only_excludes_forming_live_bar(self) -> None:
+        now = datetime(2026, 7, 10, 12, 1, tzinfo=NEW_YORK)
+        completed = Bar(
+            time=datetime(2026, 7, 10, 11, 55, tzinfo=NEW_YORK),
+            open=1,
+            high=1,
+            low=1,
+            close=1,
+            volume=1,
+        )
+        forming = Bar(
+            time=datetime(2026, 7, 10, 12, 0, tzinfo=NEW_YORK),
+            open=2,
+            high=2,
+            low=2,
+            close=2,
+            volume=1,
+        )
+        broker = FakeBroker([completed, forming])
+
+        bars = _fresh_historical_bars(
+            broker,
+            Settings(trading_mode="live"),
+            "SOXL",
+            bar_size="5 mins",
+            completed_only=True,
+            now=now,
+        )
+
+        self.assertEqual([completed], bars)
+
+    def test_completed_only_includes_bar_at_close_boundary(self) -> None:
+        now = datetime(2026, 7, 10, 12, 5, tzinfo=NEW_YORK)
+        closed = Bar(
+            time=datetime(2026, 7, 10, 12, 0, tzinfo=NEW_YORK),
+            open=1,
+            high=1,
+            low=1,
+            close=1,
+            volume=1,
+        )
+        broker = FakeBroker([closed])
+
+        bars = _fresh_historical_bars(
+            broker,
+            Settings(trading_mode="live"),
+            "SOXL",
+            bar_size="5 mins",
+            completed_only=True,
+            now=now,
+        )
+
+        self.assertEqual([closed], bars)
 
     def test_session_filter_excludes_previous_day_bars(self) -> None:
         now = datetime(2026, 7, 10, 12, 0, tzinfo=NEW_YORK)
@@ -246,11 +344,138 @@ class LiveDataGuardsTest(unittest.TestCase):
         self.assertFalse(broker.quote_called)
         self.assertEqual(10.05, quote.last)
 
+    def test_intraday_market_data_pins_smart_when_all_symbols_pass(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            settings = Settings(
+                trading_mode="live",
+                state_dir=tmpdir,
+                arca_fallback_enabled=True,
+            )
+            strategy = _build_momentum_strategy(
+                _build_parser().parse_args(["intraday-momentum"]), settings
+            )
+            now = datetime(2026, 7, 15, 12, 0, tzinfo=NEW_YORK)
+            session = MarketSession(
+                now.date(),
+                now.replace(hour=9, minute=30),
+                now.replace(hour=16, minute=0),
+            )
+            broker = ExchangeBroker()
+
+            exchange, bars, quotes = _load_intraday_market_data(
+                broker, settings, strategy, session, now
+            )
+
+            self.assertEqual("SMART", exchange)
+            self.assertEqual({"QQQ", "SOXL", "SOXS"}, set(bars))
+            self.assertEqual(set(bars), set(quotes))
+            self.assertEqual("SMART", _load_market_data_exchange(settings, now))
+            self.assertTrue(_market_data_exchange_state_path(settings, now).exists())
+            self.assertNotIn("ARCA", {value for value, _ in broker.bar_calls})
+
+    def test_intraday_market_data_falls_back_as_one_group_and_stays_pinned(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as tmpdir:
+            settings = Settings(
+                trading_mode="live",
+                state_dir=tmpdir,
+                arca_fallback_enabled=True,
+            )
+            strategy = _build_momentum_strategy(
+                _build_parser().parse_args(["intraday-momentum"]), settings
+            )
+            now = datetime(2026, 7, 15, 12, 0, tzinfo=NEW_YORK)
+            session = MarketSession(
+                now.date(),
+                now.replace(hour=9, minute=30),
+                now.replace(hour=16, minute=0),
+            )
+            broker = ExchangeBroker({("SMART", "SOXS")})
+
+            exchange, bars, quotes = _load_intraday_market_data(
+                broker, settings, strategy, session, now
+            )
+
+            self.assertEqual("ARCA", exchange)
+            self.assertEqual({"QQQ", "SOXL", "SOXS"}, set(bars))
+            self.assertEqual(
+                {("SMART", "QQQ"), ("SMART", "SOXL"), ("SMART", "SOXS")},
+                set(broker.quote_calls),
+            )
+            self.assertEqual("ARCA", _load_market_data_exchange(settings, now))
+
+            broker.missing.clear()
+            broker.bar_calls.clear()
+            broker.quote_calls.clear()
+            pinned, _, _ = _load_intraday_market_data(
+                broker, settings, strategy, session, now
+            )
+
+            self.assertEqual("ARCA", pinned)
+            self.assertEqual(
+                {("ARCA", "QQQ"), ("ARCA", "SOXL"), ("ARCA", "SOXS")},
+                set(broker.bar_calls),
+            )
+            self.assertNotIn("SMART", {value for value, _ in broker.bar_calls})
+            self.assertEqual(
+                {("SMART", "QQQ"), ("SMART", "SOXL"), ("SMART", "SOXS")},
+                set(broker.quote_calls),
+            )
+
+    def test_intraday_market_data_never_falls_back_smart_quotes(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            settings = Settings(
+                trading_mode="live",
+                state_dir=tmpdir,
+                arca_fallback_enabled=True,
+            )
+            strategy = _build_momentum_strategy(
+                _build_parser().parse_args(["intraday-momentum"]), settings
+            )
+            now = datetime(2026, 7, 15, 12, 0, tzinfo=NEW_YORK)
+            session = MarketSession(
+                now.date(),
+                now.replace(hour=9, minute=30),
+                now.replace(hour=16, minute=0),
+            )
+            broker = ExchangeBroker(quote_missing={("SMART", "SOXS")})
+
+            with self.assertRaisesRegex(BrokerError, "SMART live quote group"):
+                _load_intraday_market_data(
+                    broker, settings, strategy, session, now
+                )
+
+            self.assertEqual([], broker.bar_calls)
+            self.assertNotIn("ARCA", {value for value, _ in broker.quote_calls})
+
+    def test_intraday_market_data_does_not_fallback_when_disabled(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            settings = Settings(trading_mode="live", state_dir=tmpdir)
+            strategy = _build_momentum_strategy(
+                _build_parser().parse_args(["intraday-momentum"]), settings
+            )
+            now = datetime(2026, 7, 15, 12, 0, tzinfo=NEW_YORK)
+            session = MarketSession(
+                now.date(),
+                now.replace(hour=9, minute=30),
+                now.replace(hour=16, minute=0),
+            )
+            broker = ExchangeBroker({("SMART", "SOXS")})
+
+            with self.assertRaisesRegex(BrokerError, "SMART"):
+                _load_intraday_market_data(
+                    broker, settings, strategy, session, now
+                )
+
+            self.assertIsNone(_load_market_data_exchange(settings, now))
+            self.assertNotIn("ARCA", {value for value, _ in broker.bar_calls})
+
     def test_broker_live_quote_rejects_close_only_quote(self) -> None:
         from ibkr_quant_bot.broker import IbkrBroker
 
         broker = object.__new__(IbkrBroker)
-        broker._quote_with_type = lambda symbol, market_data_type: Quote(  # type: ignore[attr-defined]
+        broker._quote_with_type = lambda symbol, market_data_type, exchange="SMART": Quote(  # type: ignore[attr-defined]
             symbol=symbol,
             bid=None,
             ask=None,

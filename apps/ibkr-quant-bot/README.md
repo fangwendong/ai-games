@@ -78,6 +78,22 @@ that live quotes are unavailable, use
 That runbook also documents how to enable real-time market data in IBKR Client
 Portal and the required Market Data API acknowledgement.
 
+All worktrees should reuse the data-disk historical cache documented in
+[docs/historical-market-data.md](docs/historical-market-data.md). It includes
+the canonical path plus download, read, completeness-audit, and daily refresh
+commands.
+
+The isolated long gap-down/VWAP recovery experiment and its same-period
+comparison with live v2 are documented in
+[docs/gap-reversion-research.md](docs/gap-reversion-research.md).
+The research-only **GapGuard Fusion v1** causal state machine is documented in
+[docs/hybrid-state-research.md](docs/hybrid-state-research.md).
+
+Sanitized live fills, no-trade sessions, exit paths, and replay reconciliation
+are maintained in the append-only
+[live strategy review log](docs/live-strategy-review-log.md). Do not commit raw
+IBKR runtime journals; they contain private broker metadata.
+
 ```bash
 cd apps/ibkr-quant-bot
 export IBKR_HOST=127.0.0.1
@@ -182,6 +198,9 @@ In live trading mode, the intraday scanners refuse delayed market data:
 - Historical bars must be fresh. By default the latest bar may be at most
   `IBKR_LIVE_BAR_MAX_AGE_SECONDS=420` seconds old, which allows normal
   completed 5-minute bars but rejects 15-20 minute delayed data.
+- Entry, technical-exit, benchmark-regime, and protective-price calculations
+  use completed 5-minute bars only. A bar whose five-minute interval has not
+  ended is excluded so live decisions match the backtest close-bar convention.
 - Strategy bars are restricted to the current New York regular session, so the
   opening signal cannot inherit the prior day's EMA or VWAP history.
 - A large mismatch between the prior close and current-session prices blocks
@@ -250,6 +269,16 @@ Backtest the same rule with a built-in transaction-cost model:
 ```bash
 ibkr-bot backtest-momentum
 ```
+
+The backtest mirrors the live exit split rather than treating every exit as a
+close-based software decision. Broker-side protective stop and take-profit OCA
+orders are evaluated against each completed bar's high/low after the entry
+bar. Sell limits fill at their limit (or a better gap-open price), while sell
+stops fill at their stop (or a worse gap-open price). If a five-minute bar
+crosses both levels and tick ordering is unavailable, the stop is assumed to
+fill first. Profit-lock, technical, and benchmark exits remain close-confirmed
+and fill at the next bar open. Entry fills also remain next-bar-open estimates,
+so venue-specific SMART price improvement cannot be reconstructed from OHLCV.
 
 The tuning workflow used for this branch is documented in
 [docs/backtest-parameter-tuning.md](docs/backtest-parameter-tuning.md).

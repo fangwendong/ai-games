@@ -4,7 +4,7 @@ import argparse
 import json
 import math
 from dataclasses import asdict, replace
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -16,8 +16,13 @@ from .backtest import (
     validate_historical_bar_coverage,
 )
 from .config import Settings, load_settings
-from .historical_cache import load_bars, save_bars_by_day
-from .models import Bar, MarketSession, StrategyDecision, TradeRequest
+from .historical_cache import (
+    load_bars,
+    require_market_data_source,
+    save_bars_by_day,
+)
+from .history_refresh import schedule_lookback_days, validate_recent_cached_sessions
+from .models import Bar, MarketSession, Quote, StrategyDecision, TradeRequest
 from .risk import RiskManager
 from .strategy import (
     IntradayMomentumStrategy,
@@ -87,6 +92,24 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     subparsers.add_parser(
         "heartbeat", help="verify the Gateway API with a server-time round trip"
+    )
+
+    refresh = subparsers.add_parser(
+        "refresh-history",
+        help="refresh recent history and validate IBKR's historical RTH schedule",
+    )
+    refresh.add_argument(
+        "--symbols", nargs="+", default=["SOXL", "SOXS", "QQQ"]
+    )
+    refresh.add_argument("--duration", default="10 D")
+    refresh.add_argument("--bar-size", default="5 mins")
+    refresh.add_argument("--recent-sessions", type=int, default=2)
+    refresh.add_argument("--data-dir", default=".ibkr_bot_data/historical")
+    refresh.add_argument(
+        "--market-data-exchange",
+        choices=["SMART", "ARCA"],
+        default="SMART",
+        help="single exchange used for every symbol in this cache",
     )
 
     quote = subparsers.add_parser("quote", help="fetch a market data snapshot")
@@ -294,6 +317,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="run from cached daily bars without connecting to IBKR",
     )
+    backtest.add_argument(
+        "--market-data-exchange",
+        choices=["SMART", "ARCA"],
+        default="SMART",
+        help="required source for all historical bars in this backtest",
+    )
 
     return parser
 
@@ -450,11 +479,17 @@ def _fresh_historical_bars(
     bar_size: str = "1 min",
     what_to_show: str = "TRADES",
     session_only: bool = False,
+    completed_only: bool = False,
     session: MarketSession | None = None,
     now: datetime | None = None,
+    exchange: str = "SMART",
 ) -> list[Bar]:
     bars = broker.historical_bars(
-        symbol, duration=duration, bar_size=bar_size, what_to_show=what_to_show
+        symbol,
+        duration=duration,
+        bar_size=bar_size,
+        what_to_show=what_to_show,
+        exchange=exchange,
     )
     now = now or datetime.now(NEW_YORK)
     if session_only:
@@ -472,34 +507,47 @@ def _fresh_historical_bars(
                 < time(16, 0)
             )
         ]
-    if not settings.is_live:
-        return bars
-    if not bars:
-        raise BrokerError(f"no live bars returned for {symbol}")
+    if settings.is_live:
+        if not bars:
+            raise BrokerError(f"no live bars returned for {symbol}")
 
-    last_bar_time = _normalize_bar_time(bars[-1].time)
-    age_seconds = (now - last_bar_time).total_seconds()
-    max_age_seconds = max(
-        settings.live_bar_max_age_seconds, _bar_size_seconds(bar_size) + 120
-    )
-    if age_seconds < -60:
-        raise BrokerError(
-            f"latest bar for {symbol} is in the future: {last_bar_time.isoformat()}"
+        last_bar_time = _normalize_bar_time(bars[-1].time)
+        age_seconds = (now - last_bar_time).total_seconds()
+        max_age_seconds = max(
+            settings.live_bar_max_age_seconds, _bar_size_seconds(bar_size) + 120
         )
-    if age_seconds > max_age_seconds:
-        age_minutes = age_seconds / 60
-        max_minutes = max_age_seconds / 60
-        raise BrokerError(
-            f"latest bar for {symbol} is stale: {last_bar_time.isoformat()} "
-            f"({age_minutes:.1f} min old; max {max_minutes:.1f}); refusing delayed data"
-        )
+        if age_seconds < -60:
+            raise BrokerError(
+                f"latest bar for {symbol} is in the future: {last_bar_time.isoformat()}"
+            )
+        if age_seconds > max_age_seconds:
+            age_minutes = age_seconds / 60
+            max_minutes = max_age_seconds / 60
+            raise BrokerError(
+                f"latest bar for {symbol} is stale: {last_bar_time.isoformat()} "
+                f"({age_minutes:.1f} min old; max {max_minutes:.1f}); refusing delayed data"
+            )
+
+    if completed_only:
+        bar_duration = timedelta(seconds=_bar_size_seconds(bar_size))
+        bars = [
+            bar
+            for bar in bars
+            if _normalize_bar_time(bar.time) + bar_duration <= now
+        ]
     return bars
 
 
-def _strategy_quote(broker: IbkrBroker, settings: Settings, symbol: str):
+def _strategy_quote(
+    broker: IbkrBroker,
+    settings: Settings,
+    symbol: str,
+    *,
+    exchange: str = "SMART",
+):
     if settings.is_live:
-        return broker.live_quote(symbol)
-    return broker.quote(symbol)
+        return broker.live_quote(symbol, exchange=exchange)
+    return broker.quote(symbol, exchange=exchange)
 
 
 def _has_price_scale_discontinuity(
@@ -566,6 +614,142 @@ def _daily_entry_limit_reached(settings: Settings, now: datetime | None = None) 
     if settings.max_daily_entries <= 0:
         return False
     return _daily_entry_count(settings, now) >= settings.max_daily_entries
+
+
+def _market_data_exchange_state_path(
+    settings: Settings, now: datetime | None = None
+) -> Path:
+    now = now or datetime.now(NEW_YORK)
+    return (
+        Path(settings.state_dir).expanduser()
+        / f"market-data-source-{now.date().isoformat()}.json"
+    )
+
+
+def _load_market_data_exchange(
+    settings: Settings, now: datetime | None = None
+) -> str | None:
+    path = _market_data_exchange_state_path(settings, now)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise BrokerError(f"invalid market-data source state: {path}") from exc
+    exchange = str(
+        payload.get("bar_exchange", payload.get("exchange", ""))
+    ).upper()
+    if exchange not in {"SMART", "ARCA"}:
+        raise BrokerError(f"invalid pinned market-data exchange: {exchange!r}")
+    return exchange
+
+
+def _record_market_data_exchange(
+    settings: Settings,
+    exchange: str,
+    *,
+    reason: str,
+    now: datetime | None = None,
+) -> None:
+    now = now or datetime.now(NEW_YORK)
+    normalized = exchange.upper()
+    if normalized not in {"SMART", "ARCA"}:
+        raise ValueError(f"unsupported market-data exchange: {exchange}")
+    path = _market_data_exchange_state_path(settings, now)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                # Keep exchange for compatibility with the first source-pin
+                # format. It has always represented the historical-bar source.
+                "exchange": normalized,
+                "bar_exchange": normalized,
+                "quote_exchange": "SMART",
+                "reason": reason,
+                "recorded_at": now.isoformat(),
+                "session_date": now.date().isoformat(),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+
+
+def _load_intraday_market_data(
+    broker: IbkrBroker,
+    settings: Settings,
+    strategy: IntradayMomentumStrategy,
+    session: MarketSession,
+    now: datetime,
+) -> tuple[str, dict[str, list[Bar]], dict[str, Quote]]:
+    """Pin one bar source for all symbols while keeping quotes on SMART."""
+
+    symbols = tuple(
+        dict.fromkeys((strategy.benchmark_symbol, *strategy.symbols))
+    )
+    pinned = _load_market_data_exchange(settings, now)
+    if pinned == "ARCA" and not settings.arca_fallback_enabled:
+        raise BrokerError("ARCA market-data source is pinned but fallback is disabled")
+
+    if pinned is not None:
+        exchanges = (pinned,)
+    elif _daily_entry_count(settings, now) > 0:
+        # Older versions did not persist the source. An existing automated
+        # entry was generated from SMART, so do not change source mid-session.
+        exchanges = ("SMART",)
+    elif settings.arca_fallback_enabled:
+        exchanges = ("SMART", "ARCA")
+    else:
+        exchanges = ("SMART",)
+
+    try:
+        quotes_by_symbol = {
+            symbol: _strategy_quote(
+                broker, settings, symbol, exchange="SMART"
+            )
+            for symbol in symbols
+        }
+    except BrokerError as exc:
+        raise BrokerError(
+            f"complete SMART live quote group unavailable: {exc}"
+        ) from exc
+
+    failures: list[str] = []
+    for exchange in exchanges:
+        try:
+            bars_by_symbol = {
+                symbol: _fresh_historical_bars(
+                    broker,
+                    settings,
+                    symbol,
+                    bar_size="5 mins",
+                    session_only=True,
+                    completed_only=True,
+                    session=session,
+                    now=now,
+                    exchange=exchange,
+                )
+                for symbol in symbols
+            }
+        except BrokerError as exc:
+            failures.append(f"{exchange}: {exc}")
+            if pinned is not None:
+                break
+            continue
+
+        if pinned is None:
+            reason = (
+                "all strategy symbols passed SMART validation"
+                if exchange == "SMART"
+                else f"SMART bar validation failed; all symbols passed ARCA: {failures[0]}"
+            )
+            _record_market_data_exchange(
+                settings, exchange, reason=reason, now=now
+            )
+        return exchange, bars_by_symbol, quotes_by_symbol
+
+    detail = "; ".join(failures) or "no exchange attempted"
+    raise BrokerError(f"no complete single-source intraday market data: {detail}")
 
 
 def _record_daily_entry(
@@ -816,6 +1000,65 @@ def main(argv: list[str] | None = None) -> int:
             print(broker.server_time().isoformat())
             return 0
 
+        if args.command == "refresh-history":
+            if not settings.readonly or not settings.dry_run:
+                raise BrokerError(
+                    "refresh-history requires IBKR_READONLY=true and IBKR_DRY_RUN=true"
+                )
+            if settings.allow_live_trading:
+                raise BrokerError(
+                    "refresh-history requires IBKR_ALLOW_LIVE_TRADING=false"
+                )
+            broker.server_time()
+            now = datetime.now(timezone.utc)
+            symbols = tuple(dict.fromkeys(item.upper() for item in args.symbols))
+            fetched_counts: dict[str, int] = {}
+            for symbol in symbols:
+                rows = broker.historical_bars_paged(
+                    symbol,
+                    args.duration,
+                    bar_size=args.bar_size,
+                    what_to_show="TRADES",
+                    end_time=now,
+                    page_callback=lambda page, cached_symbol=symbol: save_bars_by_day(
+                        args.data_dir,
+                        cached_symbol,
+                        args.bar_size,
+                        page,
+                        exchange=args.market_data_exchange,
+                    ),
+                    exchange=args.market_data_exchange,
+                )
+                fetched_counts[symbol] = len(rows)
+
+            sessions = broker.historical_market_sessions(
+                "QQQ",
+                # This schedule is only used to validate the newest cached
+                # sessions. Requesting a 730-day schedule as "730 D" is
+                # rejected by IBKR because durations over 365 days must use
+                # year units, and the old history is irrelevant here.
+                num_days=schedule_lookback_days(args.recent_sessions),
+                end_datetime=now,
+            )
+            cached = {
+                symbol: load_bars(args.data_dir, symbol, args.bar_size)
+                for symbol in symbols
+            }
+            validation = validate_recent_cached_sessions(
+                cached,
+                sessions,
+                now=now,
+                recent_sessions=args.recent_sessions,
+            )
+            print(
+                json.dumps(
+                    {"fetched_counts": fetched_counts, "validation": validation},
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return 0
+
         if args.command == "quote":
             print(
                 json.dumps(asdict(broker.quote(args.symbol)), indent=2, sort_keys=True)
@@ -983,15 +1226,14 @@ def main(argv: list[str] | None = None) -> int:
             if not _is_market_hours(now, session):
                 print("market closed: skipping intraday_momentum scan")
                 return 0
-            benchmark_bars = _fresh_historical_bars(
-                broker,
-                settings,
-                strategy.benchmark_symbol,
-                bar_size="5 mins",
-                session_only=True,
-                session=session,
-                now=now,
+            (
+                market_data_exchange,
+                strategy_bars,
+                strategy_quotes,
+            ) = _load_intraday_market_data(
+                broker, settings, strategy, session, now
             )
+            benchmark_bars = strategy_bars[strategy.benchmark_symbol]
 
             current_positions = _parse_position_rows(
                 broker.positions(), strategy.symbols
@@ -1007,16 +1249,8 @@ def main(argv: list[str] | None = None) -> int:
             price_scale_discontinuities: set[str] = set()
 
             for symbol in strategy.symbols:
-                quote = _strategy_quote(broker, settings, symbol)
-                bars = _fresh_historical_bars(
-                    broker,
-                    settings,
-                    symbol,
-                    bar_size="5 mins",
-                    session_only=True,
-                    session=session,
-                    now=now,
-                )
+                quote = strategy_quotes[symbol]
+                bars = strategy_bars[symbol]
                 if _has_price_scale_discontinuity(quote, bars):
                     price_scale_discontinuities.add(symbol)
                 if symbol in current_positions:
@@ -1079,6 +1313,9 @@ def main(argv: list[str] | None = None) -> int:
                         "signal": decision.signal,
                         "score": round(float(decision.meta.get("score", 0.0)), 6),
                         "reason": decision.reason,
+                        "market_data_exchange": market_data_exchange,
+                        "bar_data_exchange": market_data_exchange,
+                        "quote_data_exchange": "SMART",
                     }
                 )
 
@@ -1151,15 +1388,7 @@ def main(argv: list[str] | None = None) -> int:
                             continue
                         quantity = int(float(position_row["position"]))
                         average_cost = float(position_row["avgCost"])
-                        bars = _fresh_historical_bars(
-                            broker,
-                            settings,
-                            symbol,
-                            bar_size="5 mins",
-                            session_only=True,
-                            session=session,
-                            now=now,
-                        )
+                        bars = strategy_bars[symbol]
                         stop_price, take_price = strategy.protective_prices(
                             symbol, average_cost, bars
                         )
@@ -1310,13 +1539,7 @@ def main(argv: list[str] | None = None) -> int:
                     )
                     print(f"entry filled quantity={filled}; daily entry state recorded")
                     if filled_quantity > 0:
-                        bars = _fresh_historical_bars(
-                            broker,
-                            settings,
-                            decision.symbol,
-                            bar_size="5 mins",
-                            session_only=True,
-                        )
+                        bars = strategy_bars[decision.symbol]
                         stop_price, take_price = strategy.protective_prices(
                             decision.symbol, average_fill_price, bars
                         )
@@ -1414,6 +1637,12 @@ def main(argv: list[str] | None = None) -> int:
                     "slippage_bps": cost_model.slippage_bps,
                     "spread_bps": cost_model.spread_bps,
                 },
+                "execution_model": {
+                    "entry": "next_bar_open",
+                    "protective_oca": "intrabar_after_entry_bar",
+                    "ambiguous_stop_take_bar": "protective_stop_first",
+                    "software_exit": "completed_bar_then_next_bar_open",
+                },
                 "validation": {
                     "method": "fixed-parameter chronological walk-forward",
                     "selection_performed": False,
@@ -1424,10 +1653,20 @@ def main(argv: list[str] | None = None) -> int:
                     "step_days": args.step_days,
                     "holdout_days": args.holdout_days,
                     "data_source": "daily cache" if args.reuse_data else "IBKR",
+                    "market_data_exchange": args.market_data_exchange,
                     "data_dir": str(Path(args.data_dir).resolve()),
                 },
             }
             bars_by_symbol: dict[str, list[Bar]] = {}
+            if args.reuse_data:
+                try:
+                    require_market_data_source(
+                        args.data_dir, args.market_data_exchange
+                    )
+                except ValueError as exc:
+                    raise BrokerError(
+                        "historical data source preflight failed: " + str(exc)
+                    ) from exc
             for symbol in strategy.symbols:
                 if args.reuse_data:
                     bars_by_symbol[symbol] = load_bars(
@@ -1439,8 +1678,13 @@ def main(argv: list[str] | None = None) -> int:
                         duration=args.duration,
                         bar_size="5 mins",
                         page_callback=lambda rows, cached_symbol=symbol: save_bars_by_day(
-                            args.data_dir, cached_symbol, "5 mins", rows
+                            args.data_dir,
+                            cached_symbol,
+                            "5 mins",
+                            rows,
+                            exchange=args.market_data_exchange,
                         ),
+                        exchange=args.market_data_exchange,
                     )
             benchmark = strategy.benchmark_symbol
             if args.reuse_data:
@@ -1453,8 +1697,13 @@ def main(argv: list[str] | None = None) -> int:
                     duration=args.duration,
                     bar_size="5 mins",
                     page_callback=lambda rows: save_bars_by_day(
-                        args.data_dir, benchmark, "5 mins", rows
+                        args.data_dir,
+                        benchmark,
+                        "5 mins",
+                        rows,
+                        exchange=args.market_data_exchange,
                     ),
+                    exchange=args.market_data_exchange,
                 )
             missing = [symbol for symbol, bars in bars_by_symbol.items() if not bars]
             if missing:

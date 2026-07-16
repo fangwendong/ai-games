@@ -50,12 +50,33 @@ not bypass the failure by deleting the latest date or shortening the requested
 window. Refresh the affected symbols, check the IBKR trading calendar for an
 early close, and rerun the preflight.
 
+For past dates, use `IbkrBroker.historical_market_sessions()` to obtain the
+regular-session schedule. It calls IBKR's dedicated `reqHistoricalSchedule`
+API with `useRTH=True`. Do not use `market_session()` for historical cache
+validation: that live guard reads contract `liquidHours`, which may omit past
+dates even when valid bars exist. Validate each cached timeline against the
+historical session's open-inclusive, close-exclusive 5-minute grid; this also
+handles early-close days without hard-coding a date.
+
 An online `backtest-momentum` run requests history from IBKR and merges it into
 the cache before this validation. A `--reuse-data` run never downloads data; it
 only validates what is already on disk. Therefore the scheduled post-close
 refresh remains necessary even though the structural preflight is built into
 the command. The production schedule refreshes on Beijing time Tuesday through
 Saturday at 06:30, after the preceding US regular session has closed.
+
+The scheduled job runs a fixed command instead of generating an ad-hoc
+validator:
+
+```bash
+PYTHONPATH=src python -m ibkr_quant_bot.cli refresh-history
+```
+
+Run it with `IBKR_READONLY=true`, `IBKR_DRY_RUN=true`, and
+`IBKR_ALLOW_LIVE_TRADING=false`. An empty HMDS response for one refresh request
+does not by itself invalidate an existing cache. The command keeps previously
+merged bars and then fails closed unless every symbol contains the complete
+latest IBKR historical session and the preceding session.
 
 When reporting a result, always include:
 
@@ -68,6 +89,32 @@ For example, after the 2026-07-13 refresh the preflight should report both
 2026-07-10 and 2026-07-13 with 78 bars for each of the three symbols. This
 example is illustrative; agents must inspect the current cache rather than
 hard-code these dates.
+
+## Live-aligned execution model
+
+The default intraday backtest models the two live exit paths separately:
+
+- broker-side protective stop/take OCA orders may fill intrabar after the
+  entry bar; stop gaps receive the worse opening price and take-profit gaps
+  receive opening price improvement
+- if one five-minute bar reaches both protective prices, the stop fills first
+  because OHLCV does not reveal tick ordering
+- software profit-lock, technical-reversal, and benchmark exits require a
+  completed bar and fill at the next bar open
+- entries fill at the next bar open; SMART routing or dark-pool improvement is
+  not inferable from historical five-minute bars and remains represented only
+  by the configured spread/slippage assumptions
+
+Protective prices are calculated from the modeled entry fill and only the bars
+that were complete when the entry signal fired. Do not use the entry bar's
+full high/low to trigger protection because part of that bar predates the live
+fill. This convention is intentionally conservative when both protective
+levels trade in the same bar and avoids tuning a favorable tick sequence from
+OHLCV data.
+
+Execution-model changes invalidate direct comparisons with reports generated
+under the former all-close-confirmed exit model. Rerun every baseline and
+candidate on the same code revision before comparing parameters.
 
 ## What to measure
 

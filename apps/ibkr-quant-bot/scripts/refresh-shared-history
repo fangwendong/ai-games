@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+set -u -o pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: refresh-shared-history [--duration "2 Y"] [--recent-sessions 2]
+                              [--market-data-exchange SMART|ARCA] SYMBOL...
+
+The caller must load the local IBKR connection environment first. This script
+forces read-only/dry-run safety, downloads one symbol at a time, retries bounded
+request failures, and audits the resulting shared cache.
+EOF
+}
+
+duration="10 D"
+recent_sessions=2
+market_data_exchange=SMART
+symbols=()
+while (($#)); do
+  case "$1" in
+    --duration)
+      duration=${2:?missing duration}
+      shift 2
+      ;;
+    --recent-sessions)
+      recent_sessions=${2:?missing recent session count}
+      shift 2
+      ;;
+    --market-data-exchange)
+      market_data_exchange=${2^^}
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      symbols+=("${1^^}")
+      shift
+      ;;
+  esac
+done
+
+if ((${#symbols[@]} == 0)); then
+  usage >&2
+  exit 2
+fi
+
+if [[ $market_data_exchange != SMART && $market_data_exchange != ARCA ]]; then
+  printf 'unsupported market-data exchange: %s\n' "$market_data_exchange" >&2
+  exit 2
+fi
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+app_dir=$(cd -- "$script_dir/.." && pwd)
+if [[ $market_data_exchange == ARCA ]]; then
+  default_data_dir=/home/fwd/data/ibkr-quant-bot/historical/5-min-rth-arca
+else
+  default_data_dir=/home/fwd/data/ibkr-quant-bot/historical/5-min-rth
+fi
+data_dir=${IBKR_SHARED_HISTORY_DIR:-$default_data_dir}
+max_attempts=${IBKR_HISTORY_MAX_ATTEMPTS:-3}
+retry_delay=${IBKR_HISTORY_RETRY_DELAY_SECONDS:-15}
+
+export IBKR_READONLY=true
+export IBKR_DRY_RUN=true
+export IBKR_ALLOW_LIVE_TRADING=false
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+export PYTHONPATH="$app_dir/src"
+
+mkdir -p "$data_dir"
+failed=()
+for symbol in "${symbols[@]}"; do
+  completed=false
+  for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+    printf 'refreshing %s (attempt %d/%d)\n' "$symbol" "$attempt" "$max_attempts"
+    if nice -n 10 taskset -c 0 python -m ibkr_quant_bot.cli refresh-history \
+      --symbols "$symbol" \
+      --duration "$duration" \
+      --bar-size "5 mins" \
+      --recent-sessions "$recent_sessions" \
+      --market-data-exchange "$market_data_exchange" \
+      --data-dir "$data_dir"; then
+      completed=true
+      break
+    fi
+    if ((attempt < max_attempts)); then
+      sleep "$retry_delay"
+    fi
+  done
+  if [[ $completed != true ]]; then
+    failed+=("$symbol")
+  fi
+done
+
+if ((${#failed[@]})); then
+  printf 'download failed after retries: %s\n' "${failed[*]}" >&2
+  exit 1
+fi
+
+python -m ibkr_quant_bot.history_audit \
+  --symbols "${symbols[@]}" \
+  --bar-size "5 mins" \
+  --recent-sessions "$recent_sessions" \
+  --data-dir "$data_dir"

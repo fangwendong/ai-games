@@ -106,6 +106,57 @@ class BrokerSafetyTest(unittest.TestCase):
         self.assertEqual(30, session.opens_at.minute)
         self.assertEqual(13, session.closes_at.hour)
 
+    def test_historical_market_sessions_use_dedicated_ibkr_schedule(self) -> None:
+        broker = object.__new__(IbkrBroker)
+        contract = object()
+        broker._stock_contract = lambda symbol: contract
+        calls = []
+
+        def historical_schedule(
+            requested_contract, *, numDays, endDateTime, useRTH
+        ):
+            calls.append((requested_contract, numDays, endDateTime, useRTH))
+            return SimpleNamespace(
+                timeZone="US/Eastern",
+                sessions=[
+                    SimpleNamespace(
+                        refDate="20260713",
+                        startDateTime="20260713-09:30:00",
+                        endDateTime="20260713-16:00:00",
+                    ),
+                    SimpleNamespace(
+                        refDate="20260714",
+                        startDateTime="20260714-09:30:00",
+                        endDateTime="20260714-13:00:00",
+                    ),
+                ],
+            )
+
+        broker._ib = SimpleNamespace(reqHistoricalSchedule=historical_schedule)
+        end = datetime(2026, 7, 15, tzinfo=timezone.utc)
+
+        sessions = broker.historical_market_sessions(
+            "QQQ", num_days=10, end_datetime=end
+        )
+
+        self.assertEqual([(contract, 10, end, True)], calls)
+        self.assertEqual(9, sessions[date(2026, 7, 13)].opens_at.hour)
+        self.assertEqual(16, sessions[date(2026, 7, 13)].closes_at.hour)
+        self.assertEqual(13, sessions[date(2026, 7, 14)].closes_at.hour)
+        self.assertEqual("US/Eastern", sessions[date(2026, 7, 14)].opens_at.tzinfo.key)
+
+    def test_historical_market_sessions_fail_closed_on_empty_response(self) -> None:
+        broker = object.__new__(IbkrBroker)
+        broker._stock_contract = lambda symbol: object()
+        broker._ib = SimpleNamespace(
+            reqHistoricalSchedule=lambda *args, **kwargs: SimpleNamespace(
+                timeZone="US/Eastern", sessions=[]
+            )
+        )
+
+        with self.assertRaisesRegex(BrokerError, "no historical sessions"):
+            broker.historical_market_sessions("QQQ", num_days=10)
+
     def test_historical_pagination_moves_end_time_backward_and_deduplicates(
         self,
     ) -> None:
@@ -124,7 +175,14 @@ class BrokerSafetyTest(unittest.TestCase):
             [],
         ]
 
-        def historical(symbol, duration, bar_size, what_to_show, end_time):
+        def historical(
+            symbol,
+            duration,
+            bar_size,
+            what_to_show,
+            end_time,
+            exchange="SMART",
+        ):
             calls.append(end_time)
             return responses.pop(0)
 

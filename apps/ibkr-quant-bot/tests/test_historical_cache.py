@@ -6,11 +6,42 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from ibkr_quant_bot.historical_cache import load_bars, save_bars_by_day
+from ibkr_quant_bot.historical_cache import (
+    load_bars,
+    load_market_data_source,
+    require_market_data_source,
+    save_bars_by_day,
+)
 from ibkr_quant_bot.models import Bar
 
 
 class HistoricalCacheTest(unittest.TestCase):
+    def test_records_and_requires_one_market_data_source(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            bar = Bar(
+                time=datetime(2026, 7, 9, 13, 30, tzinfo=timezone.utc),
+                open=1,
+                high=1,
+                low=1,
+                close=1,
+                volume=1,
+            )
+
+            save_bars_by_day(root, "SOXL", "5 mins", [bar], exchange="ARCA")
+
+            self.assertEqual("ARCA", load_market_data_source(root))
+            self.assertEqual("ARCA", require_market_data_source(root, "ARCA"))
+            with self.assertRaisesRegex(ValueError, "expected SMART, found ARCA"):
+                require_market_data_source(root, "SMART")
+            with self.assertRaisesRegex(ValueError, "cannot write SMART"):
+                save_bars_by_day(root, "QQQ", "5 mins", [bar], exchange="SMART")
+
+    def test_rejects_cache_without_source_metadata(self) -> None:
+        with TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(ValueError, "has no source metadata"):
+                require_market_data_source(temporary, "SMART")
+
     def test_saves_one_file_per_session_day_and_merges_overlaps(self) -> None:
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
