@@ -613,26 +613,24 @@ def _cached_or_snapshot_live_quotes(
 
 
 def _quote_timing_fields(quote: Quote, now: datetime) -> dict[str, object]:
-    age_seconds: float | None = None
+    age_ms: float | None = None
     if quote.observed_at:
         try:
             observed_at = datetime.fromisoformat(quote.observed_at)
             if observed_at.tzinfo is None:
                 observed_at = observed_at.replace(tzinfo=timezone.utc)
-            age_seconds = max(
+            age_ms = max(
                 0.0,
                 (now.astimezone(timezone.utc) - observed_at).total_seconds(),
-            )
+            ) * 1000
         except ValueError:
-            age_seconds = None
+            age_ms = None
     return {
         "quote_market_time": quote.market_time,
         "quote_received_at": quote.received_at,
         "quote_observed_at": quote.observed_at,
         "quote_published_at": quote.published_at,
-        "quote_age_seconds": (
-            None if age_seconds is None else round(age_seconds, 3)
-        ),
+        "quote_age_ms": None if age_ms is None else round(age_ms, 1),
     }
 
 
