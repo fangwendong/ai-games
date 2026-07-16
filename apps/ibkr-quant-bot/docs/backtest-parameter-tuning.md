@@ -90,6 +90,32 @@ For example, after the 2026-07-13 refresh the preflight should report both
 example is illustrative; agents must inspect the current cache rather than
 hard-code these dates.
 
+## Live-aligned execution model
+
+The default intraday backtest models the two live exit paths separately:
+
+- broker-side protective stop/take OCA orders may fill intrabar after the
+  entry bar; stop gaps receive the worse opening price and take-profit gaps
+  receive opening price improvement
+- if one five-minute bar reaches both protective prices, the stop fills first
+  because OHLCV does not reveal tick ordering
+- software profit-lock, technical-reversal, and benchmark exits require a
+  completed bar and fill at the next bar open
+- entries fill at the next bar open; SMART routing or dark-pool improvement is
+  not inferable from historical five-minute bars and remains represented only
+  by the configured spread/slippage assumptions
+
+Protective prices are calculated from the modeled entry fill and only the bars
+that were complete when the entry signal fired. Do not use the entry bar's
+full high/low to trigger protection because part of that bar predates the live
+fill. This convention is intentionally conservative when both protective
+levels trade in the same bar and avoids tuning a favorable tick sequence from
+OHLCV data.
+
+Execution-model changes invalidate direct comparisons with reports generated
+under the former all-close-confirmed exit model. Rerun every baseline and
+candidate on the same code revision before comparing parameters.
+
 ## What to measure
 
 Do not judge a candidate only by raw net return percentage on the walk-forward

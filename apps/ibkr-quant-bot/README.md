@@ -265,6 +265,16 @@ Backtest the same rule with a built-in transaction-cost model:
 ibkr-bot backtest-momentum
 ```
 
+The backtest mirrors the live exit split rather than treating every exit as a
+close-based software decision. Broker-side protective stop and take-profit OCA
+orders are evaluated against each completed bar's high/low after the entry
+bar. Sell limits fill at their limit (or a better gap-open price), while sell
+stops fill at their stop (or a worse gap-open price). If a five-minute bar
+crosses both levels and tick ordering is unavailable, the stop is assumed to
+fill first. Profit-lock, technical, and benchmark exits remain close-confirmed
+and fill at the next bar open. Entry fills also remain next-bar-open estimates,
+so venue-specific SMART price improvement cannot be reconstructed from OHLCV.
+
 The tuning workflow used for this branch is documented in
 [docs/backtest-parameter-tuning.md](docs/backtest-parameter-tuning.md).
 The versioned parameters and change-control rules are documented in

@@ -1637,6 +1637,12 @@ def main(argv: list[str] | None = None) -> int:
                     "slippage_bps": cost_model.slippage_bps,
                     "spread_bps": cost_model.spread_bps,
                 },
+                "execution_model": {
+                    "entry": "next_bar_open",
+                    "protective_oca": "intrabar_after_entry_bar",
+                    "ambiguous_stop_take_bar": "protective_stop_first",
+                    "software_exit": "completed_bar_then_next_bar_open",
+                },
                 "validation": {
                     "method": "fixed-parameter chronological walk-forward",
                     "selection_performed": False,

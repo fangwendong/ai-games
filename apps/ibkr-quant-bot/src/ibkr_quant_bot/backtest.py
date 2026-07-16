@@ -154,6 +154,8 @@ class _OpenPosition:
     entry_time: datetime
     entry_date: date
     entry_commission: float
+    protective_stop_price: float | None = None
+    protective_take_price: float | None = None
 
 
 NEW_YORK = ZoneInfo("America/New_York")
@@ -339,12 +341,47 @@ def _exit_reason_from_decision(decision_meta: dict[str, object]) -> str:
     return "signal"
 
 
+def _protective_prices(
+    strategy: IntradayMomentumStrategy,
+    symbol: str,
+    average_cost: float,
+    bars: list[Bar],
+) -> tuple[float | None, float | None]:
+    protective_prices = getattr(strategy, "protective_prices", None)
+    if not callable(protective_prices):
+        return None, None
+    stop_price, take_price = protective_prices(symbol, average_cost, bars)
+    return round(float(stop_price), 2), round(float(take_price), 2)
+
+
+def _protective_fill(
+    position: _OpenPosition, bar: Bar
+) -> tuple[float, str] | None:
+    """Model the broker-side sell OCA after the entry bar has completed.
+
+    A sell stop gaps down to the bar open, while a sell limit receives opening
+    price improvement. Five-minute OHLC cannot reveal which order fired first
+    when both levels trade in one bar, so the stop wins as the conservative
+    assumption.
+    """
+    stop_price = position.protective_stop_price
+    take_price = position.protective_take_price
+    stop_hit = stop_price is not None and bar.low <= stop_price
+    take_hit = take_price is not None and bar.high >= take_price
+    if stop_hit:
+        return min(bar.open, stop_price), "protective_stop"
+    if take_hit:
+        return max(bar.open, take_price), "protective_take"
+    return None
+
+
 def run_intraday_momentum_backtest(
     bars_by_symbol: dict[str, list[Bar]],
     strategy: IntradayMomentumStrategy | None = None,
     cost_model: BacktestCostModel | None = None,
     initial_capital: float = 1_000.0,
     profit_lock_rule: ProfitLockRule | None = None,
+    simulate_protective_oca: bool = True,
 ) -> BacktestResult:
     strategy = strategy or IntradayMomentumStrategy()
     cost_model = cost_model or BacktestCostModel()
@@ -480,6 +517,22 @@ def run_intraday_momentum_backtest(
                             * raw_entry_price
                             * (cost_model.slippage_bps / 10_000.0)
                         )
+                        signal_bars = _prefix_at(
+                            daily_bars_by_symbol.get(pending_order.symbol, []),
+                            pending_order.signal_time,
+                        )
+                        protective_stop_price: float | None = None
+                        protective_take_price: float | None = None
+                        if simulate_protective_oca:
+                            (
+                                protective_stop_price,
+                                protective_take_price,
+                            ) = _protective_prices(
+                                strategy,
+                                pending_order.symbol,
+                                cost_model.buy_fill(raw_entry_price),
+                                signal_bars,
+                            )
                         open_position = _OpenPosition(
                             symbol=pending_order.symbol,
                             quantity=shares,
@@ -487,9 +540,33 @@ def run_intraday_momentum_backtest(
                             entry_time=current_time,
                             entry_date=_session_date(fill_bar.time),
                             entry_commission=entry_commission,
+                            protective_stop_price=protective_stop_price,
+                            protective_take_price=protective_take_price,
                         )
                         peak_close = max(raw_entry_price, fill_bar.close)
                 pending_order = None
+
+            if (
+                open_position is not None
+                and simulate_protective_oca
+                and current_time > open_position.entry_time
+            ):
+                bar = bars_by_time.get(open_position.symbol, {}).get(current_time)
+                protective_fill = (
+                    _protective_fill(open_position, bar) if bar is not None else None
+                )
+                if protective_fill is not None:
+                    fill_price, reason = protective_fill
+                    close_position(
+                        open_position,
+                        fill_price,
+                        _session_date(bar.time),
+                        reason,
+                    )
+                    open_position = None
+                    pending_exit = None
+                    peak_close = None
+                    day_closed = True
 
             if open_position is not None and pending_exit is None:
                 bars = daily_bars_by_symbol.get(open_position.symbol, [])
