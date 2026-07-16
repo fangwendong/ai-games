@@ -87,6 +87,7 @@ class StreamingIB:
         missing = contract.symbol in self.missing
         ticker = SimpleNamespace(
             time=datetime.now(timezone.utc),
+            rtTime=datetime.now(timezone.utc),
             bid=None if missing else 10.0,
             ask=None if missing else 10.1,
             last=None if missing else 10.05,
@@ -160,7 +161,9 @@ class BrokerSafetyTest(unittest.TestCase):
         with self.assertRaises(StopStreaming):
             broker.stream_live_quotes(
                 ["QQQ", "SOXL", "SOXS"],
-                lambda quotes, market_times, observed_at: updates.append(quotes),
+                lambda quotes, market_times, received_times, observed_at: updates.append(
+                    quotes
+                ),
                 poll_interval_seconds=0.001,
             )
 
