@@ -26,11 +26,13 @@ from ibkr_quant_bot.cli import (
     _has_price_scale_discontinuity,
     _is_market_hours,
     _latest_entry_time,
+    _latest_trade_price_fields,
     _load_intraday_market_data,
     _load_market_data_exchange,
     _marketable_buy_limit_price,
     _market_data_exchange_state_path,
     _orders_state_path,
+    _protective_order_display,
     _quote_timing_fields,
     _record_daily_entry,
     _record_order_state,
@@ -145,8 +147,72 @@ class LiveDataGuardsTest(unittest.TestCase):
 
         self.assertEqual("benchmark", summary["role"])
         self.assertEqual("QQQ", summary["symbol"])
+        self.assertEqual(712.45, summary["latest_trade_price"])
+        self.assertTrue(summary["latest_trade_price_available"])
         self.assertEqual(500.0, summary["quote_age_ms"])
         self.assertNotIn("action", summary)
+
+    def test_latest_trade_price_does_not_mislabel_quote_fallback(self) -> None:
+        fields = _latest_trade_price_fields(
+            Quote("QQQ", bid=10.0, ask=10.2, last=None, close=9.9)
+        )
+
+        self.assertIsNone(fields["latest_trade_price"])
+        self.assertFalse(fields["latest_trade_price_available"])
+
+    def test_protective_order_display_reports_active_prices(self) -> None:
+        now = datetime(2026, 7, 16, 12, 0, tzinfo=NEW_YORK)
+        prefix = f"momentum-{now.date()}-SOXL-protect"
+        stop = SimpleNamespace(
+            order=SimpleNamespace(
+                orderRef=f"{prefix}-stop",
+                orderType="STP",
+                auxPrice=98.5,
+                lmtPrice=0,
+            )
+        )
+        take = SimpleNamespace(
+            order=SimpleNamespace(
+                orderRef=f"{prefix}-take",
+                orderType="LMT",
+                auxPrice=0,
+                lmtPrice=103.75,
+            )
+        )
+
+        class ProtectionBroker:
+            def active_trades_for(self, symbol, action):
+                return [stop, take]
+
+            def protective_oca_is_complete(self, *args, **kwargs):
+                return True
+
+        strategy = _build_momentum_strategy(
+            _build_parser().parse_args(
+                ["intraday-momentum", "--profile", "rotation-hysteresis-v2"]
+            ),
+            Settings(),
+        )
+        bars = [
+            Bar(now - timedelta(minutes=5), 100, 101, 99, 100, 100)
+            for _ in range(30)
+        ]
+
+        display = _protective_order_display(
+            ProtectionBroker(),
+            strategy,
+            "SOXL",
+            {"position": "5", "avgCost": "100"},
+            bars,
+            now,
+        )
+
+        self.assertEqual("holding", display["position_status"])
+        self.assertEqual(0.006, display["stop_loss_pct"])
+        self.assertEqual(0.0375, display["take_profit_pct"])
+        self.assertEqual(98.5, display["active_stop_price"])
+        self.assertEqual(103.75, display["active_take_price"])
+        self.assertEqual("complete", display["protection_status"])
 
     def test_quote_timing_fields_include_market_time_and_age(self) -> None:
         observed = datetime(2026, 7, 16, 14, 0, tzinfo=timezone.utc)

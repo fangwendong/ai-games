@@ -123,9 +123,16 @@ Each symbol in the live polling summary also includes
 do not replace it with a local clock value.
 
 QQQ is emitted as a separate `benchmark_quote` object with `role=benchmark`,
-its reference price, source exchanges, and the same timing fields. It has no
-`action` field because QQQ is a regime input, not an order candidate. SOXL and
-SOXS remain in the strategy decision list.
+its `latest_trade_price` (only when IBKR supplies a valid last trade), reference
+price, source exchanges, and the same timing fields. It has no `action` field
+because QQQ is a regime input, not an order candidate. SOXL and SOXS remain in
+the strategy decision list.
+
+Each SOXL/SOXS decision exposes the latest trade price separately from the
+reference price, plus `position_status`, `strategy_status`, `order_status`, the
+configured stop/take percentages, calculated protection prices for an open
+position, broker-active stop/take prices, and `protection_status`. Never label
+the ask, bid, or prior close as a latest trade when `quote.last` is unavailable.
 
 If the file is stale, the strategy requests a concurrent SMART snapshot with
 no fixed sleep. If that complete fallback group also fails, the strategy fails
