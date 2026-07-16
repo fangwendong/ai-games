@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from json import loads
 from pathlib import Path
 from types import SimpleNamespace
@@ -28,6 +28,7 @@ from ibkr_quant_bot.cli import (
     _marketable_buy_limit_price,
     _market_data_exchange_state_path,
     _orders_state_path,
+    _quote_timing_fields,
     _record_daily_entry,
     _record_order_state,
     _should_flatten,
@@ -125,6 +126,28 @@ def make_bar(age: timedelta) -> Bar:
 
 
 class LiveDataGuardsTest(unittest.TestCase):
+    def test_quote_timing_fields_include_market_time_and_age(self) -> None:
+        observed = datetime(2026, 7, 16, 14, 0, tzinfo=timezone.utc)
+        quote = Quote(
+            "QQQ",
+            bid=10.0,
+            ask=10.1,
+            last=10.05,
+            close=10.0,
+            market_time="2026-07-16T13:59:59.500000+00:00",
+            received_at="2026-07-16T14:00:00+00:00",
+            observed_at=observed.isoformat(),
+            published_at="2026-07-16T14:00:00.500000+00:00",
+        )
+
+        fields = _quote_timing_fields(
+            quote, observed + timedelta(seconds=1.25)
+        )
+
+        self.assertEqual(1.25, fields["quote_age_seconds"])
+        self.assertEqual(quote.market_time, fields["quote_market_time"])
+        self.assertEqual(quote.published_at, fields["quote_published_at"])
+
     def test_backtest_commission_matches_live_calibration(self) -> None:
         args = _build_parser().parse_args(["backtest-momentum"])
 

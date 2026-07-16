@@ -312,6 +312,11 @@ or delayed. For live trading, both quote availability and bar freshness matter.
 
 ### Standalone Bounded Live Quote Cache
 
+For process lifecycle, health checks, upgrades, latency inspection, and reboot
+recovery, use the [live quote cache runbook](ibkr-live-quote-cache.md). The
+behavior summary below explains how this cache participates in live
+market-data safety.
+
 Run one read-only process that subscribes to QQQ, SOXL, and SOXS concurrently:
 
 ```bash

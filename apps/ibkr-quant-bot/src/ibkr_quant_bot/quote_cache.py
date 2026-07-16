@@ -5,7 +5,6 @@ import math
 import os
 import time
 from collections import deque
-from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -84,7 +83,10 @@ class QuoteCacheWriter:
                     "received_at": received_time_value,
                     "observed_at": observed_at.isoformat(),
                     "published_at": None,
-                    **asdict(quote),
+                    "bid": quote.bid,
+                    "ask": quote.ask,
+                    "last": quote.last,
+                    "close": quote.close,
                     "symbol": normalized,
                 }
             )
@@ -179,6 +181,10 @@ def load_fresh_quotes(
             ask=_optional_float(latest.get("ask")),
             last=_optional_float(latest.get("last")),
             close=_optional_float(latest.get("close")),
+            market_time=_optional_string(latest.get("market_time")),
+            received_at=_optional_string(latest.get("received_at")),
+            observed_at=_optional_string(latest.get("observed_at")),
+            published_at=_optional_string(latest.get("published_at")),
         )
         if quote.bid is None and quote.ask is None and quote.last is None:
             raise QuoteCacheError(f"quote cache sample for {symbol} has no live price")
@@ -196,3 +202,10 @@ def _optional_float(value: object) -> float | None:
     if not math.isfinite(number) or number <= 0:
         return None
     return number
+
+
+def _optional_string(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
