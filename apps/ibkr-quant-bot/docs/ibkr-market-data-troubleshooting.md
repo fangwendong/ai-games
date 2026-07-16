@@ -330,6 +330,11 @@ with `IBKR_LIVE_QUOTE_CACHE_PATH`,
 `IBKR_LIVE_QUOTE_CACHE_REFRESH_SECONDS`, and
 `IBKR_LIVE_QUOTE_MAX_SAMPLES_PER_SYMBOL`.
 
+Every sample records `market_time` from the IB ticker and local `observed_at`;
+the file records the atomic publication time as `generated_at`. Operational
+latency can therefore be split into market-to-receive, receive-to-file, and
+market-to-file intervals without exposing account data.
+
 Each scheduled strategy poll reads the newest sample for all three symbols
 without waiting. Every symbol must be present, carry a bid, ask, or last value,
 and be no older than `IBKR_LIVE_QUOTE_CACHE_MAX_AGE_SECONDS` (three seconds by

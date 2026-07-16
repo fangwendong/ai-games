@@ -316,7 +316,9 @@ class IbkrBroker:
     def stream_live_quotes(
         self,
         symbols: Iterable[str],
-        consumer: Callable[[dict[str, Quote], datetime], None],
+        consumer: Callable[
+            [dict[str, Quote], dict[str, datetime | None], datetime], None
+        ],
         *,
         exchange: str = "SMART",
         poll_interval_seconds: float = 0.02,
@@ -356,6 +358,7 @@ class IbkrBroker:
                     raise BrokerError("IBKR live quote stream disconnected")
                 observed_at = datetime.now(timezone.utc)
                 changed: dict[str, Quote] = {}
+                market_times: dict[str, datetime | None] = {}
                 for symbol, ticker in tickers.items():
                     quote = Quote(
                         symbol=symbol,
@@ -375,8 +378,12 @@ class IbkrBroker:
                     )
                     if signature != signatures.get(symbol):
                         changed[symbol] = quote
+                        market_time = getattr(ticker, "time", None)
+                        market_times[symbol] = (
+                            market_time if isinstance(market_time, datetime) else None
+                        )
                         signatures[symbol] = signature
-                consumer(changed, observed_at)
+                consumer(changed, market_times, observed_at)
         finally:
             for contract in subscribed:
                 try:
