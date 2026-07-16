@@ -144,7 +144,7 @@ class LiveDataGuardsTest(unittest.TestCase):
             quote, observed + timedelta(seconds=1.25)
         )
 
-        self.assertEqual(1.25, fields["quote_age_seconds"])
+        self.assertEqual(1250.0, fields["quote_age_ms"])
         self.assertEqual(quote.market_time, fields["quote_market_time"])
         self.assertEqual(quote.published_at, fields["quote_published_at"])
 

@@ -95,12 +95,12 @@ payload = json.loads(path.read_text())
 now = datetime.now(timezone.utc)
 generated = datetime.fromisoformat(payload['generated_at'])
 print(f"source={payload['source']}")
-print(f"file_age_seconds={(now - generated).total_seconds():.3f}")
+print(f"file_age_ms={(now - generated).total_seconds() * 1000:.1f}")
 for symbol, rows in payload['symbols'].items():
     observed = datetime.fromisoformat(rows[-1]['observed_at'])
     print(
         f"{symbol}: samples={len(rows)} "
-        f"latest_age_seconds={(now - observed).total_seconds():.3f}"
+        f"latest_age_ms={(now - observed).total_seconds() * 1000:.1f}"
     )
 PY
 ```
@@ -117,7 +117,7 @@ Healthy during an active market-data session means:
 
 Each symbol in the live polling summary also includes
 `quote_market_time`, `quote_received_at`, `quote_observed_at`,
-`quote_published_at`, and `quote_age_seconds`. A snapshot fallback can report
+`quote_published_at`, and `quote_age_ms`. A snapshot fallback can report
 `quote_market_time=null` when IBKR supplies no exchange last-trade timestamp;
 do not replace it with a local clock value.
 
