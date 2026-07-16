@@ -636,6 +636,22 @@ def _quote_timing_fields(quote: Quote, now: datetime) -> dict[str, object]:
     }
 
 
+def _latest_trade_price_fields(quote: Quote) -> dict[str, object]:
+    try:
+        latest = float(quote.last) if quote.last is not None else None
+    except (TypeError, ValueError):
+        latest = None
+    if latest is None or not math.isfinite(latest) or latest <= 0:
+        return {
+            "latest_trade_price": None,
+            "latest_trade_price_available": False,
+        }
+    return {
+        "latest_trade_price": round(latest, 4),
+        "latest_trade_price_available": True,
+    }
+
+
 def _benchmark_quote_summary(
     symbol: str,
     quote: Quote,
@@ -646,11 +662,69 @@ def _benchmark_quote_summary(
         "role": "benchmark",
         "symbol": symbol,
         "reference_price": round(quote.reference_price, 2),
+        **_latest_trade_price_fields(quote),
         "market_data_exchange": market_data_exchange,
         "bar_data_exchange": market_data_exchange,
         "quote_data_exchange": "SMART",
         **_quote_timing_fields(quote, now),
     }
+
+
+def _protective_order_display(
+    broker: IbkrBroker,
+    strategy: IntradayMomentumStrategy | SemiconductorRotationStrategy,
+    symbol: str,
+    position_row: dict[str, str] | None,
+    bars: list[Bar],
+    now: datetime,
+) -> dict[str, object]:
+    display: dict[str, object] = {
+        "position_status": "holding" if position_row is not None else "flat",
+        "stop_loss_pct": strategy.stop_loss_pct_for(symbol),
+        "take_profit_pct": strategy.take_profit_pct_for(symbol),
+        "calculated_stop_price": None,
+        "calculated_take_price": None,
+        "active_stop_price": None,
+        "active_take_price": None,
+        "protection_status": "not_applicable",
+    }
+    if position_row is None:
+        return display
+
+    quantity = int(float(position_row["position"]))
+    average_cost = float(position_row["avgCost"])
+    stop_price, take_price = strategy.protective_prices(
+        symbol, average_cost, bars
+    )
+    display["calculated_stop_price"] = round(stop_price, 4)
+    display["calculated_take_price"] = round(take_price, 4)
+
+    order_ref_prefix = f"momentum-{now.date()}-{symbol}-protect"
+    matched = []
+    for trade in broker.active_trades_for(symbol, "SELL"):
+        order = getattr(trade, "order", None)
+        order_ref = str(getattr(order, "orderRef", "") or "")
+        if order_ref.startswith(order_ref_prefix):
+            matched.append(trade)
+            order_type = str(getattr(order, "orderType", "") or "").upper()
+            if order_type == "STP":
+                value = float(getattr(order, "auxPrice", 0) or 0)
+                if value > 0:
+                    display["active_stop_price"] = round(value, 4)
+            elif order_type == "LMT":
+                value = float(getattr(order, "lmtPrice", 0) or 0)
+                if value > 0:
+                    display["active_take_price"] = round(value, 4)
+
+    if broker.protective_oca_is_complete(
+        symbol, quantity, order_ref_prefix=order_ref_prefix
+    ):
+        display["protection_status"] = "complete"
+    elif matched:
+        display["protection_status"] = "incomplete"
+    else:
+        display["protection_status"] = "missing"
+    return display
 
 
 def _json_safe(value):
@@ -1643,17 +1717,56 @@ def main(argv: list[str] | None = None) -> int:
 
                 decisions[symbol] = decision
                 bar_count = len(bars)
+                position_row = current_positions.get(symbol)
+                protection_display = _protective_order_display(
+                    broker,
+                    strategy,
+                    symbol,
+                    position_row,
+                    bars,
+                    now,
+                )
+                if position_row is not None:
+                    strategy_status = (
+                        "exit_candidate"
+                        if decision.signal and decision.action == "SELL"
+                        else "holding"
+                    )
+                    order_status = (
+                        "exit_candidate_not_submitted_yet"
+                        if strategy_status == "exit_candidate"
+                        else "protective_orders_active"
+                        if protection_display["protection_status"] == "complete"
+                        else "protection_requires_attention"
+                    )
+                else:
+                    strategy_status = (
+                        "entry_candidate"
+                        if decision.signal and decision.action == "BUY"
+                        else "flat_no_signal"
+                    )
+                    order_status = (
+                        "entry_candidate_not_submitted_yet"
+                        if strategy_status == "entry_candidate"
+                        else "no_order_action"
+                    )
                 scan_rows.append(
                     {
                         "symbol": symbol,
                         "action": decision.action,
                         "entry_status": (
+                            "position_open"
+                            if position_row is not None
+                            else
                             "entry_candidate"
                             if decision.signal and decision.action == "BUY"
                             else "not_entered"
                         ),
+                        "strategy_status": strategy_status,
+                        "order_status": order_status,
                         "quantity": decision.quantity,
                         "reference_price": round(decision.reference_price, 2),
+                        **_latest_trade_price_fields(quote),
                         "limit_price": None
                         if decision.limit_price is None
                         else round(decision.limit_price, 2),
@@ -1681,6 +1794,7 @@ def main(argv: list[str] | None = None) -> int:
                         "market_data_exchange": market_data_exchange,
                         "bar_data_exchange": market_data_exchange,
                         "quote_data_exchange": "SMART",
+                        **protection_display,
                         **_quote_timing_fields(quote, now),
                     }
                 )
@@ -1696,8 +1810,20 @@ def main(argv: list[str] | None = None) -> int:
                                     "action",
                                     "signal",
                                     "entry_status",
+                                    "strategy_status",
+                                    "order_status",
+                                    "position_status",
+                                    "latest_trade_price",
+                                    "latest_trade_price_available",
                                     "fast_ema",
                                     "slow_ema",
+                                    "stop_loss_pct",
+                                    "take_profit_pct",
+                                    "calculated_stop_price",
+                                    "calculated_take_price",
+                                    "active_stop_price",
+                                    "active_take_price",
+                                    "protection_status",
                                     "bar_count",
                                     "bars_required",
                                     "bars_remaining",
