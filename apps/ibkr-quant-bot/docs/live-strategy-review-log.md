@@ -8,6 +8,10 @@ unrelated holdings.
 All times are America/New_York unless stated otherwise. Dollar PnL is rounded
 to cents. "Net PnL" means broker-reported realized PnL after reported
 commissions for the strategy round trip; it is not account-wide PnL.
+"Net return" is net PnL divided by the actual filled entry notional. This
+trade-level denominator is reproducible without exposing account equity and
+does not assume that unused account cash was strategy capital. A session with
+no entry has no entry-notional denominator and is reported as `N/A`.
 
 ## Evidence Hierarchy
 
@@ -26,17 +30,19 @@ sanitized fields used below.
 
 ## Session Summary
 
-| Session | Profile | Bar / execution source | Result | Exit | Net PnL |
-|---|---|---|---|---|---:|
-| 2026-07-10 | V1-compatible | SMART / SMART | SOXL round trip | Software exit | +$1.43 |
-| 2026-07-13 | V1-compatible | SMART / SMART | SOXS round trip | Mandatory 15:50 flatten | +$23.61 |
-| 2026-07-14 | `rotation-hysteresis-v2` | SMART / none | No entry | No signal before cutoff | $0.00 |
-| 2026-07-15 | `rotation-hysteresis-v2` | ARCA / SMART | SOXS round trip | Protective take | +$146.30 |
+| Session | Profile | Bar / execution source | Result | Exit | Net PnL | Net return |
+|---|---|---|---|---|---:|---:|
+| 2026-07-10 | V1-compatible | SMART / SMART | SOXL round trip | Software exit | +$1.43 | +0.38% |
+| 2026-07-13 | V1-compatible | SMART / SMART | SOXS round trip | Mandatory 15:50 flatten | +$23.61 | +0.59% |
+| 2026-07-14 | `rotation-hysteresis-v2` | SMART / none | No entry | No signal before cutoff | $0.00 | N/A |
+| 2026-07-15 | `rotation-hysteresis-v2` | ARCA / SMART | SOXS round trip | Protective take | +$146.30 | +3.70% |
 
 Across these four sessions, the strategy closed three attributable round
-trips for approximately $171.34 net realized PnL. All three were profitable,
-but three trades are far too few to estimate a reliable win rate or expected
-return.
+trips for approximately $171.34 net realized PnL, or +2.06% of the three
+filled entry notionals pooled together. This pooled rate is descriptive and
+is not an account return or a compounded portfolio return. All three trades
+were profitable, but three trades are far too few to estimate a reliable win
+rate or expected return.
 
 The July 10 and July 13 entry journals predate persistence of an explicit
 `strategy_version` field. The repository deployment timeline identifies them
@@ -201,7 +207,7 @@ Signals considered and rejected:
 Entry time, symbol, quantity, average fill, and reason:
 Protective stop/take created:
 Exit time, quantity, average fill, and reason:
-Gross PnL, commissions, and broker net realized PnL:
+Gross PnL, commissions, broker net realized PnL, and net return on entry notional:
 End-of-session position and open-order state:
 Same-source replay result and live/replay difference:
 Operational anomalies and follow-up:
