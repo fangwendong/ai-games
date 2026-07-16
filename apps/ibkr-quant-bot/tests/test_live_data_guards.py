@@ -37,6 +37,7 @@ from ibkr_quant_bot.cli import (
 )
 from ibkr_quant_bot.config import Settings
 from ibkr_quant_bot.models import Bar, MarketSession, Quote, TradeRequest
+from ibkr_quant_bot.quote_cache import QuoteCacheWriter
 
 
 class FakeBroker:
@@ -74,7 +75,7 @@ class ExchangeBroker:
         self.quote_missing = quote_missing or set()
         self.bar_calls: list[tuple[str, str]] = []
         self.quote_calls: list[tuple[str, str]] = []
-        self.quote_group_calls: list[tuple[tuple[str, ...], str, float, int]] = []
+        self.quote_group_calls: list[tuple[tuple[str, ...], str]] = []
 
     def historical_bars(
         self,
@@ -104,18 +105,14 @@ class ExchangeBroker:
             raise BrokerError(f"live quote unavailable for {symbol}")
         return Quote(symbol, bid=10.0, ask=10.1, last=10.05, close=10.0)
 
-    def live_quotes(
+    def live_quote_snapshots(
         self,
         symbols,
         *,
         exchange: str = "SMART",
-        window_seconds: float = 3.0,
-        max_samples_per_symbol: int = 100,
     ) -> dict[str, Quote]:
         normalized = tuple(symbols)
-        self.quote_group_calls.append(
-            (normalized, exchange, window_seconds, max_samples_per_symbol)
-        )
+        self.quote_group_calls.append((normalized, exchange))
         return {
             symbol: self.live_quote(symbol, exchange=exchange)
             for symbol in normalized
@@ -391,9 +388,41 @@ class LiveDataGuardsTest(unittest.TestCase):
             self.assertTrue(_market_data_exchange_state_path(settings, now).exists())
             self.assertNotIn("ARCA", {value for value, _ in broker.bar_calls})
             self.assertEqual(
-                [(("QQQ", "SOXL", "SOXS"), "SMART", 3.0, 100)],
+                [(("QQQ", "SOXL", "SOXS"), "SMART")],
                 broker.quote_group_calls,
             )
+
+    def test_intraday_market_data_prefers_fresh_quote_cache(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            settings = Settings(trading_mode="live", state_dir=tmpdir)
+            symbols = ("QQQ", "SOXL", "SOXS")
+            writer = QuoteCacheWriter(
+                Path(tmpdir) / "live-quotes.json", symbols
+            )
+            writer.update(
+                {
+                    symbol: Quote(symbol, bid=10.0, ask=10.1, last=10.05, close=10.0)
+                    for symbol in symbols
+                },
+                force=True,
+            )
+            strategy = _build_momentum_strategy(
+                _build_parser().parse_args(["intraday-momentum"]), settings
+            )
+            now = datetime(2026, 7, 15, 12, 0, tzinfo=NEW_YORK)
+            session = MarketSession(
+                now.date(),
+                now.replace(hour=9, minute=30),
+                now.replace(hour=16, minute=0),
+            )
+            broker = ExchangeBroker()
+
+            _, _, quotes = _load_intraday_market_data(
+                broker, settings, strategy, session, now
+            )
+
+            self.assertEqual(set(symbols), set(quotes))
+            self.assertEqual([], broker.quote_group_calls)
 
     def test_intraday_market_data_falls_back_as_one_group_and_stays_pinned(
         self,
