@@ -29,6 +29,10 @@ class Quote:
     ask: float | None
     last: float | None
     close: float | None
+    market_time: str | None = None
+    received_at: str | None = None
+    observed_at: str | None = None
+    published_at: str | None = None
 
     @property
     def reference_price(self) -> float:

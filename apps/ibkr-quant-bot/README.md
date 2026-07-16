@@ -72,6 +72,9 @@ For a logged-in live IB Gateway, the common API port is `4001`. Keep `IBKR_READO
 The local IBC startup and login process is documented in [docs/ibc-gateway-startup.md](docs/ibc-gateway-startup.md).
 The scheduled process, port, and authenticated API health checks are documented
 in [docs/ibkr-api-heartbeat.md](docs/ibkr-api-heartbeat.md).
+The standalone bounded SMART subscription process, atomic quote cache, health
+checks, restart procedure, latency fields, and reboot recovery are documented
+in [docs/ibkr-live-quote-cache.md](docs/ibkr-live-quote-cache.md).
 If quotes unexpectedly fall back to delayed data or the live strategy reports
 that live quotes are unavailable, use
 [docs/ibkr-market-data-troubleshooting.md](docs/ibkr-market-data-troubleshooting.md).

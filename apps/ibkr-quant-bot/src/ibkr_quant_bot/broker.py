@@ -28,6 +28,14 @@ def _clean_number(value: Any) -> float | None:
     return number
 
 
+def _datetime_iso(value: Any) -> str | None:
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat()
+
+
 class IbkrBroker:
     BALANCE_TAGS = (
         "NetLiquidation",
@@ -294,12 +302,16 @@ class IbkrBroker:
         if len(tickers) != len(normalized_symbols):
             raise BrokerError("IBKR returned an incomplete live quote snapshot group")
         for symbol, ticker in zip(normalized_symbols, tickers, strict=True):
+            observed_at = datetime.now(timezone.utc).isoformat()
             quote = Quote(
                 symbol=symbol,
                 bid=_clean_number(ticker.bid),
                 ask=_clean_number(ticker.ask),
                 last=_clean_number(ticker.last),
                 close=_clean_number(ticker.close),
+                market_time=_datetime_iso(getattr(ticker, "rtTime", None)),
+                received_at=_datetime_iso(getattr(ticker, "time", None)),
+                observed_at=observed_at,
             )
             if quote.bid is None and quote.ask is None and quote.last is None:
                 missing.append(symbol)

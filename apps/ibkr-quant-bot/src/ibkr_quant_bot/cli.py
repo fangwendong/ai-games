@@ -612,6 +612,30 @@ def _cached_or_snapshot_live_quotes(
         return broker.live_quote_snapshots(symbols, exchange="SMART")
 
 
+def _quote_timing_fields(quote: Quote, now: datetime) -> dict[str, object]:
+    age_seconds: float | None = None
+    if quote.observed_at:
+        try:
+            observed_at = datetime.fromisoformat(quote.observed_at)
+            if observed_at.tzinfo is None:
+                observed_at = observed_at.replace(tzinfo=timezone.utc)
+            age_seconds = max(
+                0.0,
+                (now.astimezone(timezone.utc) - observed_at).total_seconds(),
+            )
+        except ValueError:
+            age_seconds = None
+    return {
+        "quote_market_time": quote.market_time,
+        "quote_received_at": quote.received_at,
+        "quote_observed_at": quote.observed_at,
+        "quote_published_at": quote.published_at,
+        "quote_age_seconds": (
+            None if age_seconds is None else round(age_seconds, 3)
+        ),
+    }
+
+
 def _json_safe(value):
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
@@ -1428,6 +1452,7 @@ def main(argv: list[str] | None = None) -> int:
                         "market_data_exchange": market_data_exchange,
                         "bar_data_exchange": market_data_exchange,
                         "quote_data_exchange": "SMART",
+                        **_quote_timing_fields(quote, now),
                     }
                 )
 
