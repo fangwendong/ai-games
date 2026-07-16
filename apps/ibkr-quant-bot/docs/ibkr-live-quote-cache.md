@@ -4,6 +4,11 @@ This runbook covers the standalone SMART quote subscription used by the live
 rotation strategy. The process maintains a bounded local cache for QQQ, SOXL,
 and SOXS. It is market-data-only and must never run with trading permission.
 
+The session-calendar and completed-bar producer is a separate process; see
+[ibkr-live-context-cache.md](ibkr-live-context-cache.md). Keeping the two
+services separate prevents a historical-data refresh from blocking the
+real-time quote event loop.
+
 Do not put account IDs, credentials, positions, orders, or raw account output
 in this document or in quote-cache diagnostics.
 

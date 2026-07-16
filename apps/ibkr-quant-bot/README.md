@@ -75,6 +75,10 @@ in [docs/ibkr-api-heartbeat.md](docs/ibkr-api-heartbeat.md).
 The standalone bounded SMART subscription process, atomic quote cache, health
 checks, restart procedure, latency fields, and reboot recovery are documented
 in [docs/ibkr-live-quote-cache.md](docs/ibkr-live-quote-cache.md).
+The separate read-only current-session calendar and completed 5-minute bar
+cache, including its direct-query fallback and maintenance procedure, is
+documented in
+[docs/ibkr-live-context-cache.md](docs/ibkr-live-context-cache.md).
 If quotes unexpectedly fall back to delayed data or the live strategy reports
 that live quotes are unavailable, use
 [docs/ibkr-market-data-troubleshooting.md](docs/ibkr-market-data-troubleshooting.md).
@@ -204,6 +208,12 @@ In live trading mode, the intraday scanners refuse delayed market data:
 - Entry, technical-exit, benchmark-regime, and protective-price calculations
   use completed 5-minute bars only. A bar whose five-minute interval has not
   ended is excluded so live decisions match the backtest close-bar convention.
+- Live execution first reads an atomically published, complete SMART cache for
+  the current session calendar and completed QQQ/SOXL/SOXS 5-minute bars. The
+  read-only producer refreshes bars only when a new five-minute bucket is
+  available and resolves the calendar once per New York date. A missing,
+  stale, partial, wrong-date, or wrong-source cache falls through immediately
+  to the original IBKR requests; it never weakens freshness guards.
 - Strategy bars are restricted to the current New York regular session, so the
   opening signal cannot inherit the prior day's EMA or VWAP history.
 - A large mismatch between the prior close and current-session prices blocks
