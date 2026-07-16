@@ -27,6 +27,7 @@ from ibkr_quant_bot.cli import (
     _is_market_hours,
     _latest_entry_time,
     _latest_trade_price_fields,
+    _live_context_cache_path,
     _load_intraday_market_data,
     _load_market_data_exchange,
     _marketable_buy_limit_price,
@@ -44,6 +45,7 @@ from ibkr_quant_bot.cli import (
 from ibkr_quant_bot.config import Settings
 from ibkr_quant_bot.models import Bar, MarketSession, Quote, TradeRequest
 from ibkr_quant_bot.quote_cache import QuoteCacheWriter
+from ibkr_quant_bot.market_context_cache import write_market_context_cache
 
 
 class FakeBroker:
@@ -131,6 +133,58 @@ def make_bar(age: timedelta) -> Bar:
 
 
 class LiveDataGuardsTest(unittest.TestCase):
+    def test_intraday_market_data_uses_complete_fresh_bar_cache(self) -> None:
+        now = datetime(2026, 7, 15, 12, 1, tzinfo=NEW_YORK)
+        session = MarketSession(
+            now.date(),
+            datetime(2026, 7, 15, 9, 30, tzinfo=NEW_YORK),
+            datetime(2026, 7, 15, 16, 0, tzinfo=NEW_YORK),
+        )
+        symbols = ("QQQ", "SOXL", "SOXS")
+        bars = {
+            symbol: [
+                Bar(
+                    datetime(2026, 7, 15, 11, 55, tzinfo=NEW_YORK),
+                    10,
+                    10.2,
+                    9.9,
+                    10.1,
+                    100,
+                )
+            ]
+            for symbol in symbols
+        }
+        broker = ExchangeBroker()
+        with TemporaryDirectory() as temporary:
+            settings = Settings(
+                trading_mode="live",
+                state_dir=temporary,
+                live_context_cache_max_age_seconds=420,
+            )
+            write_market_context_cache(
+                _live_context_cache_path(settings),
+                session_date=now.date(),
+                session=session,
+                bars_by_symbol=bars,
+                source="SMART",
+                bar_size="5 mins",
+                generated_at=now.astimezone(timezone.utc),
+            )
+            strategy = _build_momentum_strategy(
+                _build_parser().parse_args(
+                    ["intraday-momentum", "--profile", "rotation-hysteresis-v2"]
+                ),
+                settings,
+            )
+
+            exchange, loaded, _ = _load_intraday_market_data(
+                broker, settings, strategy, session, now
+            )
+
+        self.assertEqual("SMART", exchange)
+        self.assertEqual(bars, loaded)
+        self.assertEqual([], broker.bar_calls)
+
     def test_benchmark_quote_summary_exposes_qqq_without_order_action(self) -> None:
         now = datetime(2026, 7, 16, 14, 0, 1, tzinfo=timezone.utc)
         quote = Quote(

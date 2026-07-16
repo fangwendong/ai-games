@@ -27,6 +27,12 @@ from .historical_cache import (
 )
 from .history_refresh import schedule_lookback_days, validate_recent_cached_sessions
 from .models import Bar, MarketSession, Quote, StrategyDecision, TradeRequest
+from .market_context_cache import (
+    MarketContextCacheError,
+    load_cached_market_session,
+    load_fresh_cached_bars,
+    write_market_context_cache,
+)
 from .quote_cache import QuoteCacheError, QuoteCacheWriter, load_fresh_quotes
 from .risk import RiskManager
 from .strategy import (
@@ -128,6 +134,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "--symbols", nargs="+", default=["QQQ", "SOXL", "SOXS"]
     )
     stream_quotes.add_argument("--cache-path", default=None)
+
+    cache_context = subparsers.add_parser(
+        "cache-live-context",
+        help="precompute the SMART session calendar and completed 5-minute bars",
+    )
+    cache_context.add_argument(
+        "--symbols", nargs="+", default=["QQQ", "SOXL", "SOXS"]
+    )
+    cache_context.add_argument("--cache-path", default=None)
 
     subparsers.add_parser("account", help="show account summary")
     subparsers.add_parser(
@@ -505,6 +520,29 @@ def _fresh_historical_bars(
         what_to_show=what_to_show,
         exchange=exchange,
     )
+    return _validate_historical_bars(
+        bars,
+        settings,
+        symbol,
+        bar_size=bar_size,
+        session_only=session_only,
+        completed_only=completed_only,
+        session=session,
+        now=now,
+    )
+
+
+def _validate_historical_bars(
+    bars: list[Bar],
+    settings: Settings,
+    symbol: str,
+    *,
+    bar_size: str,
+    session_only: bool,
+    completed_only: bool,
+    session: MarketSession | None,
+    now: datetime | None,
+) -> list[Bar]:
     now = now or datetime.now(NEW_YORK)
     if session_only:
         session_open = session.opens_at if session is not None else None
@@ -591,6 +629,36 @@ def _live_quote_cache_path(settings: Settings) -> Path:
     if settings.live_quote_cache_path:
         return Path(settings.live_quote_cache_path).expanduser()
     return Path(settings.state_dir).expanduser() / "live-quotes.json"
+
+
+def _live_context_cache_path(settings: Settings) -> Path:
+    if settings.live_context_cache_path:
+        return Path(settings.live_context_cache_path).expanduser()
+    return Path(settings.state_dir).expanduser() / "live-context.json"
+
+
+def _cached_or_broker_market_session(
+    broker: IbkrBroker,
+    settings: Settings,
+    symbol: str,
+    now: datetime,
+) -> MarketSession | None:
+    if settings.is_live:
+        try:
+            session = load_cached_market_session(
+                _live_context_cache_path(settings),
+                session_date=now.date(),
+                max_age_seconds=settings.live_context_cache_max_age_seconds,
+                now=now,
+            )
+            print("market_session_source=cache", file=sys.stderr)
+            return session
+        except MarketContextCacheError as exc:
+            print(
+                f"market_session_source=broker cache_reason={exc}",
+                file=sys.stderr,
+            )
+    return broker.market_session(symbol, now.date())
 
 
 def _cached_or_snapshot_live_quotes(
@@ -892,20 +960,53 @@ def _load_intraday_market_data(
     failures: list[str] = []
     for exchange in exchanges:
         try:
-            bars_by_symbol = {
-                symbol: _fresh_historical_bars(
-                    broker,
-                    settings,
-                    symbol,
-                    bar_size="5 mins",
-                    session_only=True,
-                    completed_only=True,
-                    session=session,
-                    now=now,
-                    exchange=exchange,
-                )
-                for symbol in symbols
-            }
+            cached_bars = None
+            if settings.is_live and exchange == "SMART":
+                try:
+                    cached_bars = load_fresh_cached_bars(
+                        _live_context_cache_path(settings),
+                        symbols,
+                        session_date=now.date(),
+                        source=exchange,
+                        bar_size="5 mins",
+                        max_age_seconds=settings.live_context_cache_max_age_seconds,
+                        now=now,
+                    )
+                    print("live_bar_source=cache", file=sys.stderr)
+                except MarketContextCacheError as exc:
+                    print(
+                        f"live_bar_source=broker cache_reason={exc}",
+                        file=sys.stderr,
+                    )
+            if cached_bars is not None:
+                bars_by_symbol = {
+                    symbol: _validate_historical_bars(
+                        cached_bars[symbol],
+                        settings,
+                        symbol,
+                        bar_size="5 mins",
+                        session_only=True,
+                        completed_only=True,
+                        session=session,
+                        now=now,
+                    )
+                    for symbol in symbols
+                }
+            else:
+                bars_by_symbol = {
+                    symbol: _fresh_historical_bars(
+                        broker,
+                        settings,
+                        symbol,
+                        bar_size="5 mins",
+                        session_only=True,
+                        completed_only=True,
+                        session=session,
+                        now=now,
+                        exchange=exchange,
+                    )
+                    for symbol in symbols
+                }
         except BrokerError as exc:
             failures.append(f"{exchange}: {exc}")
             if pinned is not None:
@@ -1391,6 +1492,101 @@ def _run_live_quote_cache(settings: Settings, args: argparse.Namespace) -> int:
             return 0
 
 
+def _run_live_context_cache(settings: Settings, args: argparse.Namespace) -> int:
+    if not settings.readonly or not settings.dry_run:
+        raise BrokerError(
+            "cache-live-context requires IBKR_READONLY=true and IBKR_DRY_RUN=true"
+        )
+    if settings.allow_live_trading:
+        raise BrokerError(
+            "cache-live-context requires IBKR_ALLOW_LIVE_TRADING=false"
+        )
+    symbols = tuple(
+        dict.fromkeys(item.strip().upper() for item in args.symbols if item.strip())
+    )
+    if not symbols:
+        raise ValueError("cache-live-context requires at least one symbol")
+    cache_path = (
+        Path(args.cache_path).expanduser()
+        if args.cache_path
+        else _live_context_cache_path(settings)
+    )
+    last_refresh_bucket: tuple[object, ...] | None = None
+    cached_session_date = None
+    cached_session: MarketSession | None = None
+    while True:
+        broker = IbkrBroker(settings)
+        try:
+            broker.connect()
+            while True:
+                now = datetime.now(NEW_YORK)
+                refresh_bucket = (
+                    now.date(),
+                    now.hour,
+                    now.minute // 5,
+                )
+                if refresh_bucket != last_refresh_bucket:
+                    if cached_session_date != now.date():
+                        cached_session = broker.market_session(symbols[0], now.date())
+                        cached_session_date = now.date()
+                    session = cached_session
+                    bars_by_symbol: dict[str, list[Bar]] = {}
+                    if session is not None and _is_market_hours(now, session):
+                        bars_by_symbol = {
+                            symbol: _fresh_historical_bars(
+                                broker,
+                                settings,
+                                symbol,
+                                bar_size="5 mins",
+                                session_only=True,
+                                completed_only=True,
+                                session=session,
+                                now=now,
+                                exchange="SMART",
+                            )
+                            for symbol in symbols
+                        }
+                    write_market_context_cache(
+                        cache_path,
+                        session_date=now.date(),
+                        session=session,
+                        bars_by_symbol=bars_by_symbol,
+                        source="SMART",
+                        bar_size="5 mins",
+                    )
+                    last_refresh_bucket = refresh_bucket
+                    print(
+                        json.dumps(
+                            {
+                                "bar_counts": {
+                                    symbol: len(bars_by_symbol.get(symbol, []))
+                                    for symbol in symbols
+                                },
+                                "cache_path": str(cache_path),
+                                "session_date": now.date().isoformat(),
+                                "source": "SMART",
+                            },
+                            sort_keys=True,
+                        ),
+                        flush=True,
+                    )
+                blocking_sleep(1)
+        except KeyboardInterrupt:
+            return 0
+        except (BrokerError, ConnectionError, TimeoutError, OSError) as exc:
+            print(
+                f"live context cache reconnecting after {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+        finally:
+            broker.disconnect()
+        try:
+            blocking_sleep(5)
+        except KeyboardInterrupt:
+            return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     settings = load_settings()
@@ -1400,6 +1596,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "stream-live-quotes":
         return _run_live_quote_cache(settings, args)
+
+    if args.command == "cache-live-context":
+        return _run_live_context_cache(settings, args)
 
     broker = None
     if not (args.command == "backtest-momentum" and args.reuse_data):
@@ -1628,7 +1827,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "intraday-momentum":
             strategy = _build_momentum_strategy(args, settings)
             now = datetime.now(NEW_YORK)
-            session = broker.market_session(strategy.benchmark_symbol, now.date())
+            session = _cached_or_broker_market_session(
+                broker, settings, strategy.benchmark_symbol, now
+            )
             if session is None:
                 print("exchange holiday: skipping intraday_momentum scan")
                 return 0
