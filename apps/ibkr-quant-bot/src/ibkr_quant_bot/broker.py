@@ -317,7 +317,13 @@ class IbkrBroker:
         self,
         symbols: Iterable[str],
         consumer: Callable[
-            [dict[str, Quote], dict[str, datetime | None], datetime], None
+            [
+                dict[str, Quote],
+                dict[str, datetime | None],
+                dict[str, datetime | None],
+                datetime,
+            ],
+            None,
         ],
         *,
         exchange: str = "SMART",
@@ -348,7 +354,7 @@ class IbkrBroker:
         try:
             for symbol, contract in contracts.items():
                 tickers[symbol] = self._ib.reqMktData(
-                    contract, "", snapshot=False, regulatorySnapshot=False
+                    contract, "233", snapshot=False, regulatorySnapshot=False
                 )
                 subscribed.append(contract)
             while True:
@@ -359,6 +365,7 @@ class IbkrBroker:
                 observed_at = datetime.now(timezone.utc)
                 changed: dict[str, Quote] = {}
                 market_times: dict[str, datetime | None] = {}
+                received_times: dict[str, datetime | None] = {}
                 for symbol, ticker in tickers.items():
                     quote = Quote(
                         symbol=symbol,
@@ -378,12 +385,18 @@ class IbkrBroker:
                     )
                     if signature != signatures.get(symbol):
                         changed[symbol] = quote
-                        market_time = getattr(ticker, "time", None)
+                        market_time = getattr(ticker, "rtTime", None)
                         market_times[symbol] = (
                             market_time if isinstance(market_time, datetime) else None
                         )
+                        received_time = getattr(ticker, "time", None)
+                        received_times[symbol] = (
+                            received_time
+                            if isinstance(received_time, datetime)
+                            else None
+                        )
                         signatures[symbol] = signature
-                consumer(changed, market_times, observed_at)
+                consumer(changed, market_times, received_times, observed_at)
         finally:
             for contract in subscribed:
                 try:

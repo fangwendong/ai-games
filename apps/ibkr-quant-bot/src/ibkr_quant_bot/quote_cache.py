@@ -47,6 +47,7 @@ class QuoteCacheWriter:
         quotes: dict[str, Quote],
         *,
         market_times: dict[str, datetime | None] | None = None,
+        received_times: dict[str, datetime | None] | None = None,
         observed_at: datetime | None = None,
         monotonic_now: float | None = None,
         force: bool = False,
@@ -56,6 +57,7 @@ class QuoteCacheWriter:
             observed_at = observed_at.replace(tzinfo=timezone.utc)
         observed_at = observed_at.astimezone(timezone.utc)
         market_times = market_times or {}
+        received_times = received_times or {}
         for symbol, quote in quotes.items():
             normalized = symbol.upper()
             if normalized not in self.samples:
@@ -69,9 +71,17 @@ class QuoteCacheWriter:
                 market_time_value = market_time.astimezone(timezone.utc).isoformat()
             else:
                 market_time_value = None
+            received_time = received_times.get(normalized)
+            if received_time is not None:
+                if received_time.tzinfo is None:
+                    received_time = received_time.replace(tzinfo=timezone.utc)
+                received_time_value = received_time.astimezone(timezone.utc).isoformat()
+            else:
+                received_time_value = None
             self.samples[normalized].append(
                 {
                     "market_time": market_time_value,
+                    "received_at": received_time_value,
                     "observed_at": observed_at.isoformat(),
                     **asdict(quote),
                     "symbol": normalized,

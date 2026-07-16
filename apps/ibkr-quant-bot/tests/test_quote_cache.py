@@ -39,6 +39,12 @@ class QuoteCacheTest(unittest.TestCase):
                         symbol: datetime(2026, 7, 16, 14, 0, tzinfo=timezone.utc)
                         for symbol in ("QQQ", "SOXL", "SOXS")
                     },
+                    received_times={
+                        symbol: datetime(
+                            2026, 7, 16, 14, 0, 0, 100_000, tzinfo=timezone.utc
+                        )
+                        for symbol in ("QQQ", "SOXL", "SOXS")
+                    },
                     monotonic_now=float(index) / 10,
                     force=index == 9,
                 )
@@ -47,6 +53,14 @@ class QuoteCacheTest(unittest.TestCase):
             self.assertEqual(3, payload["max_samples_per_symbol"])
             self.assertTrue(
                 all(len(rows) == 3 for rows in payload["symbols"].values())
+            )
+            self.assertTrue(
+                all(
+                    rows[-1]["received_at"].startswith(
+                        "2026-07-16T14:00:00.100000"
+                    )
+                    for rows in payload["symbols"].values()
+                )
             )
             self.assertTrue(
                 all(

@@ -1070,9 +1070,10 @@ def _run_live_quote_cache(settings: Settings, args: argparse.Namespace) -> int:
             broker.connect()
             broker.stream_live_quotes(
                 symbols,
-                lambda quotes, market_times, observed_at: writer.update(
+                lambda quotes, market_times, received_times, observed_at: writer.update(
                     quotes,
                     market_times=market_times,
+                    received_times=received_times,
                     observed_at=observed_at,
                 ),
                 exchange="SMART",
