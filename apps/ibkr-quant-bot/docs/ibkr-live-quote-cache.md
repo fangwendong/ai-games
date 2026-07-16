@@ -121,6 +121,11 @@ Each symbol in the live polling summary also includes
 `quote_market_time=null` when IBKR supplies no exchange last-trade timestamp;
 do not replace it with a local clock value.
 
+QQQ is emitted as a separate `benchmark_quote` object with `role=benchmark`,
+its reference price, source exchanges, and the same timing fields. It has no
+`action` field because QQQ is a regime input, not an order candidate. SOXL and
+SOXS remain in the strategy decision list.
+
 If the file is stale, the strategy requests a concurrent SMART snapshot with
 no fixed sleep. If that complete fallback group also fails, the strategy fails
 closed and does not submit an order.

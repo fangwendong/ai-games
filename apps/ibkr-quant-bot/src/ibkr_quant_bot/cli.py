@@ -634,6 +634,23 @@ def _quote_timing_fields(quote: Quote, now: datetime) -> dict[str, object]:
     }
 
 
+def _benchmark_quote_summary(
+    symbol: str,
+    quote: Quote,
+    market_data_exchange: str,
+    now: datetime,
+) -> dict[str, object]:
+    return {
+        "role": "benchmark",
+        "symbol": symbol,
+        "reference_price": round(quote.reference_price, 2),
+        "market_data_exchange": market_data_exchange,
+        "bar_data_exchange": market_data_exchange,
+        "quote_data_exchange": "SMART",
+        **_quote_timing_fields(quote, now),
+    }
+
+
 def _json_safe(value):
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
@@ -1368,6 +1385,21 @@ def main(argv: list[str] | None = None) -> int:
                 broker, settings, strategy, session, now
             )
             benchmark_bars = strategy_bars[strategy.benchmark_symbol]
+            benchmark_quote = strategy_quotes[strategy.benchmark_symbol]
+            print(
+                json.dumps(
+                    {
+                        "benchmark_quote": _benchmark_quote_summary(
+                            strategy.benchmark_symbol,
+                            benchmark_quote,
+                            market_data_exchange,
+                            now,
+                        )
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
 
             current_positions = _parse_position_rows(
                 broker.positions(), strategy.symbols

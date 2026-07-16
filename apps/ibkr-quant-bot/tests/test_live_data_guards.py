@@ -16,6 +16,7 @@ from ibkr_quant_bot.cli import (
     ROTATION_HYSTERESIS_V2_VERSION,
     _build_momentum_strategy,
     _build_parser,
+    _benchmark_quote_summary,
     _completed_bars_since_entry,
     _daily_entry_count,
     _daily_entry_limit_reached,
@@ -126,6 +127,25 @@ def make_bar(age: timedelta) -> Bar:
 
 
 class LiveDataGuardsTest(unittest.TestCase):
+    def test_benchmark_quote_summary_exposes_qqq_without_order_action(self) -> None:
+        now = datetime(2026, 7, 16, 14, 0, 1, tzinfo=timezone.utc)
+        quote = Quote(
+            "QQQ",
+            bid=712.4,
+            ask=712.5,
+            last=712.45,
+            close=710.0,
+            market_time="2026-07-16T14:00:00+00:00",
+            observed_at="2026-07-16T14:00:00.500000+00:00",
+        )
+
+        summary = _benchmark_quote_summary("QQQ", quote, "SMART", now)
+
+        self.assertEqual("benchmark", summary["role"])
+        self.assertEqual("QQQ", summary["symbol"])
+        self.assertEqual(500.0, summary["quote_age_ms"])
+        self.assertNotIn("action", summary)
+
     def test_quote_timing_fields_include_market_time_and_age(self) -> None:
         observed = datetime(2026, 7, 16, 14, 0, tzinfo=timezone.utc)
         quote = Quote(
