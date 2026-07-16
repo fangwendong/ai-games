@@ -77,6 +77,8 @@ def load_cached_market_session(
     path: str | Path,
     *,
     session_date: date,
+    source: str,
+    bar_size: str,
     max_age_seconds: float,
     now: datetime | None = None,
 ) -> MarketSession | None:
@@ -86,6 +88,7 @@ def load_cached_market_session(
         max_age_seconds=max_age_seconds,
         now=now,
     )
+    _require_source_and_bar_size(payload, source=source, bar_size=bar_size)
     raw = payload.get("session")
     if raw is None:
         return None
@@ -119,10 +122,7 @@ def load_fresh_cached_bars(
         max_age_seconds=max_age_seconds,
         now=now,
     )
-    if str(payload.get("source", "")).upper() != source.upper():
-        raise MarketContextCacheError("market context cache source mismatch")
-    if payload.get("bar_size") != bar_size:
-        raise MarketContextCacheError("market context cache bar-size mismatch")
+    _require_source_and_bar_size(payload, source=source, bar_size=bar_size)
     raw_symbols = payload.get("symbols")
     if not isinstance(raw_symbols, dict):
         raise MarketContextCacheError("market context cache has invalid symbols")
@@ -189,8 +189,25 @@ def _decode_bar(symbol: str, row: object) -> Bar:
         raise MarketContextCacheError(
             f"market context cache has invalid {symbol} bar"
         ) from exc
-    if timestamp.tzinfo is None or not all(math.isfinite(value) for value in values):
+    open_price, high, low, close, volume = values
+    if (
+        timestamp.tzinfo is None
+        or not all(math.isfinite(value) for value in values)
+        or min(open_price, high, low, close) <= 0
+        or volume < 0
+        or high < max(open_price, low, close)
+        or low > min(open_price, high, close)
+    ):
         raise MarketContextCacheError(
             f"market context cache has unusable {symbol} bar"
         )
     return Bar(timestamp, *values)
+
+
+def _require_source_and_bar_size(
+    payload: dict[str, object], *, source: str, bar_size: str
+) -> None:
+    if str(payload.get("source", "")).upper() != source.upper():
+        raise MarketContextCacheError("market context cache source mismatch")
+    if payload.get("bar_size") != bar_size:
+        raise MarketContextCacheError("market context cache bar-size mismatch")

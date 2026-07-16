@@ -22,8 +22,11 @@ in this document or in quote-cache diagnostics.
 - refresh: atomic file replacement every one second
 - memory bound: 100 samples per symbol, 300 samples total
 - stale threshold used by the strategy: three seconds
+- singleton guard: a non-blocking advisory lock rejects a second writer
 
-The process reconnects after transient Gateway and network errors. A code
+Each publication is flushed, `fsync`ed, and atomically replaces the prior
+file. Readers therefore see either the previous complete JSON document or the
+new complete document. The process reconnects after transient Gateway and network errors. A code
 error can still terminate the tmux session, so the process and file freshness
 must both be checked. tmux does not survive a machine reboot.
 
@@ -69,8 +72,9 @@ tmux new-session -d \
    exec env PYTHONPATH=src python -m ibkr_quant_bot.cli stream-live-quotes'
 ```
 
-Do not start a second instance to repair a stale file. Diagnose the existing
-process first, then perform one controlled restart if necessary.
+Do not start a second instance to repair a stale file. The second process is
+rejected by the cache-writer lock, but operators must still diagnose the
+existing process first and then perform one controlled restart if necessary.
 
 ## Quick Health Check
 

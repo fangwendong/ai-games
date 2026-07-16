@@ -37,6 +37,8 @@ from ibkr_quant_bot.cli import (
     _quote_timing_fields,
     _record_daily_entry,
     _record_order_state,
+    _run_live_context_cache,
+    _run_live_quote_cache,
     _should_flatten,
     _strategy_quote,
     _trade_filled_quantity,
@@ -133,6 +135,26 @@ def make_bar(age: timedelta) -> Bar:
 
 
 class LiveDataGuardsTest(unittest.TestCase):
+    def test_cache_daemons_require_readonly_dry_run_and_no_live_permission(self) -> None:
+        runners = (_run_live_quote_cache, _run_live_context_cache)
+        for runner in runners:
+            with self.subTest(runner=runner.__name__, gate="readonly_dry_run"):
+                with self.assertRaisesRegex(BrokerError, "requires"):
+                    runner(
+                        Settings(readonly=False, dry_run=False),
+                        SimpleNamespace(),
+                    )
+            with self.subTest(runner=runner.__name__, gate="live_permission"):
+                with self.assertRaisesRegex(BrokerError, "ALLOW_LIVE_TRADING=false"):
+                    runner(
+                        Settings(
+                            readonly=True,
+                            dry_run=True,
+                            allow_live_trading=True,
+                        ),
+                        SimpleNamespace(),
+                    )
+
     def test_intraday_market_data_uses_complete_fresh_bar_cache(self) -> None:
         now = datetime(2026, 7, 15, 12, 1, tzinfo=NEW_YORK)
         session = MarketSession(

@@ -35,6 +35,7 @@ from .market_context_cache import (
 )
 from .quote_cache import QuoteCacheError, QuoteCacheWriter, load_fresh_quotes
 from .risk import RiskManager
+from .runtime_lock import RuntimeLockError, acquire_cache_writer_lock
 from .strategy import (
     IntradayMomentumStrategy,
     MovingAverageStrategy,
@@ -648,6 +649,8 @@ def _cached_or_broker_market_session(
             session = load_cached_market_session(
                 _live_context_cache_path(settings),
                 session_date=now.date(),
+                source="SMART",
+                bar_size="5 mins",
                 max_age_seconds=settings.live_context_cache_max_age_seconds,
                 now=now,
             )
@@ -1444,6 +1447,10 @@ def _run_live_quote_cache(settings: Settings, args: argparse.Namespace) -> int:
         if args.cache_path
         else _live_quote_cache_path(settings)
     )
+    try:
+        writer_lock = acquire_cache_writer_lock(cache_path)
+    except RuntimeLockError as exc:
+        raise BrokerError(f"stream-live-quotes refused duplicate writer: {exc}") from exc
     writer = QuoteCacheWriter(
         cache_path,
         symbols,
@@ -1463,6 +1470,8 @@ def _run_live_quote_cache(settings: Settings, args: argparse.Namespace) -> int:
         flush=True,
     )
     while True:
+        # Keep the advisory-lock descriptor strongly referenced for this daemon.
+        _ = writer_lock
         broker = IbkrBroker(settings)
         try:
             broker.connect()
@@ -1511,10 +1520,16 @@ def _run_live_context_cache(settings: Settings, args: argparse.Namespace) -> int
         if args.cache_path
         else _live_context_cache_path(settings)
     )
+    try:
+        writer_lock = acquire_cache_writer_lock(cache_path)
+    except RuntimeLockError as exc:
+        raise BrokerError(f"cache-live-context refused duplicate writer: {exc}") from exc
     last_refresh_bucket: tuple[object, ...] | None = None
     cached_session_date = None
     cached_session: MarketSession | None = None
     while True:
+        # Keep the advisory-lock descriptor strongly referenced for this daemon.
+        _ = writer_lock
         broker = IbkrBroker(settings)
         try:
             broker.connect()
