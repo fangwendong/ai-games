@@ -172,6 +172,9 @@ Important behavior:
   delayed if live data is unavailable.
 - `ibkr-bot intraday-momentum` uses `live_quote()` in live trading mode and
   refuses delayed data.
+- Concurrent snapshot and streaming paths also require the ticker's IBKR
+  `marketDataType` field to equal `1`; a missing field or values `2`, `3`, or
+  `4` fail closed even when a price is present.
 - Live historical bars must also pass freshness checks. The default
   `IBKR_LIVE_BAR_MAX_AGE_SECONDS=420` allows normal completed 5-minute bars but
   rejects delayed bars that are typically 15-20 minutes stale.

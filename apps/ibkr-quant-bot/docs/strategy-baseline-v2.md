@@ -17,6 +17,12 @@ The percentage stop, ATR stop, technical reversal confirmation, benchmark
 reversal confirmation, daily entry limit, and mandatory end-of-session flatten
 remain unchanged.
 
+Operationally, the mandatory flatten check is evaluated before the normal
+three-symbol signal-data load. It needs the IBKR session calendar, position,
+and order state, but it does not need fresh QQQ/SOXL/SOXS indicator bars or a
+quote-cache sample. This keeps signal-data failure from blocking the final
+reduce-only exit attempt.
+
 No new position may fill at or after 13:30 America/New_York. Because decisions
 use completed 5-minute bars, the 13:25 bar and all later bars are ineligible to
 create an entry. This restriction applies only to new entries. Existing

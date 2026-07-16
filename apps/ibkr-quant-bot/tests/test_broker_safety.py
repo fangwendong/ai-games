@@ -86,6 +86,7 @@ class StreamingIB:
         self.requests.append((contract.symbol, snapshot))
         missing = contract.symbol in self.missing
         ticker = SimpleNamespace(
+            marketDataType=1,
             time=datetime.now(timezone.utc),
             rtTime=datetime.now(timezone.utc),
             bid=None if missing else 10.0,
@@ -102,6 +103,7 @@ class StreamingIB:
             missing = contract.symbol in self.missing
             rows.append(
                 SimpleNamespace(
+                    marketDataType=1,
                     bid=None if missing else 10.0,
                     ask=None if missing else 10.1,
                     last=None if missing else 10.05,
@@ -180,6 +182,41 @@ class BrokerSafetyTest(unittest.TestCase):
 
         with self.assertRaisesRegex(BrokerError, "SOXS"):
             broker.live_quote_snapshots(["QQQ", "SOXL", "SOXS"])
+
+    def test_live_quote_snapshots_reject_delayed_market_data_type(self) -> None:
+        fake_ib = StreamingIB()
+        broker = make_streaming_broker(fake_ib)
+        original = fake_ib.reqTickers
+
+        def delayed(*contracts):
+            rows = original(*contracts)
+            rows[1].marketDataType = 3
+            return rows
+
+        fake_ib.reqTickers = delayed
+
+        with self.assertRaisesRegex(BrokerError, "type 3.*SOXL"):
+            broker.live_quote_snapshots(["QQQ", "SOXL", "SOXS"])
+
+    def test_stream_live_quotes_rejects_delayed_market_data_type(self) -> None:
+        fake_ib = StreamingIB()
+        broker = make_streaming_broker(fake_ib)
+        original = fake_ib.reqMktData
+
+        def delayed_soxs(contract, *args, **kwargs):
+            ticker = original(contract, *args, **kwargs)
+            if contract.symbol == "SOXS":
+                ticker.marketDataType = 3
+            return ticker
+
+        fake_ib.reqMktData = delayed_soxs
+
+        with self.assertRaisesRegex(BrokerError, "type 3.*SOXS"):
+            broker.stream_live_quotes(
+                ["QQQ", "SOXL", "SOXS"], lambda *_: None, poll_interval_seconds=0.001
+            )
+
+        self.assertEqual(["QQQ", "SOXL", "SOXS"], fake_ib.cancelled)
 
     def test_stream_live_quotes_rejects_nonpositive_poll_interval(self) -> None:
         broker = make_streaming_broker(StreamingIB())
@@ -351,6 +388,75 @@ class BrokerSafetyTest(unittest.TestCase):
 
         with self.assertRaisesRegex(BrokerError, "active BUY order"):
             broker._preflight_order(TradeRequest("SOXL", "BUY", 1))
+
+    def test_complete_protective_oca_requires_both_matching_legs(self) -> None:
+        group = "oca-test"
+
+        def leg(order_ref, order_type):
+            return SimpleNamespace(
+                contract=SimpleNamespace(symbol="SOXL"),
+                order=SimpleNamespace(
+                    permId=order_ref,
+                    orderId=order_ref,
+                    action="SELL",
+                    orderRef=order_ref,
+                    orderType=order_type,
+                    ocaGroup=group,
+                ),
+                orderStatus=SimpleNamespace(remaining=5),
+            )
+
+        prefix = "momentum-2026-07-16-SOXL-protect"
+        stop = leg(f"{prefix}-stop", "STP")
+        take = leg(f"{prefix}-take", "LMT")
+        broker = make_broker(
+            Settings(trading_mode="paper"), FakeIB("DU123456", trades=[stop, take])
+        )
+
+        self.assertTrue(
+            broker.protective_oca_is_complete(
+                "SOXL", 5, order_ref_prefix=prefix
+            )
+        )
+        broker._ib.trades = [stop]
+        self.assertFalse(
+            broker.protective_oca_is_complete(
+                "SOXL", 5, order_ref_prefix=prefix
+            )
+        )
+
+    def test_filled_order_ref_prefix_recovers_missing_entry_state(self) -> None:
+        trade = SimpleNamespace(
+            contract=SimpleNamespace(symbol="SOXL"),
+            order=SimpleNamespace(
+                permId=1,
+                orderId=2,
+                action="BUY",
+                orderRef="momentum-2026-07-16-SOXL-entry-101500",
+            ),
+            orderStatus=SimpleNamespace(filled=3, remaining=0),
+            fills=[],
+        )
+        broker = make_broker(
+            Settings(trading_mode="paper"), FakeIB("DU123456", trades=[trade])
+        )
+
+        self.assertTrue(
+            broker.filled_order_ref_prefix_exists(
+                "momentum-2026-07-16-SOXL-entry-"
+            )
+        )
+        self.assertEqual(
+            1,
+            broker.filled_order_ref_prefix_count(
+                "momentum-2026-07-16-SOXL-entry-"
+            ),
+        )
+        self.assertFalse(
+            broker.filled_order_ref_prefix_exists(
+                "momentum-2026-07-16-SOXS-entry-"
+            )
+        )
 
     def test_broker_preflight_requires_explicit_live_enable(self) -> None:
         broker = make_broker(Settings(trading_mode="live"), FakeIB("U123456"))
