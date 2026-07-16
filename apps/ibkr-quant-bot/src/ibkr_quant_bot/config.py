@@ -63,6 +63,8 @@ class Settings:
     market_data_type: str = "auto"
     request_timeout: float = 30.0
     live_bar_max_age_seconds: int = 420
+    live_quote_window_seconds: float = 3.0
+    live_quote_max_samples_per_symbol: int = 100
     max_daily_entries: int = 1
     state_dir: str = ".ibkr_bot_state/semiconductor_rotation_intraday"
     entry_order_price_offset_bps: float = 5.0
@@ -101,6 +103,12 @@ def load_settings() -> Settings:
         market_data_type=os.getenv("IBKR_MARKET_DATA_TYPE", "auto").strip().lower(),
         request_timeout=float(os.getenv("IBKR_REQUEST_TIMEOUT", "30")),
         live_bar_max_age_seconds=int(os.getenv("IBKR_LIVE_BAR_MAX_AGE_SECONDS", "420")),
+        live_quote_window_seconds=float(
+            os.getenv("IBKR_LIVE_QUOTE_WINDOW_SECONDS", "3")
+        ),
+        live_quote_max_samples_per_symbol=int(
+            os.getenv("IBKR_LIVE_QUOTE_MAX_SAMPLES_PER_SYMBOL", "100")
+        ),
         max_daily_entries=int(os.getenv("IBKR_MAX_DAILY_ENTRIES", "1")),
         state_dir=os.getenv(
             "IBKR_STATE_DIR", ".ibkr_bot_state/semiconductor_rotation_intraday"
