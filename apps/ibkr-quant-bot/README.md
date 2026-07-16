@@ -89,6 +89,11 @@ comparison with live v2 are documented in
 The research-only **GapGuard Fusion v1** causal state machine is documented in
 [docs/hybrid-state-research.md](docs/hybrid-state-research.md).
 
+Sanitized live fills, no-trade sessions, exit paths, and replay reconciliation
+are maintained in the append-only
+[live strategy review log](docs/live-strategy-review-log.md). Do not commit raw
+IBKR runtime journals; they contain private broker metadata.
+
 ```bash
 cd apps/ibkr-quant-bot
 export IBKR_HOST=127.0.0.1
