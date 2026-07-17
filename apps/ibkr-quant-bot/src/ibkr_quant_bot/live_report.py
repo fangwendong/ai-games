@@ -133,7 +133,7 @@ def format_live_report(
         lines.append("- SOXL/SOXS：策略在生成决策前失败，指标不可用。")
     lines.append(f"- 订单最终结果：{_order_result(output, exit_code)}。")
 
-    lines.append("风险与保护")
+    lines.extend(["", "风险与保护"])
     for symbol, row in zip(("SOXL", "SOXS"), decisions, strict=False):
         lines.append(
             f"- {symbol}：stop_loss_pct={_value(row.get('stop_loss_pct'), digits=4)}；"
@@ -159,11 +159,15 @@ def format_live_report(
             if row.get("quote_data_exchange")
         }
     )
-    bar_counts = ", ".join(
+    strategy_bar_counts = ", ".join(
         f"{row.get('symbol')}={row.get('bar_count', '不可用')}" for row in scan_rows
-    ) or "不可用"
+    )
+    bar_counts = f"QQQ={benchmark.get('bar_count', '不可用')}"
+    if strategy_bar_counts:
+        bar_counts = f"{bar_counts}, {strategy_bar_counts}"
     lines.extend(
         [
+            "",
             "运行诊断",
             (
                 f"- bar_data_exchange={','.join(exchanges) or '不可用'}；"

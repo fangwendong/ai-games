@@ -16,8 +16,8 @@ The monitor reports on four areas:
    counts, and current-session protection state.
 3. IBKR infrastructure: Gateway/IBC processes, API port `4001`, and a forced
    read-only server-time heartbeat.
-4. Market-data infrastructure: process/tmux presence and file activity for the
-   quote cache and live context cache.
+4. Runtime infrastructure: process/tmux presence and file activity for the
+   quote cache, live context cache, and deterministic live strategy reporter.
 
 The monitor must not inspect SMART/ARCA values, symbols, prices, bars, cache
 latency, or price scale. Cache checks use process state and `stat` only.
@@ -65,7 +65,9 @@ Raise a decision-level alert when any of these is true:
 - a monitored disk is at least 85% full.
 - Gateway/IBC, port `4001`, or the read-only heartbeat fails.
 - the quote/context cache process or expected file activity stops.
-- the current trading-stage task state is wrong.
+- during regular trading hours, the deterministic reporter is missing,
+  duplicated, older than 120 seconds, or reports a nonzero runner exit.
+- the legacy Codex polling schedule is unexpectedly resumed.
 - collection or permitted cleanup fails.
 
 A one-sample CPU increase below the threshold is informational. Task-count
@@ -73,14 +75,20 @@ changes alone are not an alert; validate named current-stage protection instead.
 
 ## Trading-Stage Protection
 
-The baseline changes across the session:
+The deterministic reporter replaces the old one-minute Codex schedule. Its
+supervisor is `ibkr-live-strategy-reporter` and remains alive across sessions,
+while its runner gates execution to 09:30-16:00 America/New_York on weekdays.
+The broker calendar remains authoritative for holidays and early closes.
 
-- Before the scheduled US open: the polling task is paused; current-day start
-  and stop tasks are enabled.
-- During the regular session: polling and the stop task are enabled; a
-  successfully completed/expired start task is normal.
-- After the scheduled stop: polling is paused; a successfully completed/expired
-  stop task is normal.
+- The legacy `af15c80b` Codex polling task must remain paused.
+- Exactly one `ibkr-live-strategy-reporter` tmux session and one
+  `run-live-strategy-report-loop.zsh` process must exist.
+- During the regular session, `latest-summary.txt` and `latest-run.log` must be
+  no more than 120 seconds old and `latest-run.log` must contain
+  `runner_exit=0`.
+- Outside the regular session, summary freshness is not required.
+- Old one-time start/stop tasks may exist, expire, or be removed without an
+  alert because they no longer control the deterministic reporter.
 
 Daily history refresh and the health monitor itself should remain enabled.
 One-time task IDs and dates must be updated when the next live session is
@@ -109,7 +117,7 @@ If unhealthy, put the abnormal information before every normal metric:
 建议：<next action>
 ```
 
-Then include `核心概览` with resource, botmux, IB, and cache status. End with
+Then include `核心概览` with resource, botmux, IB, and cache/reporter status. End with
 `指标明细`, expanding:
 
 - CPU/idle and load 1/5/15;
@@ -118,7 +126,8 @@ Then include `核心概览` with resource, botmux, IB, and cache status. End wit
 - highest CPU and memory processes;
 - active sessions, cleanup count, enabled/paused task counts, and trading stage;
 - Gateway/IBC/port/heartbeat state; and
-- quote/context process counts plus file update time or age.
+- quote/context process counts plus file update time or age; and
+- reporter tmux/process counts plus in-session summary age and runner exit.
 
 Do not append the full task list, UTC server timestamp, collection commands,
 old-task history, or a duplicate conclusion.
@@ -176,3 +185,4 @@ Expected state:
 | Context file is older than quote file | Context refreshes per five-minute bucket; quotes refresh near one second | Apply service-specific file-age expectations. |
 | CPU briefly rises during the check | `mpstat`, botmux, or a scheduled command was active | Alert only at the documented threshold. |
 | Completed history worker remains online | Scheduled botmux session did not exit cleanly | Review separately; do not kill it from the health task. |
+| Legacy one-minute polling is paused | The deterministic reporter replaced it | Treat paused as the required state; do not resume it. |

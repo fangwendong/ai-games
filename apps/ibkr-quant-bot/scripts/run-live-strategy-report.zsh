@@ -65,7 +65,9 @@ if [[ ${BOTMUX_REPORT_DRY_SEND:-false} == true ]]; then
   print -r -- "$(<"$summary_output")"
 else
   : ${BOTMUX_REPORT_SESSION_ID:?BOTMUX_REPORT_SESSION_ID is required}
-  botmux send --session "$BOTMUX_REPORT_SESSION_ID" --no-mention \
+  : ${BOTMUX_REPORT_ROOT_MESSAGE_ID:?BOTMUX_REPORT_ROOT_MESSAGE_ID is required}
+  botmux send --session-id "$BOTMUX_REPORT_SESSION_ID" \
+    --into "$BOTMUX_REPORT_ROOT_MESSAGE_ID" --no-mention \
     --content-file "$summary_output"
 fi
 

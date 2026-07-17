@@ -24,6 +24,7 @@ non-secret variable:
 
 ```text
 BOTMUX_REPORT_SESSION_ID=<target botmux session UUID>
+BOTMUX_REPORT_ROOT_MESSAGE_ID=<target Feishu topic root message ID>
 ```
 
 The runner always forces live market data and disables ARCA fallback. It does
@@ -48,6 +49,7 @@ scripts/run-live-strategy-report.zsh
 tmux new-session -d -s ibkr-live-strategy-reporter \
   "cd /home/fwd/work/ai-games-wt-codex-live/apps/ibkr-quant-bot && \
    export BOTMUX_REPORT_SESSION_ID=<session UUID> && \
+   export BOTMUX_REPORT_ROOT_MESSAGE_ID=<topic root message ID> && \
    exec scripts/run-live-strategy-report-loop.zsh"
 
 tmux kill-session -t ibkr-live-strategy-reporter

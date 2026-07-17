@@ -2188,6 +2188,7 @@ def main(argv: list[str] | None = None) -> int:
                 market_data_exchange,
                 now,
             )
+            benchmark_summary["bar_count"] = len(benchmark_bars)
 
             current_positions = _parse_position_rows(
                 broker.positions(), strategy.symbols
