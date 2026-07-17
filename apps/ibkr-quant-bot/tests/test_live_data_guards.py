@@ -1094,6 +1094,51 @@ class LiveDataGuardsTest(unittest.TestCase):
 
         self.assertEqual([closed], bars)
 
+    def test_completed_bar_freshness_uses_bar_end_time(self) -> None:
+        now = datetime(2026, 7, 17, 9, 44, 12, tzinfo=NEW_YORK)
+        recently_completed = Bar(
+            time=datetime(2026, 7, 17, 9, 35, tzinfo=NEW_YORK),
+            open=1,
+            high=1,
+            low=1,
+            close=1,
+            volume=1,
+        )
+        broker = FakeBroker([recently_completed])
+
+        bars = _fresh_historical_bars(
+            broker,
+            Settings(trading_mode="live", live_bar_max_age_seconds=420),
+            "QQQ",
+            bar_size="5 mins",
+            completed_only=True,
+            now=now,
+        )
+
+        self.assertEqual([recently_completed], bars)
+
+    def test_completed_bar_still_rejects_stale_completion_time(self) -> None:
+        now = datetime(2026, 7, 17, 9, 47, 1, tzinfo=NEW_YORK)
+        stale = Bar(
+            time=datetime(2026, 7, 17, 9, 35, tzinfo=NEW_YORK),
+            open=1,
+            high=1,
+            low=1,
+            close=1,
+            volume=1,
+        )
+        broker = FakeBroker([stale])
+
+        with self.assertRaisesRegex(BrokerError, "stale"):
+            _fresh_historical_bars(
+                broker,
+                Settings(trading_mode="live", live_bar_max_age_seconds=420),
+                "QQQ",
+                bar_size="5 mins",
+                completed_only=True,
+                now=now,
+            )
+
     def test_session_filter_excludes_previous_day_bars(self) -> None:
         now = datetime(2026, 7, 10, 12, 0, tzinfo=NEW_YORK)
         previous = Bar(

@@ -563,6 +563,7 @@ def _validate_historical_bars(
     now: datetime | None,
 ) -> list[Bar]:
     now = now or datetime.now(NEW_YORK)
+    bar_duration = timedelta(seconds=_bar_size_seconds(bar_size))
     if session_only:
         session_open = session.opens_at if session is not None else None
         session_close = session.closes_at if session is not None else None
@@ -578,34 +579,38 @@ def _validate_historical_bars(
                 < time(16, 0)
             )
         ]
+    if completed_only:
+        bars = [
+            bar
+            for bar in bars
+            if _normalize_bar_time(bar.time) + bar_duration <= now
+        ]
     if settings.is_live:
         if not bars:
             raise BrokerError(f"no live bars returned for {symbol}")
 
         last_bar_time = _normalize_bar_time(bars[-1].time)
-        age_seconds = (now - last_bar_time).total_seconds()
+        freshness_time = (
+            last_bar_time + bar_duration if completed_only else last_bar_time
+        )
+        age_seconds = (now - freshness_time).total_seconds()
         max_age_seconds = max(
             settings.live_bar_max_age_seconds, _bar_size_seconds(bar_size) + 120
         )
         if age_seconds < -60:
             raise BrokerError(
-                f"latest bar for {symbol} is in the future: {last_bar_time.isoformat()}"
+                f"latest bar for {symbol} is in the future: "
+                f"{last_bar_time.isoformat()}"
             )
         if age_seconds > max_age_seconds:
             age_minutes = age_seconds / 60
             max_minutes = max_age_seconds / 60
             raise BrokerError(
                 f"latest bar for {symbol} is stale: {last_bar_time.isoformat()} "
-                f"({age_minutes:.1f} min old; max {max_minutes:.1f}); refusing delayed data"
+                f"(completed {freshness_time.isoformat()}; "
+                f"{age_minutes:.1f} min old; max {max_minutes:.1f}); "
+                "refusing delayed data"
             )
-
-    if completed_only:
-        bar_duration = timedelta(seconds=_bar_size_seconds(bar_size))
-        bars = [
-            bar
-            for bar in bars
-            if _normalize_bar_time(bar.time) + bar_duration <= now
-        ]
     return bars
 
 
