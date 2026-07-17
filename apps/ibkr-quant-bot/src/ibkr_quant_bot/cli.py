@@ -35,7 +35,11 @@ from .market_context_cache import (
 )
 from .quote_cache import QuoteCacheError, QuoteCacheWriter, load_fresh_quotes
 from .risk import RiskManager
-from .runtime_lock import RuntimeLockError, acquire_cache_writer_lock
+from .runtime_lock import (
+    RuntimeLockError,
+    acquire_cache_writer_lock,
+    acquire_runtime_lock,
+)
 from .strategy import (
     IntradayMomentumStrategy,
     MovingAverageStrategy,
@@ -626,6 +630,11 @@ def _orders_state_path(settings: Settings, now: datetime | None = None) -> Path:
     return state_dir / f"orders-{now.date().isoformat()}.jsonl"
 
 
+def _strategy_runtime_lock_path(settings: Settings, profile: str) -> Path:
+    del profile  # All intraday profiles share symbols, positions, and order state.
+    return Path(settings.state_dir).expanduser() / "intraday-momentum.run.lock"
+
+
 def _live_quote_cache_path(settings: Settings) -> Path:
     if settings.live_quote_cache_path:
         return Path(settings.live_quote_cache_path).expanduser()
@@ -1038,6 +1047,8 @@ def _record_daily_entry(
     filled_quantity: float | None = None,
     average_fill_price: float | None = None,
     strategy_version: str | None = None,
+    protective_stop_price: float | None = None,
+    protective_take_price: float | None = None,
 ) -> None:
     now = now or datetime.now(NEW_YORK)
     path = _entry_state_path(settings, now)
@@ -1052,6 +1063,8 @@ def _record_daily_entry(
             "quantity": request.quantity,
             "filled_quantity": filled_quantity,
             "average_fill_price": average_fill_price,
+            "protective_stop_price": protective_stop_price,
+            "protective_take_price": protective_take_price,
             "strategy_version": strategy_version,
             "order_type": request.order_type,
             "limit_price": request.limit_price,
@@ -1063,6 +1076,34 @@ def _record_daily_entry(
     state["entry_count"] = _daily_entry_count(settings, now) + 1
     state["entries"] = entries
     _write_text_atomic(path, json.dumps(state, indent=2, sort_keys=True))
+
+
+def _latest_entry_protective_prices(
+    settings: Settings, symbol: str, now: datetime | None = None
+) -> tuple[float, float] | None:
+    now = now or datetime.now(NEW_YORK)
+    entries = _load_entry_state(settings, now).get("entries", [])
+    if not isinstance(entries, list):
+        return None
+    for entry in reversed(entries):
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("symbol", "")).upper() != symbol.upper():
+            continue
+        try:
+            stop_price = float(entry["protective_stop_price"])
+            take_price = float(entry["protective_take_price"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        if (
+            not math.isfinite(stop_price)
+            or not math.isfinite(take_price)
+            or stop_price <= 0
+            or take_price <= stop_price
+        ):
+            return None
+        return stop_price, take_price
+    return None
 
 
 def _latest_entry_time(
@@ -1159,6 +1200,84 @@ def _record_order_state(
         file.write("\n")
 
 
+def _is_strategy_entry_trade(trade, symbols: tuple[str, ...]) -> bool:
+    order = getattr(trade, "order", None)
+    symbol = str(getattr(getattr(trade, "contract", None), "symbol", "")).upper()
+    action = str(getattr(order, "action", "") or "").upper()
+    order_ref = str(getattr(order, "orderRef", "") or "")
+    return (
+        symbol in {item.upper() for item in symbols}
+        and action == "BUY"
+        and order_ref.startswith("momentum-")
+        and "-entry-" in order_ref
+    )
+
+
+def _cancel_orphaned_strategy_entry_orders(
+    broker: IbkrBroker,
+    settings: Settings,
+    strategy: IntradayMomentumStrategy | SemiconductorRotationStrategy,
+    now: datetime,
+) -> int:
+    """Cancel entry orders left behind by a previous one-shot strategy run."""
+    active_by_identity = {
+        id(trade): trade
+        for symbol in strategy.symbols
+        for trade in broker.active_trades_for(symbol, "BUY")
+        if _is_strategy_entry_trade(trade, strategy.symbols)
+    }
+    active = list(active_by_identity.values())
+    if not active:
+        return 0
+    if settings.readonly or settings.dry_run:
+        print(
+            f"dry-run: detected {len(active)} orphaned strategy BUY order(s); "
+            "not cancelled"
+        )
+        return len(active)
+
+    for trade in active:
+        order = getattr(trade, "order", None)
+        symbol = str(
+            getattr(getattr(trade, "contract", None), "symbol", "")
+        ).upper()
+        quantity_value = getattr(order, "totalQuantity", None)
+        if quantity_value is None:
+            quantity_value = getattr(getattr(trade, "orderStatus", None), "remaining", 0)
+        try:
+            quantity = max(1, int(round(float(quantity_value or 0))))
+        except (TypeError, ValueError):
+            quantity = 1
+        broker.cancel_order(trade)
+        _record_order_state(
+            settings,
+            TradeRequest(
+                symbol=symbol,
+                action="BUY",
+                quantity=quantity,
+                order_type=str(getattr(order, "orderType", "LMT") or "LMT"),
+                limit_price=getattr(order, "lmtPrice", None),
+                time_in_force=str(getattr(order, "tif", "DAY") or "DAY"),
+                order_ref=str(getattr(order, "orderRef", "") or ""),
+            ),
+            trade,
+            now,
+        )
+
+    unresolved = {
+        id(trade): trade
+        for symbol in strategy.symbols
+        for trade in broker.active_trades_for(symbol, "BUY")
+        if _is_strategy_entry_trade(trade, strategy.symbols)
+    }
+    if unresolved:
+        raise BrokerError(
+            "orphaned strategy BUY cancellation unresolved; refusing strategy run"
+        )
+    print(f"cancelled orphaned strategy BUY orders={len(active)}")
+    return len(active)
+
+
 def _parse_position_rows(
     rows: list[dict[str, str]], symbols: tuple[str, ...]
 ) -> dict[str, dict[str, str]]:
@@ -1198,6 +1317,7 @@ def _ensure_protective_oca(
     position_row: dict[str, str],
     bars: list[Bar],
     now: datetime,
+    protective_prices: tuple[float, float] | None = None,
 ) -> str:
     quantity = int(float(position_row["position"]))
     average_cost = float(position_row["avgCost"])
@@ -1248,9 +1368,12 @@ def _ensure_protective_oca(
             f"incomplete protective SELL cancellation unresolved for {symbol}"
         )
 
-    stop_price, take_price = strategy.protective_prices(
-        symbol, average_cost, bars
-    )
+    if protective_prices is None:
+        stop_price, take_price = strategy.protective_prices(
+            symbol, average_cost, bars
+        )
+    else:
+        stop_price, take_price = protective_prices
     trades = broker.place_protective_oca(
         symbol,
         quantity,
@@ -1279,6 +1402,40 @@ def _ensure_protective_oca(
     return "recreated" if incomplete_strategy_orders else "created"
 
 
+def _ensure_positions_protected_before_market_data(
+    broker: IbkrBroker,
+    settings: Settings,
+    strategy: IntradayMomentumStrategy | SemiconductorRotationStrategy,
+    positions: dict[str, dict[str, str]],
+    now: datetime,
+) -> None:
+    """Repair broker-hosted protection without requiring signal market data."""
+    if not positions or settings.readonly or settings.dry_run:
+        return
+    for symbol, position_row in positions.items():
+        stored_prices = _latest_entry_protective_prices(settings, symbol, now)
+        if stored_prices is None:
+            average_cost = float(position_row["avgCost"])
+            stored_prices = strategy.protective_prices(symbol, average_cost, [])
+            price_source = "fixed-percent fallback"
+        else:
+            price_source = "entry state"
+        status = _ensure_protective_oca(
+            broker,
+            settings,
+            strategy,
+            symbol,
+            position_row,
+            [],
+            now,
+            protective_prices=stored_prices,
+        )
+        print(
+            f"protective OCA preflight {symbol}: {status} "
+            f"price_source={price_source}"
+        )
+
+
 def _flatten_strategy_positions_if_due(
     broker: IbkrBroker,
     settings: Settings,
@@ -1288,6 +1445,9 @@ def _flatten_strategy_positions_if_due(
 ) -> bool:
     if not _should_flatten(settings, now, session):
         return False
+    _cancel_orphaned_strategy_entry_orders(
+        broker, settings, strategy, now
+    )
     current_positions = _parse_position_rows(broker.positions(), strategy.symbols)
     _validate_strategy_positions(current_positions)
     if not current_positions:
@@ -1615,6 +1775,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "cache-live-context":
         return _run_live_context_cache(settings, args)
 
+    strategy_run_lock = None
+    if args.command == "intraday-momentum":
+        lock_path = _strategy_runtime_lock_path(settings, args.profile)
+        try:
+            strategy_run_lock = acquire_runtime_lock(lock_path)
+        except RuntimeLockError:
+            print(
+                f"intraday momentum skipped: another {args.profile} run is active"
+            )
+            return 0
+
     broker = None
     if not (args.command == "backtest-momentum" and args.reuse_data):
         broker = _with_broker(settings)
@@ -1842,18 +2013,32 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "intraday-momentum":
             strategy = _build_momentum_strategy(args, settings)
             now = datetime.now(NEW_YORK)
+            _cancel_orphaned_strategy_entry_orders(
+                broker, settings, strategy, now
+            )
             session = _cached_or_broker_market_session(
                 broker, settings, strategy.benchmark_symbol, now
+            )
+            current_positions = _parse_position_rows(
+                broker.positions(), strategy.symbols
+            )
+            _validate_strategy_positions(current_positions)
+            if session is not None and _flatten_strategy_positions_if_due(
+                broker, settings, strategy, now, session
+            ):
+                return 0
+            _ensure_positions_protected_before_market_data(
+                broker,
+                settings,
+                strategy,
+                current_positions,
+                now,
             )
             if session is None:
                 print("exchange holiday: skipping intraday_momentum scan")
                 return 0
             if not _is_market_hours(now, session):
                 print("market closed: skipping intraday_momentum scan")
-                return 0
-            if _flatten_strategy_positions_if_due(
-                broker, settings, strategy, now, session
-            ):
                 return 0
             (
                 market_data_exchange,
@@ -2257,18 +2442,6 @@ def main(argv: list[str] | None = None) -> int:
                         )
                     filled_quantity = int(filled)
                     average_fill_price = _trade_average_fill_price(trade) or limit_price
-                    _record_daily_entry(
-                        settings,
-                        request,
-                        filled_quantity=filled,
-                        average_fill_price=average_fill_price,
-                        strategy_version=(
-                            ROTATION_HYSTERESIS_V2_VERSION
-                            if args.profile == ROTATION_HYSTERESIS_V2_VERSION
-                            else args.profile
-                        ),
-                    )
-                    print(f"entry filled quantity={filled}; daily entry state recorded")
                     if filled_quantity > 0:
                         bars = strategy_bars[decision.symbol]
                         stop_price, take_price = strategy.protective_prices(
@@ -2281,18 +2454,44 @@ def main(argv: list[str] | None = None) -> int:
                             take_price,
                             order_ref=f"momentum-{datetime.now(NEW_YORK).date()}-{decision.symbol}-protect",
                         )
-                        for protective_trade in protective_trades:
+                        for order_type, protective_trade, protective_price in (
+                            ("STP", protective_trades[0], stop_price),
+                            ("LMT", protective_trades[1], take_price),
+                        ):
                             _record_order_state(
                                 settings,
                                 TradeRequest(
                                     symbol=decision.symbol,
                                     action="SELL",
                                     quantity=filled_quantity,
+                                    order_type=order_type,
+                                    limit_price=(
+                                        protective_price
+                                        if order_type == "LMT"
+                                        else None
+                                    ),
                                     time_in_force="GTC",
                                     reduce_only=True,
                                 ),
                                 protective_trade,
                             )
+                        _record_daily_entry(
+                            settings,
+                            request,
+                            filled_quantity=filled,
+                            average_fill_price=average_fill_price,
+                            strategy_version=(
+                                ROTATION_HYSTERESIS_V2_VERSION
+                                if args.profile == ROTATION_HYSTERESIS_V2_VERSION
+                                else args.profile
+                            ),
+                            protective_stop_price=stop_price,
+                            protective_take_price=take_price,
+                        )
+                        print(
+                            f"entry filled quantity={filled}; protection created "
+                            "before daily entry state was recorded"
+                        )
             return 0
 
         if args.command == "backtest-momentum":
@@ -2553,6 +2752,8 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         if broker is not None:
             broker.disconnect()
+        if strategy_run_lock is not None:
+            strategy_run_lock.close()
 
     return 2
 
