@@ -123,6 +123,12 @@ Then include `核心概览` with resource, botmux, IB, and cache status. End wit
 Do not append the full task list, UTC server timestamp, collection commands,
 old-task history, or a duplicate conclusion.
 
+Send the report as a multiline `botmux send` heredoc. Line boundaries must be
+real LF characters (`U+000A`), not the two literal characters `\` and `n`.
+Before sending, reject and rebuild any body containing a literal `\n`
+sequence; passing a JSON-escaped string directly as the message body causes
+the chat client to display broken line breaks.
+
 ## Safe Task Replacement
 
 botmux currently has no in-place schedule edit. Replace the monitor without a
@@ -135,6 +141,10 @@ coverage gap:
 4. Remove every superseded health-monitor task by ID so only one remains.
 5. Run the replacement immediately with `botmux schedule run <new-id>`.
 6. Confirm `lastStatus=ok`, review the rendered message, and verify the next run.
+
+For the immediate test, inspect the delivered message itself (for example with
+`botmux quoted <message-id>`) and verify that its content contains real newline
+characters rather than literal `\n` sequences.
 
 Never leave two five-minute monitors active: duplicate runs waste a botmux
 worker and can emit contradictory alerts.
