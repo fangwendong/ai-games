@@ -80,6 +80,8 @@ supervisor is `ibkr-live-strategy-reporter` and remains alive across sessions.
 It executes at seconds `03/13/23/33/43/53`, sends chat only at `:03`, and gates
 execution to 09:30-16:00 America/New_York on weekdays. The broker calendar
 remains authoritative for holidays and early closes.
+The reporter loop exits itself at normal close as a fallback if an external
+stop task is delivered but not acted on.
 
 - The legacy `af15c80b` Codex polling task must remain paused.
 - Exactly one `ibkr-live-strategy-reporter` tmux session and one
