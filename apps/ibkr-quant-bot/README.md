@@ -70,6 +70,10 @@ ibkr-bot doctor
 For a logged-in live IB Gateway, the common API port is `4001`. Keep `IBKR_READONLY=true` for balance, position, and quote checks:
 
 The local IBC startup and login process is documented in [docs/ibc-gateway-startup.md](docs/ibc-gateway-startup.md).
+The canonical route to every bot runbook and research note is the
+[documentation index](docs/README.md). Server resource, botmux, Gateway
+heartbeat, cache-process, alert-threshold, and report-format maintenance is in
+[the health-monitor runbook](docs/server-health-monitor.md).
 The scheduled process, port, and authenticated API health checks are documented
 in [docs/ibkr-api-heartbeat.md](docs/ibkr-api-heartbeat.md).
 The standalone bounded SMART subscription process, atomic quote cache, health
