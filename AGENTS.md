@@ -22,6 +22,7 @@ run commands and validation path.
 |---|---|
 | `README.md` | Repository overview and worktree workflow. |
 | `AGENTS.md` | This AI orientation guide. |
+| `docs/` | Repository-wide documents, including the OPC studio/quant stack. |
 | `apps/ibkr-quant-bot/` | Interactive Brokers market data, backtest, and live strategy bot. |
 | `games/escape-room-doors/` | Static browser escape-room prototype. |
 | `games/garden-logic/` | Static browser logic puzzle prototype. |
@@ -40,6 +41,8 @@ run commands and validation path.
 - For searches, prefer `rg` and `rg --files`.
 - Keep generated state, credentials, `.env`, cache files, and local logs out of
   git.
+- Route repository-wide documents through `docs/README.md`; keep subproject
+  document indexes linked from the corresponding section in this file.
 - Default to ASCII in repo files unless an existing file intentionally uses
   another character set.
 
@@ -55,6 +58,12 @@ Recent work has focused on `apps/ibkr-quant-bot/`, especially:
 
 Before changing live-trading behavior, inspect the latest git history and the
 bot runbooks. Trading code has real money implications.
+
+## Repository-Wide Documents
+
+Start with `docs/README.md` for material spanning multiple subprojects. It
+currently routes to the OPC exploration covering the shared AI, server, game,
+and quant-development workflow.
 
 ## IBKR Quant Bot
 
