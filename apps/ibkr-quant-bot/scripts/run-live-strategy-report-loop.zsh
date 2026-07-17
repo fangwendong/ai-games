@@ -9,6 +9,20 @@ state_dir="$app_dir/.ibkr_bot_state/live-strategy-reporter"
 mkdir -p "$state_dir"
 
 while true; do
+  # Deterministic normal-session shutdown. Do not depend solely on a botmux
+  # task being delivered to and acted on by an AI session after the close.
+  et_weekday=$((10#$(TZ=America/New_York date +%u)))
+  et_hhmm=$((10#$(TZ=America/New_York date +%H%M)))
+  if (( et_weekday >= 6 || et_hhmm >= 1600 )); then
+    log_tmp="$state_dir/latest-run.log.tmp.$$"
+    print -r -- "shutdown_reason=market_closed" >"$log_tmp"
+    print -r -- "strategy_interval_seconds=10" >>"$log_tmp"
+    print -r -- "report_interval_seconds=60" >>"$log_tmp"
+    print -r -- "runner_exit=0" >>"$log_tmp"
+    mv -f "$log_tmp" "$state_dir/latest-run.log"
+    exit 0
+  fi
+
   # Use fixed wall-clock slots instead of sleeping after a run. A slow run may
   # skip a slot, but executions never overlap or drift into a tight retry loop.
   now_epoch=$(date +%s)

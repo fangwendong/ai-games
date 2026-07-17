@@ -39,6 +39,11 @@ but only update the bounded local latest-summary/latest-run files. Runs are
 strictly serial: a slow execution skips a later wall-clock slot instead of
 overlapping another strategy process.
 
+The supervisor also exits itself at or after `16:00 America/New_York` on a
+weekday, or immediately on a weekend. This is a deterministic fallback for a
+missed external stop task. It closes only the strategy supervisor; quote and
+context caches, Gateway, heartbeat, and health monitoring remain independent.
+
 ## Safe validation
 
 Generate a report without submitting orders or sending a message:
