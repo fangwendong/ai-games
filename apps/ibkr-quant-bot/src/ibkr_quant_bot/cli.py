@@ -2404,6 +2404,31 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 json.dumps(
                     {
+                        "session_trade_status": {
+                            "daily_entry_count": _daily_entry_count(settings, now),
+                            "max_daily_entries": settings.max_daily_entries,
+                            "current_positions": [
+                                {
+                                    "symbol": symbol,
+                                    "quantity": int(float(position_row["position"])),
+                                }
+                                for symbol, position_row in current_positions.items()
+                            ],
+                            "entries": [
+                                {
+                                    "symbol": str(entry.get("symbol", "")).upper(),
+                                    "filled_quantity": entry.get("filled_quantity"),
+                                    "average_fill_price": entry.get(
+                                        "average_fill_price"
+                                    ),
+                                    "time": entry.get("time"),
+                                }
+                                for entry in _load_entry_state(settings, now).get(
+                                    "entries", []
+                                )
+                                if isinstance(entry, dict)
+                            ],
+                        },
                         "core_decisions": [
                             {
                                 key: row[key]
