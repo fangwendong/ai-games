@@ -26,6 +26,7 @@ from .historical_cache import (
     save_bars_by_day,
 )
 from .history_refresh import schedule_lookback_days, validate_recent_cached_sessions
+from .live_review_log import append_review_log, current_session_date
 from .models import Bar, MarketSession, Quote, StrategyDecision, TradeRequest
 from .market_context_cache import (
     MarketContextCacheError,
@@ -159,6 +160,31 @@ def _build_parser() -> argparse.ArgumentParser:
         "--symbols", nargs="+", default=["QQQ", "SOXL", "SOXS"]
     )
     cache_context.add_argument("--cache-path", default=None)
+
+    review_log = subparsers.add_parser(
+        "append-live-review-log",
+        help="append the day's sanitized live-strategy review into the review log",
+    )
+    review_log.add_argument(
+        "--state-dir",
+        default=".ibkr_bot_state/semiconductor_rotation_intraday",
+        help="strategy state directory containing the daily journal files",
+    )
+    review_log.add_argument(
+        "--doc-path",
+        default="docs/live-strategy-review-log.md",
+        help="target markdown review log",
+    )
+    review_log.add_argument(
+        "--latest-summary-path",
+        default=".ibkr_bot_state/live-strategy-reporter/latest-summary.txt",
+        help="fallback summary used when no entry journal exists",
+    )
+    review_log.add_argument(
+        "--session-date",
+        default=None,
+        help="America/New_York session date to append (defaults to current trading date)",
+    )
 
     subparsers.add_parser("account", help="show account summary")
     subparsers.add_parser(
@@ -1956,6 +1982,20 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "cache-live-context":
         return _run_live_context_cache(settings, args)
+
+    if args.command == "append-live-review-log":
+        state_dir = Path(args.state_dir)
+        doc_path = Path(args.doc_path)
+        latest_summary_path = Path(args.latest_summary_path)
+        session_date = args.session_date or current_session_date()
+        result = append_review_log(
+            state_dir=state_dir,
+            doc_path=doc_path,
+            session_date=session_date,
+            latest_summary_path=latest_summary_path,
+        )
+        print(result.message)
+        return 0
 
     strategy_run_lock = None
     strategy_run_deadline = None

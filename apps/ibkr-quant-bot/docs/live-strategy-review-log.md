@@ -28,6 +28,20 @@ Do not copy raw runtime records into Git. They can contain account numbers,
 broker IDs, OCA group names, and other private metadata. Record only the
 sanitized fields used below.
 
+## Daily Close Automation
+
+The post-close maintenance command is
+`PYTHONPATH=src python -m ibkr_quant_bot.cli append-live-review-log`.
+It reads the current session's sanitized journals under
+`.ibkr_bot_state/semiconductor_rotation_intraday/` and appends a single
+session block to this document if the date is not already present. If the day
+has no filled entry yet, the command records a no-trade snapshot instead of
+inventing a result.
+
+Run it after the regular US close, once the exit and commission records have
+settled. The scheduled task should stay separate from the live 10-second
+strategy runner, quote cache, and context cache.
+
 ## Session Summary
 
 | Session | Profile | Bar / execution source | Result | Exit | Net PnL | Net return |
@@ -230,6 +244,37 @@ A same-source historical replay has not yet been appended for this session.
 When added, it must use the complete 2026-07-16 SMART bar set and the corrected
 protective-OCA execution model; it must not substitute ARCA bars or infer the
 two live entry fills from a favorable bar extreme.
+
+## 2026-07-17
+
+### Market-Data Context
+
+- Bar / quote / order route: SMART / SMART / SMART
+- Source decision: all strategy symbols passed SMART validation
+
+### Execution
+
+- Session date and profile: 2026-07-17 / rotation-hysteresis-v2
+- Bar source / quote source / order route: SMART / SMART / SMART
+- Data completeness and corporate actions: entry journal recorded; no
+  corporate-action event is reflected in the session snapshot
+- Signals considered and rejected: SOXL entry signal was accepted; SOXS stayed
+  out of the bullish regime
+- Entry time, symbol, quantity, average fill, and reason: 12:00:04 ET, SOXL,
+  21, $138.88, entry signal satisfied
+- Protective stop/take created: stop $133.35 / take $144.09
+- Exit time, quantity, average fill, and reason: N/A; no exit fill found in
+  the current journal snapshot
+- Gross PnL, commissions, broker net realized PnL, and net return on entry
+  notional: N/A until an exit fill is recorded
+- End-of-session position and open-order state: entry recorded; protective OCA
+  orders remain active in the stored journal snapshot
+
+### Review
+
+The stored evidence confirms the entry and the protective orders, but the
+closeout leg is not present in the current journal snapshot yet. Reconcile the
+exit before treating this day as a completed round trip.
 
 ## Follow-Up Items
 
