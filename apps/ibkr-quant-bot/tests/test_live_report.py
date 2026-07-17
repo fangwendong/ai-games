@@ -26,13 +26,16 @@ class LiveReportTest(unittest.TestCase):
         )
 
         self.assertIn("| 项目 | 内容 |", report)
-        self.assertIn("| 可用现金 | 4402.96 USD", report)
+        self.assertIn("| 可用现金 | 4402.96 USD |", report)
+        self.assertIn("| 现金来源 | live_context_cache |", report)
         self.assertIn("| 预留现金 | 10.00 USD |", report)
-        self.assertIn("| 执行时间 | 耗时 731 ms", report)
-        self.assertIn("| QQQ | 最新价 695.49", report)
-        self.assertIn("| SOXL | 最新价 132.50；⚪ 今日未成交；空仓", report)
-        self.assertIn("| Bar 行情 | exchange=SMART", report)
-        self.assertIn("age=273.8 ms", report)
+        self.assertIn("| 执行耗时 | 731 ms |", report)
+        self.assertIn("| QQQ 最新价 | 695.49 |", report)
+        self.assertIn("| SOXL 最新价 | 132.50 |", report)
+        self.assertIn("| SOXL 今日状态 | ⚪ 今日未成交 |", report)
+        self.assertIn("| SOXL 当前状态 | 空仓 |", report)
+        self.assertIn("| Bar 交易所 | SMART |", report)
+        self.assertIn("| Quote 延迟 | 273.8 ms |", report)
         self.assertIn("| Bar 数量 | QQQ=16, SOXL=16, SOXS=16 |", report)
         self.assertIn("本轮结论：不下单｜当前没有入场或退场信号", report)
 
@@ -49,7 +52,7 @@ class LiveReportTest(unittest.TestCase):
         )
 
         self.assertIn("🟢 今日 SOXL 已成交并清仓；今日不会再次开仓", report)
-        self.assertIn("| SOXL | 最新价 132.50；🟢 已成交·已清仓；空仓", report)
+        self.assertIn("| SOXL 今日状态 | 🟢 已成交·已清仓 |", report)
         self.assertIn("不会：入场额度 1/1", report)
         self.assertIn("本轮结论：不下单｜今日入场次数已达上限", report)
 
