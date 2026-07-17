@@ -75,6 +75,7 @@ Read first:
 - `apps/ibkr-quant-bot/docs/README.md` (canonical index for every bot document)
 - `apps/ibkr-quant-bot/docs/ibc-gateway-startup.md`
 - `apps/ibkr-quant-bot/docs/ibkr-market-data-troubleshooting.md`
+- `apps/ibkr-quant-bot/docs/live-strategy-reporter.md`
 
 All maintained Markdown under `apps/ibkr-quant-bot/docs/` must be reachable
 through `apps/ibkr-quant-bot/docs/README.md`. Update that index whenever a bot
