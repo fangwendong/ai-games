@@ -227,7 +227,7 @@ OPC 的优势不是一次做很多游戏，而是让“从想法到可试玩版�
 | `ib-insync` | 封装 IBKR TWS API 的连接、合约、行情和订单调用 | 所有调用集中在 broker 层；明确 client ID、市场数据类型和连接超时 |
 | IB Gateway | 连接 IBKR 账户、行情和交易 API | API 端口受限；实盘启用前验证身份、权限和行情订阅 |
 | IBC | 自动启动和守护 IB Gateway | 只负责进程生命周期，不能替代 2FA 和交易安全开关 |
-| IBKR paper account | 在模拟环境验证 API、订单和退出链路 | 模拟成交与真实成交有差异，不能用 paper 结果替代实盘风控 |
+| IBKR live 账户与行情权限 | 获取真实的历史/实时行情，并在明确授权后承载实盘订单 | 日常检查强制只读、dry-run、禁止实盘下单；live 连接不等于允许交易 |
 | 自研 CLI | 提供 doctor、heartbeat、历史补齐、回测和策略命令 | 只读检查、dry-run 与实盘命令明确分离 |
 | 回测引擎 | 重放历史 bars，计算交易成本、盈亏、胜率和回撤 | 信号与成交按时间因果执行，止盈止损口径与实盘对齐 |
 | SMART / ARCA 行情 | 提供实时和历史市场数据 | 同一交易日保持统一来源；实盘不静默回退到延迟行情 |
@@ -263,9 +263,11 @@ OPC 的优势不是一次做很多游戏，而是让“从想法到可试玩版�
 6. **运维层**：heartbeat、日志轮转、定时启停、资源巡检和告警。
 7. **复盘层**：真实成交、佣金、滑点与回测差异记录。
 
-### 从模拟盘开始
+### 从 live 账户的只读验证开始
 
-先在 paper account 验证连接、行情、订单状态和退出逻辑，再考虑小资金实盘。IBKR 官方说明 TWS API/Web API 可用于模拟账户，但模拟成交与真实市场仍有差异，例如部分订单类型和盘口深度，参见 [IBKR Paper Trading Account](https://ibkrcampus.com/campus/glossary-terms/paper-trading-account/)。
+这套系统从一开始就通过 IBKR live 账户权限获取历史行情、回测数据和实盘行情；回测在本地重放这些历史 bars，并不会把回测订单发送给 IBKR。
+
+live 账户连接与真实下单是两件事。连接、heartbeat、行情检查和策略验证默认强制只读、dry-run、禁止实盘交易。只有在策略、风控、任务状态和人工授权全部确认后，才显式开启真实订单通道。
 
 安全默认值应该是：
 
@@ -275,7 +277,7 @@ DRY_RUN=true
 ALLOW_LIVE_TRADING=false
 ```
 
-进入实盘必须同时满足多个显式开关，而不是修改一个布尔值就能下单。只读检查、回测、策略研究和实盘执行要使用不同命令与配置边界。
+允许真实下单必须同时满足多个显式开关，而不是修改一个布尔值就能下单。只读检查、回测、策略研究和实盘执行要使用不同命令与配置边界。
 
 ### 回测必须接近实盘
 
@@ -394,7 +396,7 @@ GitHub 的[秘密扫描说明](https://docs.github.com/en/code-security/concepts
 
 ### 第 3 周：量化闭环
 
-- 只连接模拟账户；
+- 连接 IBKR live 账户，但强制只读、dry-run、禁止实盘下单；
 - 下载、校验并统一保存历史行情；
 - 完成一个包含交易成本的基线回测；
 - 用 dry-run 运行策略，验证信号、风控和收盘退出。
@@ -431,7 +433,6 @@ AI 擅长加速执行，不擅长替你承担责任。服务器可以 24 小时�
 - [OpenAI Account Sharing Policy](https://help.openai.com/en/articles/10471989)
 - [ChatGPT 与 API Platform 的独立计费说明](https://help.openai.com/en/articles/9039756-billing-settings-in-chatgpt-vs-platform)
 - [OpenAI Codex 文档](https://developers.openai.com/codex/)
-- [IBKR Paper Trading Account](https://ibkrcampus.com/campus/glossary-terms/paper-trading-account/)
 - [GitHub Secret Scanning](https://docs.github.com/en/code-security/concepts/secret-security/secret-scanning)
 
-> 风险提示：本文是工程实践分享，不构成投资建议、收益承诺或开户建议。量化回测不代表未来表现，模拟成交不等于真实成交，实盘交易可能损失全部投入资金。
+> 风险提示：本文是工程实践分享，不构成投资建议、收益承诺或开户建议。量化回测不代表未来表现，历史 bar 撮合不等于真实成交，实盘交易可能损失全部投入资金。
