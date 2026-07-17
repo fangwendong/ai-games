@@ -191,6 +191,13 @@ intraday setup in this branch is the momentum rotation rule:
 - exit on stop loss, take profit, or bearish reversal
 - one open position at a time across `SOXL`, `TQQQ`, and `TECL`
 
+For a new intraday-momentum entry, live sizing uses the lower of the account's
+current USD `TotalCashValue` and `AvailableFunds` as the notional ceiling. It
+does not use margin `BuyingPower`. The ATR-based `IBKR_MAX_RISK_PER_TRADE`
+limit still applies, so the order quantity is the lower of the cash-sized and
+risk-sized quantities. A missing, ambiguous, non-USD, or non-positive balance
+snapshot fails closed and does not affect position exits or mandatory flattening.
+
 Run the scanner and exit manager with the current default
 `rotation-hysteresis-v2` profile:
 
