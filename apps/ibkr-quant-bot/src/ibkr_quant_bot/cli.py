@@ -39,6 +39,7 @@ from .runtime_lock import (
     RuntimeLockError,
     acquire_cache_writer_lock,
     acquire_runtime_lock,
+    arm_runtime_lock_deadline,
 )
 from .strategy import (
     IntradayMomentumStrategy,
@@ -49,6 +50,8 @@ from .strategy import (
 
 NEW_YORK = ZoneInfo("America/New_York")
 DEFAULT_MOMENTUM_PROFILE = "rotation-hysteresis-v2"
+INTRADAY_MOMENTUM_RUNTIME_TIMEOUT_SECONDS = 60.0
+INTRADAY_MOMENTUM_REMOTE_REQUEST_TIMEOUT_SECONDS = 3.0
 FROZEN_ROTATION_HYSTERESIS_VERSION = "rotation-hysteresis-v1"
 FROZEN_ROTATION_HYSTERESIS_PARAMETERS: dict[str, object] = {
     "symbols": ("SOXL", "SOXS"),
@@ -379,7 +382,11 @@ def _doctor(settings: Settings) -> int:
 
 def _with_broker(settings: Settings) -> IbkrBroker:
     broker = IbkrBroker(settings)
-    broker.connect()
+    try:
+        broker.connect()
+    except Exception:
+        broker.disconnect()
+        raise
     return broker
 
 
@@ -1776,6 +1783,7 @@ def main(argv: list[str] | None = None) -> int:
         return _run_live_context_cache(settings, args)
 
     strategy_run_lock = None
+    strategy_run_deadline = None
     if args.command == "intraday-momentum":
         lock_path = _strategy_runtime_lock_path(settings, args.profile)
         try:
@@ -1785,11 +1793,18 @@ def main(argv: list[str] | None = None) -> int:
                 f"intraday momentum skipped: another {args.profile} run is active"
             )
             return 0
+        strategy_run_deadline = arm_runtime_lock_deadline(
+            strategy_run_lock, INTRADAY_MOMENTUM_RUNTIME_TIMEOUT_SECONDS
+        )
+        settings = replace(
+            settings,
+            request_timeout=INTRADAY_MOMENTUM_REMOTE_REQUEST_TIMEOUT_SECONDS,
+        )
 
     broker = None
-    if not (args.command == "backtest-momentum" and args.reuse_data):
-        broker = _with_broker(settings)
     try:
+        if not (args.command == "backtest-momentum" and args.reuse_data):
+            broker = _with_broker(settings)
         if args.command == "heartbeat":
             print(broker.server_time().isoformat())
             return 0
@@ -2749,9 +2764,20 @@ def main(argv: list[str] | None = None) -> int:
             }
             print(json.dumps(report, indent=2, sort_keys=True))
             return 0
+    except (BrokerError, ConnectionError, TimeoutError, OSError) as exc:
+        if args.command != "intraday-momentum":
+            raise
+        print(
+            f"intraday momentum failed: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+            flush=True,
+        )
+        return 1
     finally:
         if broker is not None:
             broker.disconnect()
+        if strategy_run_deadline is not None:
+            strategy_run_deadline.cancel()
         if strategy_run_lock is not None:
             strategy_run_lock.close()
 

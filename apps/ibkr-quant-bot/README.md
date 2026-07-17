@@ -238,7 +238,12 @@ In live trading mode, the intraday scanners refuse delayed market data:
 - Each `intraday-momentum` run holds a non-blocking advisory lock for the
   complete position-check, decision, and order lifecycle. An overlapping run
   from any profile skips before connecting to IBKR instead of racing the first
-  run over the same positions and order state.
+  run over the same positions and order state. The accepted process has a hard
+  60-second lifetime: a watchdog closes the lock and terminates the process
+  with exit code `124` if it gets stuck. Intraday IBKR remote requests use a
+  3-second request timeout and exit non-zero on failure. Other local strategy
+  stages do not add separate deadlines; existing fill/cancel confirmation
+  windows remain order-safety controls.
 - A strategy-owned BUY order is expected to live only inside the one-shot run
   that submitted it. A later run treats any remaining `momentum-...-entry-...`
   BUY as orphaned, cancels it, and refuses to continue until IBKR confirms that
