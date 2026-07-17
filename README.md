@@ -2,6 +2,11 @@
 
 This repository is the shared home for AI-assisted game prototypes and reusable Codex skills.
 
+The repository-wide [documentation index](docs/README.md) includes
+[OPC Exploration](docs/opc-exploration.md), a shareable guide to building a
+one-person game studio and safety-first quantitative-trading stack with
+ChatGPT/Codex and an overseas server.
+
 ## Layout
 
 - `games/`: one directory per game.
