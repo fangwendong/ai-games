@@ -14,9 +14,12 @@ from .strategy import IntradayMomentumStrategy
 
 @dataclass(frozen=True)
 class BacktestCostModel:
-    commission_per_order: float = 0.35
+    commission_per_order: float = 1.0
     slippage_bps: float = 1.0
     spread_bps: float = 1.0
+    commission_per_share: float = 0.0
+    minimum_commission_per_order: float = 0.0
+    sell_fee_per_share: float = 0.0
 
     @property
     def per_side_bps(self) -> float:
@@ -27,6 +30,31 @@ class BacktestCostModel:
 
     def sell_fill(self, raw_price: float) -> float:
         return raw_price * (1.0 - self.per_side_bps / 10_000.0)
+
+    def commission(self, shares: int, *, side: str) -> float:
+        variable = self.commission_per_share * shares
+        base = max(
+            self.commission_per_order,
+            self.minimum_commission_per_order,
+            variable,
+        )
+        if side.upper() == "SELL":
+            base += self.sell_fee_per_share * shares
+        return base
+
+
+@dataclass(frozen=True)
+class ProfitLockRule:
+    """Close-based trailing profit lock used only when explicitly enabled."""
+
+    activation_pct: float
+    drawdown_pct: float
+
+    def __post_init__(self) -> None:
+        if self.activation_pct <= 0:
+            raise ValueError("activation_pct must be positive")
+        if self.drawdown_pct <= 0:
+            raise ValueError("drawdown_pct must be positive")
 
 
 @dataclass(frozen=True)
@@ -42,6 +70,7 @@ class BacktestTrade:
     exit_reason: str
     gross_pnl: float
     net_pnl: float
+    entry_time: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -124,6 +153,9 @@ class _OpenPosition:
     entry_price: float
     entry_time: datetime
     entry_date: date
+    entry_commission: float
+    protective_stop_price: float | None = None
+    protective_take_price: float | None = None
 
 
 NEW_YORK = ZoneInfo("America/New_York")
@@ -139,6 +171,90 @@ def _session_date(value: datetime) -> date:
     if value.tzinfo is None:
         return value.date()
     return value.astimezone(NEW_YORK).date()
+
+
+def validate_historical_bar_coverage(
+    bars_by_symbol: dict[str, list[Bar]], *, recent_sessions: int = 2
+) -> dict[str, object]:
+    """Fail closed when the newest cached 5-minute sessions are incomplete."""
+    if recent_sessions < 1:
+        raise ValueError("recent_sessions must be positive")
+    if not bars_by_symbol:
+        raise ValueError("historical preflight requires at least one symbol")
+
+    grouped: dict[str, dict[date, list[Bar]]] = {}
+    latest_by_symbol: dict[str, date] = {}
+    for raw_symbol, bars in bars_by_symbol.items():
+        symbol = raw_symbol.upper()
+        if not bars:
+            raise ValueError(f"historical preflight found no bars for {symbol}")
+        sessions: dict[date, list[Bar]] = defaultdict(list)
+        for bar in bars:
+            sessions[_session_date(bar.time)].append(bar)
+        grouped[symbol] = sessions
+        latest_by_symbol[symbol] = max(sessions)
+
+    latest_dates = set(latest_by_symbol.values())
+    if len(latest_dates) != 1:
+        detail = ", ".join(
+            f"{symbol}={session.isoformat()}"
+            for symbol, session in sorted(latest_by_symbol.items())
+        )
+        raise ValueError(f"historical preflight latest-session mismatch: {detail}")
+
+    common_sessions = sorted(
+        set.intersection(*(set(sessions) for sessions in grouped.values()))
+    )
+    if len(common_sessions) < recent_sessions:
+        raise ValueError(
+            "historical preflight needs at least "
+            f"{recent_sessions} common sessions; found {len(common_sessions)}"
+        )
+
+    checked = common_sessions[-recent_sessions:]
+    counts: dict[str, dict[str, int]] = {}
+    for session in checked:
+        session_key = session.isoformat()
+        timeline_by_symbol: dict[str, tuple[datetime, ...]] = {}
+        counts[session_key] = {}
+        for symbol, sessions in grouped.items():
+            bars = sessions[session]
+            timeline = tuple(sorted(_time_key(bar.time) for bar in bars))
+            if len(timeline) != len(set(timeline)):
+                raise ValueError(
+                    f"historical preflight found duplicate {symbol} bars on {session_key}"
+                )
+            if len(timeline) not in {42, 78}:
+                raise ValueError(
+                    "historical preflight expected 78 regular-session bars or 42 "
+                    f"early-close bars for {symbol} on {session_key}; found {len(timeline)}"
+                )
+            gaps = [
+                (later - earlier).total_seconds()
+                for earlier, later in zip(timeline, timeline[1:])
+            ]
+            if any(gap != 300 for gap in gaps):
+                raise ValueError(
+                    f"historical preflight found a non-5-minute gap for {symbol} on {session_key}"
+                )
+            timeline_by_symbol[symbol] = timeline
+            counts[session_key][symbol] = len(timeline)
+        reference_symbol = sorted(timeline_by_symbol)[0]
+        reference = timeline_by_symbol[reference_symbol]
+        for symbol, timeline in timeline_by_symbol.items():
+            if timeline != reference:
+                raise ValueError(
+                    "historical preflight timeline mismatch on "
+                    f"{session_key}: {reference_symbol} versus {symbol}"
+                )
+
+    latest = next(iter(latest_dates))
+    return {
+        "status": "passed",
+        "latest_common_session": latest.isoformat(),
+        "checked_sessions": [session.isoformat() for session in checked],
+        "bar_counts": counts,
+    }
 
 
 def _prefix_at(bars: list[Bar], current_time: datetime) -> list[Bar]:
@@ -225,14 +341,55 @@ def _exit_reason_from_decision(decision_meta: dict[str, object]) -> str:
     return "signal"
 
 
+def _protective_prices(
+    strategy: IntradayMomentumStrategy,
+    symbol: str,
+    average_cost: float,
+    bars: list[Bar],
+) -> tuple[float | None, float | None]:
+    protective_prices = getattr(strategy, "protective_prices", None)
+    if not callable(protective_prices):
+        return None, None
+    stop_price, take_price = protective_prices(symbol, average_cost, bars)
+    return round(float(stop_price), 2), round(float(take_price), 2)
+
+
+def _protective_fill(
+    position: _OpenPosition, bar: Bar
+) -> tuple[float, str] | None:
+    """Model the broker-side sell OCA after the entry bar has completed.
+
+    A sell stop gaps down to the bar open, while a sell limit receives opening
+    price improvement. Five-minute OHLC cannot reveal which order fired first
+    when both levels trade in one bar, so the stop wins as the conservative
+    assumption.
+    """
+    stop_price = position.protective_stop_price
+    take_price = position.protective_take_price
+    stop_hit = stop_price is not None and bar.low <= stop_price
+    take_hit = take_price is not None and bar.high >= take_price
+    if stop_hit:
+        return min(bar.open, stop_price), "protective_stop"
+    if take_hit:
+        return max(bar.open, take_price), "protective_take"
+    return None
+
+
 def run_intraday_momentum_backtest(
     bars_by_symbol: dict[str, list[Bar]],
     strategy: IntradayMomentumStrategy | None = None,
     cost_model: BacktestCostModel | None = None,
     initial_capital: float = 1_000.0,
+    profit_lock_rule: ProfitLockRule | None = None,
+    simulate_protective_oca: bool = True,
 ) -> BacktestResult:
     strategy = strategy or IntradayMomentumStrategy()
     cost_model = cost_model or BacktestCostModel()
+    if profit_lock_rule is None:
+        activation_pct = getattr(strategy, "profit_lock_activation_pct", None)
+        drawdown_pct = getattr(strategy, "profit_lock_drawdown_pct", None)
+        if activation_pct is not None and drawdown_pct is not None:
+            profit_lock_rule = ProfitLockRule(activation_pct, drawdown_pct)
     grouped = _group_bars_by_day(bars_by_symbol)
     all_days = sorted({day for daily in grouped.values() for day in daily})
 
@@ -252,9 +409,9 @@ def run_intraday_momentum_backtest(
         nonlocal gross_cash, net_cash, trade_count, win_count, loss_count
         nonlocal total_commission, total_slippage_cost, total_spread_cost
         gross_cash += position.quantity * raw_exit_price
+        exit_commission = cost_model.commission(position.quantity, side="SELL")
         net_cash += (
-            position.quantity * cost_model.sell_fill(raw_exit_price)
-            - cost_model.commission_per_order
+            position.quantity * cost_model.sell_fill(raw_exit_price) - exit_commission
         )
         gross_entry = position.entry_price
         net_entry = cost_model.buy_fill(position.entry_price)
@@ -263,14 +420,15 @@ def run_intraday_momentum_backtest(
         gross_pnl = position.quantity * (gross_exit - gross_entry)
         net_pnl = (
             position.quantity * (net_exit - net_entry)
-            - 2 * cost_model.commission_per_order
+            - position.entry_commission
+            - exit_commission
         )
         trade_count += 1
         if net_pnl >= 0:
             win_count += 1
         else:
             loss_count += 1
-        total_commission += cost_model.commission_per_order
+        total_commission += exit_commission
         total_spread_cost += (
             position.quantity * raw_exit_price * (cost_model.spread_bps / 10_000.0)
         )
@@ -290,6 +448,7 @@ def run_intraday_momentum_backtest(
                 exit_reason=reason,
                 gross_pnl=gross_pnl,
                 net_pnl=net_pnl,
+                entry_time=position.entry_time,
             )
         )
 
@@ -309,6 +468,7 @@ def run_intraday_momentum_backtest(
         pending_order: _PendingOrder | None = None
         pending_exit: _PendingExit | None = None
         open_position: _OpenPosition | None = None
+        peak_close: float | None = None
         day_closed = False
 
         for current_time in timeline:
@@ -326,6 +486,7 @@ def run_intraday_momentum_backtest(
                         pending_exit.reason,
                     )
                     open_position = None
+                    peak_close = None
                     day_closed = True
                 pending_exit = None
 
@@ -339,12 +500,13 @@ def run_intraday_momentum_backtest(
                         int(gross_cash // raw_entry_price),
                     )
                     if shares > 0:
+                        entry_commission = cost_model.commission(shares, side="BUY")
                         gross_cash -= shares * raw_entry_price
                         net_cash -= (
                             shares * cost_model.buy_fill(raw_entry_price)
-                            + cost_model.commission_per_order
+                            + entry_commission
                         )
-                        total_commission += cost_model.commission_per_order
+                        total_commission += entry_commission
                         total_spread_cost += (
                             shares
                             * raw_entry_price
@@ -355,19 +517,62 @@ def run_intraday_momentum_backtest(
                             * raw_entry_price
                             * (cost_model.slippage_bps / 10_000.0)
                         )
+                        signal_bars = _prefix_at(
+                            daily_bars_by_symbol.get(pending_order.symbol, []),
+                            pending_order.signal_time,
+                        )
+                        protective_stop_price: float | None = None
+                        protective_take_price: float | None = None
+                        if simulate_protective_oca:
+                            (
+                                protective_stop_price,
+                                protective_take_price,
+                            ) = _protective_prices(
+                                strategy,
+                                pending_order.symbol,
+                                cost_model.buy_fill(raw_entry_price),
+                                signal_bars,
+                            )
                         open_position = _OpenPosition(
                             symbol=pending_order.symbol,
                             quantity=shares,
                             entry_price=raw_entry_price,
                             entry_time=current_time,
                             entry_date=_session_date(fill_bar.time),
+                            entry_commission=entry_commission,
+                            protective_stop_price=protective_stop_price,
+                            protective_take_price=protective_take_price,
                         )
+                        peak_close = max(raw_entry_price, fill_bar.close)
                 pending_order = None
+
+            if (
+                open_position is not None
+                and simulate_protective_oca
+                and current_time > open_position.entry_time
+            ):
+                bar = bars_by_time.get(open_position.symbol, {}).get(current_time)
+                protective_fill = (
+                    _protective_fill(open_position, bar) if bar is not None else None
+                )
+                if protective_fill is not None:
+                    fill_price, reason = protective_fill
+                    close_position(
+                        open_position,
+                        fill_price,
+                        _session_date(bar.time),
+                        reason,
+                    )
+                    open_position = None
+                    pending_exit = None
+                    peak_close = None
+                    day_closed = True
 
             if open_position is not None and pending_exit is None:
                 bars = daily_bars_by_symbol.get(open_position.symbol, [])
                 bar = bars_by_time.get(open_position.symbol, {}).get(current_time)
                 if bar is not None:
+                    peak_close = max(peak_close or open_position.entry_price, bar.close)
                     prefix = _prefix_at(bars, current_time)
                     benchmark_prefix = _prefix_at(benchmark_daily_bars, current_time)
                     quote = Quote(
@@ -393,6 +598,21 @@ def run_intraday_momentum_backtest(
                                 signal_time=current_time,
                                 fill_time=fill_time,
                                 reason=_exit_reason_from_decision(exit_decision.meta),
+                            )
+                    elif (
+                        profit_lock_rule is not None
+                        and peak_close
+                        >= open_position.entry_price
+                        * (1.0 + profit_lock_rule.activation_pct)
+                        and bar.close
+                        <= peak_close * (1.0 - profit_lock_rule.drawdown_pct)
+                    ):
+                        fill_time = _next_bar_time(bars, current_time)
+                        if fill_time is not None:
+                            pending_exit = _PendingExit(
+                                signal_time=current_time,
+                                fill_time=fill_time,
+                                reason="profit_lock",
                             )
 
             if day_closed:

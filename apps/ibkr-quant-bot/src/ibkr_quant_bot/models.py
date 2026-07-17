@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 
@@ -16,12 +16,23 @@ class Bar:
 
 
 @dataclass(frozen=True)
+class MarketSession:
+    session_date: date
+    opens_at: datetime
+    closes_at: datetime
+
+
+@dataclass(frozen=True)
 class Quote:
     symbol: str
     bid: float | None
     ask: float | None
     last: float | None
     close: float | None
+    market_time: str | None = None
+    received_at: str | None = None
+    observed_at: str | None = None
+    published_at: str | None = None
 
     @property
     def reference_price(self) -> float:

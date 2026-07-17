@@ -63,6 +63,14 @@ class Settings:
     market_data_type: str = "auto"
     request_timeout: float = 30.0
     live_bar_max_age_seconds: int = 420
+    live_quote_cache_path: str | None = None
+    live_quote_cache_max_age_seconds: float = 3.0
+    live_quote_cache_refresh_seconds: float = 1.0
+    live_quote_max_samples_per_symbol: int = 100
+    live_context_cache_path: str | None = None
+    live_context_cache_max_age_seconds: float = 420.0
+    live_tradable_capital_cache_max_age_seconds: float = 90.0
+    entry_cash_reserve_usd: float = 10.0
     max_daily_entries: int = 1
     state_dir: str = ".ibkr_bot_state/semiconductor_rotation_intraday"
     entry_order_price_offset_bps: float = 5.0
@@ -72,6 +80,7 @@ class Settings:
     atr_window: int = 14
     atr_stop_multiple: float = 2.0
     historical_request_pause_seconds: float = 0.25
+    arca_fallback_enabled: bool = False
 
     @property
     def is_live(self) -> bool:
@@ -100,6 +109,30 @@ def load_settings() -> Settings:
         market_data_type=os.getenv("IBKR_MARKET_DATA_TYPE", "auto").strip().lower(),
         request_timeout=float(os.getenv("IBKR_REQUEST_TIMEOUT", "30")),
         live_bar_max_age_seconds=int(os.getenv("IBKR_LIVE_BAR_MAX_AGE_SECONDS", "420")),
+        live_quote_cache_path=(
+            os.getenv("IBKR_LIVE_QUOTE_CACHE_PATH", "").strip() or None
+        ),
+        live_quote_cache_max_age_seconds=float(
+            os.getenv("IBKR_LIVE_QUOTE_CACHE_MAX_AGE_SECONDS", "3")
+        ),
+        live_quote_cache_refresh_seconds=float(
+            os.getenv("IBKR_LIVE_QUOTE_CACHE_REFRESH_SECONDS", "1")
+        ),
+        live_quote_max_samples_per_symbol=int(
+            os.getenv("IBKR_LIVE_QUOTE_MAX_SAMPLES_PER_SYMBOL", "100")
+        ),
+        live_context_cache_path=(
+            os.getenv("IBKR_LIVE_CONTEXT_CACHE_PATH", "").strip() or None
+        ),
+        live_context_cache_max_age_seconds=float(
+            os.getenv("IBKR_LIVE_CONTEXT_CACHE_MAX_AGE_SECONDS", "420")
+        ),
+        live_tradable_capital_cache_max_age_seconds=float(
+            os.getenv("IBKR_LIVE_TRADABLE_CAPITAL_CACHE_MAX_AGE_SECONDS", "90")
+        ),
+        entry_cash_reserve_usd=float(
+            os.getenv("IBKR_ENTRY_CASH_RESERVE_USD", "10")
+        ),
         max_daily_entries=int(os.getenv("IBKR_MAX_DAILY_ENTRIES", "1")),
         state_dir=os.getenv(
             "IBKR_STATE_DIR", ".ibkr_bot_state/semiconductor_rotation_intraday"
@@ -119,4 +152,5 @@ def load_settings() -> Settings:
         historical_request_pause_seconds=float(
             os.getenv("IBKR_HISTORICAL_REQUEST_PAUSE_SECONDS", "0.25")
         ),
+        arca_fallback_enabled=_bool_env("IBKR_ARCA_FALLBACK_ENABLED", False),
     )

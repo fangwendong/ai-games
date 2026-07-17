@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from ibkr_quant_bot.models import Bar, Quote
 from ibkr_quant_bot.strategy import (
@@ -51,6 +52,48 @@ def make_bearish_bars(prices: list[float]) -> list[Bar]:
 
 
 class IntradayMomentumStrategyTest(unittest.TestCase):
+    def test_rotation_entry_cutoff_blocks_1330_fill_but_not_1325_fill(self) -> None:
+        new_york = ZoneInfo("America/New_York")
+        strategy = SemiconductorRotationStrategy(
+            entry_fill_cutoff_et_minutes=13 * 60 + 30,
+            long_min_score=0.0,
+        )
+        prices = [100 + index * 0.5 for index in range(31)]
+        start = datetime(2026, 7, 14, 10, 55, tzinfo=new_york)
+        bars = [
+            Bar(
+                time=start + timedelta(minutes=5 * index),
+                open=price,
+                high=price + 0.2,
+                low=price - 0.2,
+                close=price,
+                volume=1000 + index,
+            )
+            for index, price in enumerate(prices)
+        ]
+        benchmark = [
+            Bar(
+                time=bar.time,
+                open=300 + index,
+                high=301 + index,
+                low=299 + index,
+                close=300 + index,
+                volume=2000 + index,
+            )
+            for index, bar in enumerate(bars)
+        ]
+        quote = Quote(symbol="SOXL", bid=115, ask=115.1, last=115, close=115)
+
+        allowed = strategy.decide(
+            "SOXL", quote, bars[:-1], benchmark_bars=benchmark[:-1]
+        )
+        blocked = strategy.decide("SOXL", quote, bars, benchmark_bars=benchmark)
+
+        self.assertTrue(allowed.signal)
+        self.assertFalse(blocked.signal)
+        self.assertTrue(blocked.meta["entry_window_closed"])
+        self.assertIn("13:30", blocked.reason)
+
     def test_decide_returns_buy_for_bullish_series(self) -> None:
         strategy = IntradayMomentumStrategy(min_score=0.0)
         bars = make_bars([100 + i * 0.5 for i in range(30)])
@@ -140,6 +183,36 @@ class IntradayMomentumStrategyTest(unittest.TestCase):
         self.assertFalse(strategy._benchmark_reversal_confirmed("SOXL", not_confirmed))
         self.assertTrue(strategy._benchmark_reversal_confirmed("SOXL", confirmed))
 
+    def test_rotation_profit_lock_uses_completed_close_peak(self) -> None:
+        strategy = SemiconductorRotationStrategy(
+            profit_lock_activation_pct=0.03,
+            profit_lock_drawdown_pct=0.006,
+        )
+        quote = Quote(symbol="SOXL", bid=102, ask=102.1, last=102, close=102)
+        bars = make_bars([100, 103.5, 102.8])
+
+        decision = strategy.profit_lock_decide(
+            "SOXL", quote, bars, quantity=4, average_cost=100
+        )
+
+        self.assertTrue(decision.signal)
+        self.assertEqual("SELL", decision.action)
+        self.assertEqual(4, decision.quantity)
+        self.assertEqual(103.5, decision.meta["profit_lock_peak_close"])
+
+    def test_rotation_profit_lock_waits_until_activation(self) -> None:
+        strategy = SemiconductorRotationStrategy(
+            profit_lock_activation_pct=0.03,
+            profit_lock_drawdown_pct=0.006,
+        )
+        quote = Quote(symbol="SOXL", bid=99, ask=99.1, last=99, close=99)
+
+        decision = strategy.profit_lock_decide(
+            "SOXL", quote, make_bars([100, 102.9, 99]), quantity=4, average_cost=100
+        )
+
+        self.assertFalse(decision.signal)
+
     def test_decide_honors_min_score_threshold(self) -> None:
         strategy = IntradayMomentumStrategy(min_score=1.0)
         bars = make_bars([100 + i * 0.5 for i in range(30)])
@@ -163,6 +236,39 @@ class IntradayMomentumStrategyTest(unittest.TestCase):
 
         self.assertTrue(decision.signal)
         self.assertEqual("BUY", decision.action)
+
+    def test_rotation_range_gate_blocks_entry_until_completed_range_passes(self) -> None:
+        strategy = SemiconductorRotationStrategy(
+            benchmark_min_intraday_range=0.0075,
+            long_min_score=0.0,
+        )
+        bull_bars = make_bars([100 + i * 0.5 for i in range(40)])
+        quote = Quote(symbol="SOXL", bid=119.8, ask=120.0, last=119.9, close=119.9)
+        narrow = make_benchmark_bars([300 + i * 0.01 for i in range(60)])
+        wide = [
+            Bar(
+                time=bar.time,
+                open=bar.open,
+                high=bar.high if index else 303.0,
+                low=bar.low,
+                close=bar.close,
+                volume=bar.volume,
+            )
+            for index, bar in enumerate(narrow)
+        ]
+
+        blocked = strategy.decide(
+            "SOXL", quote, bull_bars, benchmark_bars=narrow
+        )
+        allowed = strategy.decide("SOXL", quote, bull_bars, benchmark_bars=wide)
+
+        self.assertFalse(blocked.signal)
+        self.assertEqual("HOLD", blocked.action)
+        self.assertFalse(blocked.meta["benchmark_range_gate_passed"])
+        self.assertIn("below minimum", blocked.reason)
+        self.assertTrue(allowed.signal)
+        self.assertEqual("BUY", allowed.action)
+        self.assertTrue(allowed.meta["benchmark_range_gate_passed"])
 
     def test_rotation_strategy_buys_short_symbol_in_bear_regime(self) -> None:
         strategy = SemiconductorRotationStrategy()

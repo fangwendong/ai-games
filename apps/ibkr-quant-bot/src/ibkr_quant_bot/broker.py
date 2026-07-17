@@ -4,12 +4,12 @@ import math
 import time
 import uuid
 from collections.abc import Callable, Iterable
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from .config import Settings
-from .models import Bar, Quote, TradeRequest
+from .models import Bar, MarketSession, Quote, TradeRequest
 
 
 class BrokerError(RuntimeError):
@@ -26,6 +26,28 @@ def _clean_number(value: Any) -> float | None:
     if math.isnan(number) or math.isinf(number) or number <= 0:
         return None
     return number
+
+
+def _datetime_iso(value: Any) -> str | None:
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat()
+
+
+def _require_live_ticker(ticker: Any, symbol: str) -> None:
+    try:
+        market_data_type = int(getattr(ticker, "marketDataType"))
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise BrokerError(
+            f"IBKR did not confirm live market-data type for {symbol}"
+        ) from exc
+    if market_data_type != 1:
+        raise BrokerError(
+            f"IBKR returned market-data type {market_data_type} for {symbol}; "
+            "refusing non-live data"
+        )
 
 
 class IbkrBroker:
@@ -78,6 +100,144 @@ class IbkrBroker:
         if self._ib.isConnected():
             self._ib.disconnect()
 
+    def server_time(self) -> datetime:
+        """Round-trip a lightweight request to verify the API session."""
+        value = self._ib.reqCurrentTime()
+        if not isinstance(value, datetime):
+            raise BrokerError("IBKR heartbeat returned an invalid server time")
+        return value
+
+    def market_session(self, symbol: str, session_date: date) -> MarketSession | None:
+        """Return IBKR's regular/liquid session, or None for an explicit closure."""
+        contract = self._stock_contract(symbol)
+        details = self._ib.reqContractDetails(contract)
+        if not details:
+            raise BrokerError(f"IBKR returned no contract details for {symbol}")
+        detail = details[0]
+        liquid_hours = str(getattr(detail, "liquidHours", "") or "")
+        timezone_id = str(getattr(detail, "timeZoneId", "") or "")
+        try:
+            session_timezone = ZoneInfo(timezone_id or "America/New_York")
+        except Exception as exc:
+            raise BrokerError(
+                f"unsupported IBKR trading-hours timezone for {symbol}: {timezone_id!r}"
+            ) from exc
+
+        day_key = session_date.strftime("%Y%m%d")
+        matching = [
+            item for item in liquid_hours.split(";") if item.startswith(f"{day_key}:")
+        ]
+        if not matching:
+            raise BrokerError(
+                f"IBKR liquid-hours calendar has no {session_date.isoformat()} entry for {symbol}"
+            )
+        if all(value.split(":", 1)[1].upper() == "CLOSED" for value in matching):
+            return None
+
+        intervals: list[tuple[datetime, datetime]] = []
+        for value in matching:
+            payload = value.split(":", 1)[1]
+            if payload.upper() == "CLOSED":
+                continue
+            for interval in payload.split(","):
+                try:
+                    start_text, end_text = interval.split("-", 1)
+                    if ":" not in start_text:
+                        start_text = f"{day_key}:{start_text}"
+                    if ":" not in end_text:
+                        end_text = f"{day_key}:{end_text}"
+                    start = datetime.strptime(start_text, "%Y%m%d:%H%M").replace(
+                        tzinfo=session_timezone
+                    )
+                    end = datetime.strptime(end_text, "%Y%m%d:%H%M").replace(
+                        tzinfo=session_timezone
+                    )
+                except ValueError as exc:
+                    raise BrokerError(
+                        f"invalid IBKR liquid-hours entry for {symbol}: {interval!r}"
+                    ) from exc
+                intervals.append((start, end))
+        if not intervals:
+            raise BrokerError(
+                f"IBKR liquid-hours calendar has no usable session for {symbol} on {session_date.isoformat()}"
+            )
+        return MarketSession(
+            session_date=session_date,
+            opens_at=min(start for start, _ in intervals),
+            closes_at=max(end for _, end in intervals),
+        )
+
+    def historical_market_sessions(
+        self,
+        symbol: str,
+        *,
+        num_days: int,
+        end_datetime: datetime | date | str | None = None,
+    ) -> dict[date, MarketSession]:
+        """Return IBKR's historical regular-session schedule keyed by date.
+
+        Contract ``liquidHours`` is intended for the current trading calendar and
+        may omit past dates. Historical cache validation must use IBKR's dedicated
+        historical schedule request instead.
+        """
+        if num_days < 1:
+            raise ValueError("num_days must be positive")
+
+        contract = self._stock_contract(symbol)
+        schedule = self._ib.reqHistoricalSchedule(
+            contract,
+            numDays=num_days,
+            endDateTime=end_datetime or "",
+            useRTH=True,
+        )
+        timezone_id = str(getattr(schedule, "timeZone", "") or "America/New_York")
+        try:
+            session_timezone = ZoneInfo(timezone_id)
+        except Exception as exc:
+            raise BrokerError(
+                f"unsupported IBKR historical-schedule timezone for {symbol}: {timezone_id!r}"
+            ) from exc
+
+        def parse_timestamp(value: object) -> datetime:
+            if isinstance(value, datetime):
+                parsed = value
+            else:
+                try:
+                    parsed = datetime.strptime(str(value), "%Y%m%d-%H:%M:%S")
+                except ValueError as exc:
+                    raise BrokerError(
+                        f"invalid IBKR historical-schedule timestamp for {symbol}: {value!r}"
+                    ) from exc
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=session_timezone)
+            return parsed.astimezone(session_timezone)
+
+        sessions: dict[date, MarketSession] = {}
+        for row in list(getattr(schedule, "sessions", []) or []):
+            try:
+                session_date = datetime.strptime(str(row.refDate), "%Y%m%d").date()
+            except (AttributeError, ValueError) as exc:
+                raise BrokerError(
+                    f"invalid IBKR historical-schedule date for {symbol}: "
+                    f"{getattr(row, 'refDate', None)!r}"
+                ) from exc
+            opens_at = parse_timestamp(getattr(row, "startDateTime", None))
+            closes_at = parse_timestamp(getattr(row, "endDateTime", None))
+            if closes_at <= opens_at:
+                raise BrokerError(
+                    f"invalid IBKR historical session for {symbol} on "
+                    f"{session_date.isoformat()}: close is not after open"
+                )
+            sessions[session_date] = MarketSession(
+                session_date=session_date,
+                opens_at=opens_at,
+                closes_at=closes_at,
+            )
+
+        if not sessions:
+            raise BrokerError(f"IBKR returned no historical sessions for {symbol}")
+        return sessions
+
     def _stock_contract(
         self, symbol: str, exchange: str = "SMART", currency: str = "USD"
     ) -> Any:
@@ -87,9 +247,15 @@ class IbkrBroker:
             raise BrokerError(f"could not qualify stock contract for {symbol}")
         return qualified[0]
 
-    def _quote_with_type(self, symbol: str, market_data_type: str) -> Quote:
+    def _quote_with_type(
+        self,
+        symbol: str,
+        market_data_type: str,
+        *,
+        exchange: str = "SMART",
+    ) -> Quote:
         self._set_market_data_type(market_data_type)
-        contract = self._stock_contract(symbol)
+        contract = self._stock_contract(symbol, exchange=exchange)
         ticker = self._ib.reqMktData(contract, "", False, False)
         self._ib.sleep(2)
         self._ib.cancelMktData(contract)
@@ -101,26 +267,170 @@ class IbkrBroker:
             close=_clean_number(ticker.close),
         )
 
-    def quote(self, symbol: str) -> Quote:
+    def quote(self, symbol: str, *, exchange: str = "SMART") -> Quote:
         mode = (self.settings.market_data_type or "auto").strip().lower()
         if mode == "auto":
-            live_quote = self._quote_with_type(symbol, "live")
+            live_quote = self._quote_with_type(symbol, "live", exchange=exchange)
             if (
                 live_quote.bid is not None
                 or live_quote.ask is not None
                 or live_quote.last is not None
             ):
                 return live_quote
-            return self._quote_with_type(symbol, "delayed")
-        return self._quote_with_type(symbol, mode)
+            return self._quote_with_type(symbol, "delayed", exchange=exchange)
+        return self._quote_with_type(symbol, mode, exchange=exchange)
 
-    def live_quote(self, symbol: str) -> Quote:
-        quote = self._quote_with_type(symbol, "live")
+    def live_quote(self, symbol: str, *, exchange: str = "SMART") -> Quote:
+        quote = self._quote_with_type(symbol, "live", exchange=exchange)
         if quote.bid is None and quote.ask is None and quote.last is None:
             raise BrokerError(
                 f"live quote unavailable for {symbol}; refusing to use delayed data"
             )
         return quote
+
+    def live_quote_snapshots(
+        self,
+        symbols: Iterable[str],
+        *,
+        exchange: str = "SMART",
+    ) -> dict[str, Quote]:
+        """Request one concurrent live snapshot group without a fixed sleep."""
+        normalized_symbols = tuple(
+            dict.fromkeys(symbol.strip().upper() for symbol in symbols if symbol.strip())
+        )
+        if not normalized_symbols:
+            raise ValueError("symbols must not be empty")
+        self._set_market_data_type("live")
+        requested = [
+            self._stock(symbol, exchange, "USD") for symbol in normalized_symbols
+        ]
+        qualified = self._ib.qualifyContracts(*requested)
+        if len(qualified) != len(requested):
+            raise BrokerError(
+                "could not qualify complete live quote group: "
+                + ", ".join(normalized_symbols)
+            )
+        quotes: dict[str, Quote] = {}
+        missing: list[str] = []
+        tickers = self._ib.reqTickers(*qualified)
+        if len(tickers) != len(normalized_symbols):
+            raise BrokerError("IBKR returned an incomplete live quote snapshot group")
+        for symbol, ticker in zip(normalized_symbols, tickers, strict=True):
+            _require_live_ticker(ticker, symbol)
+            observed_at = datetime.now(timezone.utc).isoformat()
+            quote = Quote(
+                symbol=symbol,
+                bid=_clean_number(ticker.bid),
+                ask=_clean_number(ticker.ask),
+                last=_clean_number(ticker.last),
+                close=_clean_number(ticker.close),
+                market_time=_datetime_iso(getattr(ticker, "rtTime", None)),
+                received_at=_datetime_iso(getattr(ticker, "time", None)),
+                observed_at=observed_at,
+            )
+            if quote.bid is None and quote.ask is None and quote.last is None:
+                missing.append(symbol)
+            else:
+                quotes[symbol] = quote
+        if missing:
+            raise BrokerError(
+                "live quote unavailable for "
+                + ", ".join(missing)
+                + "; refusing to use delayed data"
+            )
+        return quotes
+
+    def stream_live_quotes(
+        self,
+        symbols: Iterable[str],
+        consumer: Callable[
+            [
+                dict[str, Quote],
+                dict[str, datetime | None],
+                dict[str, datetime | None],
+                datetime,
+            ],
+            None,
+        ],
+        *,
+        exchange: str = "SMART",
+        poll_interval_seconds: float = 0.02,
+    ) -> None:
+        """Continuously consume a concurrent live subscription until interrupted."""
+        normalized_symbols = tuple(
+            dict.fromkeys(symbol.strip().upper() for symbol in symbols if symbol.strip())
+        )
+        if not normalized_symbols:
+            raise ValueError("symbols must not be empty")
+        if poll_interval_seconds <= 0:
+            raise ValueError("poll_interval_seconds must be positive")
+        self._set_market_data_type("live")
+        requested = [
+            self._stock(symbol, exchange, "USD") for symbol in normalized_symbols
+        ]
+        qualified = self._ib.qualifyContracts(*requested)
+        if len(qualified) != len(requested):
+            raise BrokerError(
+                "could not qualify complete live quote stream group: "
+                + ", ".join(normalized_symbols)
+            )
+        contracts = dict(zip(normalized_symbols, qualified, strict=True))
+        tickers: dict[str, Any] = {}
+        subscribed: list[Any] = []
+        signatures: dict[str, tuple[object, ...]] = {}
+        try:
+            for symbol, contract in contracts.items():
+                tickers[symbol] = self._ib.reqMktData(
+                    contract, "233", snapshot=False, regulatorySnapshot=False
+                )
+                subscribed.append(contract)
+            while True:
+                self._ib.sleep(poll_interval_seconds)
+                is_connected = getattr(self._ib, "isConnected", None)
+                if callable(is_connected) and not is_connected():
+                    raise BrokerError("IBKR live quote stream disconnected")
+                observed_at = datetime.now(timezone.utc)
+                changed: dict[str, Quote] = {}
+                market_times: dict[str, datetime | None] = {}
+                received_times: dict[str, datetime | None] = {}
+                for symbol, ticker in tickers.items():
+                    quote = Quote(
+                        symbol=symbol,
+                        bid=_clean_number(ticker.bid),
+                        ask=_clean_number(ticker.ask),
+                        last=_clean_number(ticker.last),
+                        close=_clean_number(ticker.close),
+                    )
+                    if quote.bid is None and quote.ask is None and quote.last is None:
+                        continue
+                    _require_live_ticker(ticker, symbol)
+                    signature = (
+                        getattr(ticker, "time", None),
+                        quote.bid,
+                        quote.ask,
+                        quote.last,
+                        quote.close,
+                    )
+                    if signature != signatures.get(symbol):
+                        changed[symbol] = quote
+                        market_time = getattr(ticker, "rtTime", None)
+                        market_times[symbol] = (
+                            market_time if isinstance(market_time, datetime) else None
+                        )
+                        received_time = getattr(ticker, "time", None)
+                        received_times[symbol] = (
+                            received_time
+                            if isinstance(received_time, datetime)
+                            else None
+                        )
+                        signatures[symbol] = signature
+                consumer(changed, market_times, received_times, observed_at)
+        finally:
+            for contract in subscribed:
+                try:
+                    self._ib.cancelMktData(contract)
+                except Exception:
+                    pass
 
     def historical_bars(
         self,
@@ -129,8 +439,9 @@ class IbkrBroker:
         bar_size: str = "1 min",
         what_to_show: str = "TRADES",
         end_time: datetime | str | None = None,
+        exchange: str = "SMART",
     ) -> list[Bar]:
-        contract = self._stock_contract(symbol)
+        contract = self._stock_contract(symbol, exchange=exchange)
         rows = self._ib.reqHistoricalData(
             contract,
             endDateTime=end_time or "",
@@ -179,6 +490,7 @@ class IbkrBroker:
         chunk_duration: str = "1 W",
         end_time: datetime | None = None,
         page_callback: Callable[[list[Bar]], None] | None = None,
+        exchange: str = "SMART",
     ) -> list[Bar]:
         """Page backward with explicit end times for long intraday histories."""
         end = end_time or datetime.now(timezone.utc)
@@ -198,6 +510,7 @@ class IbkrBroker:
                 bar_size=bar_size,
                 what_to_show=what_to_show,
                 end_time=cursor,
+                exchange=exchange,
             )
             if not rows:
                 break
@@ -351,6 +664,84 @@ class IbkrBroker:
             for trade in self.active_trades()
             if self._trade_symbol(trade) == symbol
             and self._trade_action(trade) == action
+        )
+
+    def active_trades_for(self, symbol: str, action: str) -> list[Any]:
+        symbol = symbol.upper()
+        action = action.upper()
+        return [
+            trade
+            for trade in self.active_trades()
+            if self._trade_symbol(trade) == symbol
+            and self._trade_action(trade) == action
+            and self._trade_remaining(trade) > 0
+        ]
+
+    def filled_order_ref_prefix_exists(self, order_ref_prefix: str) -> bool:
+        return self.filled_order_ref_prefix_count(order_ref_prefix) > 0
+
+    def filled_order_ref_prefix_count(self, order_ref_prefix: str) -> int:
+        count = 0
+        seen_refs: set[str] = set()
+        for trade in [*self.active_trades(), *self.completed_trades()]:
+            order = getattr(trade, "order", None)
+            order_ref = str(getattr(order, "orderRef", "") or "")
+            if not order_ref.startswith(order_ref_prefix):
+                continue
+            if order_ref in seen_refs:
+                continue
+            seen_refs.add(order_ref)
+            order_status = getattr(trade, "orderStatus", None)
+            try:
+                filled = float(getattr(order_status, "filled", 0) or 0)
+            except (TypeError, ValueError):
+                filled = 0.0
+            if filled > 0 or bool(getattr(trade, "fills", None)):
+                count += 1
+        return count
+
+    def protective_oca_is_complete(
+        self,
+        symbol: str,
+        quantity: int,
+        *,
+        order_ref_prefix: str,
+    ) -> bool:
+        trades = [
+            trade
+            for trade in self.active_trades_for(symbol, "SELL")
+            if str(
+                getattr(getattr(trade, "order", None), "orderRef", "") or ""
+            ).startswith(order_ref_prefix)
+        ]
+        if len(trades) != 2:
+            return False
+        expected_refs = {
+            f"{order_ref_prefix}-stop",
+            f"{order_ref_prefix}-take",
+        }
+        refs = {
+            str(getattr(getattr(trade, "order", None), "orderRef", "") or "")
+            for trade in trades
+        }
+        order_types = {
+            str(getattr(getattr(trade, "order", None), "orderType", "") or "").upper()
+            for trade in trades
+        }
+        groups = {
+            str(getattr(getattr(trade, "order", None), "ocaGroup", "") or "")
+            for trade in trades
+        }
+        quantities_match = all(
+            math.isclose(self._trade_remaining(trade), float(quantity), abs_tol=1e-6)
+            for trade in trades
+        )
+        return (
+            refs == expected_refs
+            and order_types == {"STP", "LMT"}
+            and len(groups) == 1
+            and "" not in groups
+            and quantities_match
         )
 
     def cancel_active_orders(

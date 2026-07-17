@@ -22,6 +22,7 @@ run commands and validation path.
 |---|---|
 | `README.md` | Repository overview and worktree workflow. |
 | `AGENTS.md` | This AI orientation guide. |
+| `docs/` | Repository-wide documents, including the OPC studio/quant stack. |
 | `apps/ibkr-quant-bot/` | Interactive Brokers market data, backtest, and live strategy bot. |
 | `games/escape-room-doors/` | Static browser escape-room prototype. |
 | `games/garden-logic/` | Static browser logic puzzle prototype. |
@@ -40,6 +41,8 @@ run commands and validation path.
 - For searches, prefer `rg` and `rg --files`.
 - Keep generated state, credentials, `.env`, cache files, and local logs out of
   git.
+- Route repository-wide documents through `docs/README.md`; keep subproject
+  document indexes linked from the corresponding section in this file.
 - Default to ASCII in repo files unless an existing file intentionally uses
   another character set.
 
@@ -56,6 +59,12 @@ Recent work has focused on `apps/ibkr-quant-bot/`, especially:
 Before changing live-trading behavior, inspect the latest git history and the
 bot runbooks. Trading code has real money implications.
 
+## Repository-Wide Documents
+
+Start with `docs/README.md` for material spanning multiple subprojects. It
+currently routes to the OPC exploration covering the shared AI, server, game,
+and quant-development workflow.
+
 ## IBKR Quant Bot
 
 Path: `apps/ibkr-quant-bot/`
@@ -63,8 +72,14 @@ Path: `apps/ibkr-quant-bot/`
 Read first:
 
 - `apps/ibkr-quant-bot/README.md`
+- `apps/ibkr-quant-bot/docs/README.md` (canonical index for every bot document)
 - `apps/ibkr-quant-bot/docs/ibc-gateway-startup.md`
 - `apps/ibkr-quant-bot/docs/ibkr-market-data-troubleshooting.md`
+- `apps/ibkr-quant-bot/docs/live-strategy-reporter.md`
+
+All maintained Markdown under `apps/ibkr-quant-bot/docs/` must be reachable
+through `apps/ibkr-quant-bot/docs/README.md`. Update that index whenever a bot
+document is added, renamed, or removed.
 
 Core modules:
 
@@ -109,6 +124,12 @@ Recent strategy facts worth knowing:
 - Live strategy uses fresh 5-minute bars and live quote checks.
 - Backtest exits are intentionally aligned with live behavior: stop/take exits
   are close-based via `exit_decide()`, not optimistic intrabar high/low fills.
+- Every backtest must refresh recent `SOXL`/`SOXS`/`QQQ` history first, then
+  pass the fail-closed preflight for the newest two common sessions. The
+  preflight requires aligned 5-minute timelines and 78 normal-session bars or
+  42 standard early-close bars per symbol. `--reuse-data` validates the cache
+  but never refreshes it. See
+  `apps/ibkr-quant-bot/docs/backtest-parameter-tuning.md`.
 - Daily entry limit has been used as a risk control; tests showed looser
   intraday re-entry significantly worsened recent backtests.
 - The real-time market data issue was resolved by ensuring the right IBKR
