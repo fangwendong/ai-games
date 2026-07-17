@@ -16,6 +16,7 @@ from ibkr_quant_bot.cli import (
     ROTATION_HYSTERESIS_V2_VERSION,
     _build_momentum_strategy,
     _build_parser,
+    _available_cash_notional,
     _benchmark_quote_summary,
     _completed_bars_since_entry,
     _cancel_orphaned_strategy_entry_orders,
@@ -138,6 +139,57 @@ def make_bar(age: timedelta) -> Bar:
 
 
 class LiveDataGuardsTest(unittest.TestCase):
+    def test_available_cash_notional_uses_lower_cash_or_available_funds(self) -> None:
+        rows = [
+            {
+                "account": "U123",
+                "tag": "TotalCashValue",
+                "value": "4412.25",
+                "currency": "USD",
+            },
+            {
+                "account": "U123",
+                "tag": "AvailableFunds",
+                "value": "4388.50",
+                "currency": "USD",
+            },
+            {
+                "account": "U123",
+                "tag": "BuyingPower",
+                "value": "17554.00",
+                "currency": "USD",
+            },
+        ]
+
+        self.assertEqual(4388.50, _available_cash_notional(rows))
+
+    def test_available_cash_notional_rejects_missing_or_multiple_accounts(self) -> None:
+        with self.assertRaisesRegex(BrokerError, "missing USD account balance fields"):
+            _available_cash_notional(
+                [
+                    {
+                        "account": "U123",
+                        "tag": "TotalCashValue",
+                        "value": "4412.25",
+                        "currency": "USD",
+                    }
+                ]
+            )
+
+        with self.assertRaisesRegex(BrokerError, "one USD account balance"):
+            _available_cash_notional(
+                [
+                    {
+                        "account": account,
+                        "tag": tag,
+                        "value": "4412.25",
+                        "currency": "USD",
+                    }
+                    for account in ("U123", "U456")
+                    for tag in ("TotalCashValue", "AvailableFunds")
+                ]
+            )
+
     def test_cache_daemons_require_readonly_dry_run_and_no_live_permission(self) -> None:
         runners = (_run_live_quote_cache, _run_live_context_cache)
         for runner in runners:

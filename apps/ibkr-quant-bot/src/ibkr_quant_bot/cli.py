@@ -1316,6 +1316,51 @@ def _validate_strategy_positions(
             )
 
 
+def _available_cash_notional(rows: list[dict[str, str]]) -> float:
+    """Return a conservative USD entry cap from the current IBKR balance.
+
+    TotalCashValue prevents the strategy from treating margin buying power as
+    cash. AvailableFunds prevents it from spending cash that IBKR has already
+    reserved for margin or other account obligations. Requiring both fields
+    makes a missing or ambiguous account snapshot fail closed.
+    """
+    usd_rows = [
+        row
+        for row in rows
+        if str(row.get("currency", "")).upper() == "USD"
+        and str(row.get("tag", "")) in {"TotalCashValue", "AvailableFunds"}
+    ]
+    accounts = {str(row.get("account", "")) for row in usd_rows}
+    if len(accounts) != 1:
+        raise BrokerError(
+            "cannot determine one USD account balance for dynamic entry sizing"
+        )
+
+    values: dict[str, float] = {}
+    for row in usd_rows:
+        tag = str(row.get("tag", ""))
+        try:
+            value = float(row.get("value", ""))
+        except (TypeError, ValueError) as exc:
+            raise BrokerError(f"invalid USD {tag} value for dynamic entry sizing") from exc
+        if not math.isfinite(value):
+            raise BrokerError(f"non-finite USD {tag} value for dynamic entry sizing")
+        if tag in values and not math.isclose(values[tag], value, abs_tol=0.01):
+            raise BrokerError(f"ambiguous USD {tag} values for dynamic entry sizing")
+        values[tag] = value
+
+    missing = {"TotalCashValue", "AvailableFunds"} - values.keys()
+    if missing:
+        raise BrokerError(
+            "missing USD account balance fields for dynamic entry sizing: "
+            + ",".join(sorted(missing))
+        )
+    available = min(values["TotalCashValue"], values["AvailableFunds"])
+    if available <= 0:
+        raise BrokerError("no positive USD cash is available for a new strategy entry")
+    return available
+
+
 def _ensure_protective_oca(
     broker: IbkrBroker,
     settings: Settings,
@@ -2395,6 +2440,23 @@ def main(argv: list[str] | None = None) -> int:
 
             decision = max(
                 buy_candidates, key=lambda item: float(item.meta.get("score", 0.0))
+            )
+            entry_notional_cap = _available_cash_notional(broker.balance())
+            strategy = replace(strategy, max_notional=entry_notional_cap)
+            decision = strategy.decide(
+                decision.symbol,
+                strategy_quotes[decision.symbol],
+                strategy_bars[decision.symbol],
+                benchmark_bars=benchmark_bars,
+            )
+            if not decision.signal or decision.action != "BUY":
+                raise BrokerError(
+                    "entry signal changed while applying current available cash sizing"
+                )
+            print(
+                "dynamic entry sizing: "
+                f"current usable USD cash={entry_notional_cap:.2f}, "
+                f"risk budget={strategy.max_risk_per_trade:.2f}"
             )
             limit_price = _marketable_buy_limit_price(
                 decision.reference_price, decision.limit_price, settings
