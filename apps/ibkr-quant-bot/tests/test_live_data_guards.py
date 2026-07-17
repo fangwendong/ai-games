@@ -14,6 +14,8 @@ from ibkr_quant_bot.cli import (
     NEW_YORK,
     ROTATION_HYSTERESIS_V2_PARAMETERS,
     ROTATION_HYSTERESIS_V2_VERSION,
+    ROTATION_RANGE_GATED_V1_PARAMETERS,
+    ROTATION_RANGE_GATED_V1_VERSION,
     _build_momentum_strategy,
     _build_parser,
     _available_cash_notional,
@@ -443,6 +445,25 @@ class LiveDataGuardsTest(unittest.TestCase):
         self.assertEqual("rotation-hysteresis-v2", ROTATION_HYSTERESIS_V2_VERSION)
         for name, expected in ROTATION_HYSTERESIS_V2_PARAMETERS.items():
             self.assertEqual(expected, getattr(strategy, name), name)
+
+    def test_range_gated_candidate_is_isolated_from_v2(self) -> None:
+        candidate = _build_momentum_strategy(
+            _build_parser().parse_args(
+                ["intraday-momentum", "--profile", "rotation-range-gated-v1"]
+            ),
+            Settings(),
+        )
+        baseline = _build_momentum_strategy(
+            _build_parser().parse_args(
+                ["intraday-momentum", "--profile", "rotation-hysteresis-v2"]
+            ),
+            Settings(),
+        )
+
+        self.assertEqual("rotation-range-gated-v1", ROTATION_RANGE_GATED_V1_VERSION)
+        for name, expected in ROTATION_RANGE_GATED_V1_PARAMETERS.items():
+            self.assertEqual(expected, getattr(candidate, name), name)
+        self.assertEqual(0.0, baseline.benchmark_min_intraday_range)
 
     def test_insufficient_bars_still_report_available_fast_slow_diagnostics(self) -> None:
         strategy = _build_momentum_strategy(
