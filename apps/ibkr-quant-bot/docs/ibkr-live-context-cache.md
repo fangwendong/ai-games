@@ -40,6 +40,12 @@ reports the fallback and uses configured `IBKR_MAX_ORDER_NOTIONAL` (4000 USD in
 live) minus the same reserve, producing a 3990 USD fallback entry ceiling.
 Mandatory pre-close flatten still runs before bar loading.
 
+After a two-second publication grace at each five-minute boundary, every
+symbol must contain the theoretically latest completed bar. If the cached group
+is even one bar behind, the strategy immediately fetches the full SMART group
+from IBKR. The direct response must pass the same exact completed-bar check;
+otherwise the strategy fails closed rather than evaluating an older signal.
+
 ## Safety Environment
 
 Always force these values for this process:

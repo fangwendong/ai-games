@@ -313,6 +313,153 @@ class LiveDataGuardsTest(unittest.TestCase):
         self.assertEqual(bars, loaded)
         self.assertEqual([], broker.bar_calls)
 
+    def test_intraday_market_data_refetches_cache_missing_latest_bar(self) -> None:
+        now = datetime(2026, 7, 15, 12, 1, tzinfo=NEW_YORK)
+        session = MarketSession(
+            now.date(),
+            datetime(2026, 7, 15, 9, 30, tzinfo=NEW_YORK),
+            datetime(2026, 7, 15, 16, 0, tzinfo=NEW_YORK),
+        )
+        symbols = ("QQQ", "SOXL", "SOXS")
+        stale_bars = {
+            symbol: [
+                Bar(
+                    datetime(2026, 7, 15, 11, 50, tzinfo=NEW_YORK),
+                    10,
+                    10.2,
+                    9.9,
+                    10.1,
+                    100,
+                )
+            ]
+            for symbol in symbols
+        }
+        broker = ExchangeBroker()
+        with TemporaryDirectory() as temporary:
+            settings = Settings(trading_mode="live", state_dir=temporary)
+            write_market_context_cache(
+                _live_context_cache_path(settings),
+                session_date=now.date(),
+                session=session,
+                bars_by_symbol=stale_bars,
+                source="SMART",
+                bar_size="5 mins",
+                generated_at=now.astimezone(timezone.utc),
+            )
+            strategy = _build_momentum_strategy(
+                _build_parser().parse_args(
+                    ["intraday-momentum", "--profile", "rotation-hysteresis-v2"]
+                ),
+                settings,
+            )
+
+            exchange, loaded, _ = _load_intraday_market_data(
+                broker, settings, strategy, session, now
+            )
+
+        self.assertEqual("SMART", exchange)
+        self.assertEqual(
+            {("SMART", "QQQ"), ("SMART", "SOXL"), ("SMART", "SOXS")},
+            set(broker.bar_calls),
+        )
+        self.assertEqual(
+            datetime(2026, 7, 15, 11, 55, tzinfo=NEW_YORK),
+            loaded["QQQ"][-1].time,
+        )
+
+    def test_intraday_market_data_allows_publication_grace_at_bar_boundary(
+        self,
+    ) -> None:
+        now = datetime(2026, 7, 15, 12, 0, 1, tzinfo=NEW_YORK)
+        session = MarketSession(
+            now.date(),
+            datetime(2026, 7, 15, 9, 30, tzinfo=NEW_YORK),
+            datetime(2026, 7, 15, 16, 0, tzinfo=NEW_YORK),
+        )
+        symbols = ("QQQ", "SOXL", "SOXS")
+        bars = {
+            symbol: [
+                Bar(
+                    datetime(2026, 7, 15, 11, 50, tzinfo=NEW_YORK),
+                    10,
+                    10.2,
+                    9.9,
+                    10.1,
+                    100,
+                )
+            ]
+            for symbol in symbols
+        }
+        broker = ExchangeBroker()
+        with TemporaryDirectory() as temporary:
+            settings = Settings(trading_mode="live", state_dir=temporary)
+            write_market_context_cache(
+                _live_context_cache_path(settings),
+                session_date=now.date(),
+                session=session,
+                bars_by_symbol=bars,
+                source="SMART",
+                bar_size="5 mins",
+                generated_at=now.astimezone(timezone.utc),
+            )
+            strategy = _build_momentum_strategy(
+                _build_parser().parse_args(
+                    ["intraday-momentum", "--profile", "rotation-hysteresis-v2"]
+                ),
+                settings,
+            )
+
+            _, loaded, _ = _load_intraday_market_data(
+                broker, settings, strategy, session, now
+            )
+
+        self.assertEqual(bars, loaded)
+        self.assertEqual([], broker.bar_calls)
+
+    def test_intraday_market_data_fails_closed_if_broker_is_also_behind(
+        self,
+    ) -> None:
+        class BehindBroker(ExchangeBroker):
+            def historical_bars(
+                self,
+                symbol: str,
+                duration: str = "1 D",
+                bar_size: str = "1 min",
+                what_to_show: str = "TRADES",
+                exchange: str = "SMART",
+            ) -> list[Bar]:
+                self.bar_calls.append((exchange, symbol))
+                return [
+                    Bar(
+                        datetime(2026, 7, 15, 11, 50, tzinfo=NEW_YORK),
+                        10,
+                        10.2,
+                        9.9,
+                        10.1,
+                        100,
+                    )
+                ]
+
+        now = datetime(2026, 7, 15, 12, 1, tzinfo=NEW_YORK)
+        session = MarketSession(
+            now.date(),
+            datetime(2026, 7, 15, 9, 30, tzinfo=NEW_YORK),
+            datetime(2026, 7, 15, 16, 0, tzinfo=NEW_YORK),
+        )
+        with TemporaryDirectory() as temporary:
+            settings = Settings(trading_mode="live", state_dir=temporary)
+            strategy = _build_momentum_strategy(
+                _build_parser().parse_args(
+                    ["intraday-momentum", "--profile", "rotation-hysteresis-v2"]
+                ),
+                settings,
+            )
+
+            with self.assertRaisesRegex(BrokerError, "latest completed bar missing"):
+                _load_intraday_market_data(
+                    BehindBroker(), settings, strategy, session, now
+                )
+
     def test_benchmark_quote_summary_exposes_qqq_without_order_action(self) -> None:
         now = datetime(2026, 7, 16, 14, 0, 1, tzinfo=timezone.utc)
         quote = Quote(
