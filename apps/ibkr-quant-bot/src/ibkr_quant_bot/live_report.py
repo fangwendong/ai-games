@@ -61,6 +61,46 @@ def _order_result(output: str, exit_code: int) -> str:
     return "未下单"
 
 
+def _execution_blocker(output: str, exit_code: int) -> tuple[str, str]:
+    if exit_code != 0:
+        return "失败关闭", "策略失败关闭"
+    if "entry_order_result=fully_filled" in output:
+        return "买入已成交", "保护单已创建"
+    if "entry_order_result=partially_filled" in output:
+        return "买入部分成交", "余单已撤，保护单已按成交数量创建"
+    if "entry_order_result=not_filled" in output:
+        return "买入未成交", "入场单已撤"
+    if "exit_order_result=filled" in output:
+        return "卖出已成交", "退场完成"
+    if "exit_order_result=partially_filled" in output:
+        return "卖出部分成交", "仍需关注剩余持仓"
+    if "daily entry limit reached:" in output:
+        return "不下单", "今日入场次数已达上限"
+    if "position already aligned: no new entry" in output:
+        return "不新开仓", "已有持仓，等待保护单或退场条件"
+    if "no signal: no order" in output:
+        return "不下单", "当前没有入场或退场信号"
+    if "end-of-day flatten window: no new entry" in output:
+        return "不下单", "已进入收盘前禁止开仓窗口"
+    if "possible split/reverse-split" in output:
+        return "不下单", "价格尺度异常，疑似拆股或合股"
+    if "active entry order exists" in output:
+        return "不重复下单", "已有活动入场单"
+    if "dry-run: order not submitted" in output:
+        return "不下单", "dry-run 安全验证"
+    return _order_result(output, exit_code), "无额外执行信息"
+
+
+def _trade_marker(*, traded: bool, holding: bool, failed: bool) -> str:
+    if failed:
+        return "🔴 异常"
+    if traded and holding:
+        return "🟡 已成交·持仓"
+    if traded:
+        return "🟢 已成交·已清仓"
+    return "⚪ 今日未成交"
+
+
 def _source_line(output: str, key: str) -> str:
     prefix = f"{key}="
     for line in output.splitlines():
@@ -81,11 +121,20 @@ def format_live_report(
     benchmark: dict[str, Any] = {}
     decisions: list[dict[str, Any]] = []
     scan_rows: list[dict[str, Any]] = []
+    session_trade_status: dict[str, Any] = {}
     for item in values:
         if isinstance(item, dict) and isinstance(item.get("tradable_capital"), dict):
             capital = item["tradable_capital"]
         elif isinstance(item, dict) and isinstance(item.get("benchmark_quote"), dict):
             benchmark = item["benchmark_quote"]
+        elif isinstance(item, dict) and isinstance(
+            item.get("session_trade_status"), dict
+        ):
+            session_trade_status = item["session_trade_status"]
+            if isinstance(item.get("core_decisions"), list):
+                decisions = [
+                    row for row in item["core_decisions"] if isinstance(row, dict)
+                ]
         elif isinstance(item, dict) and isinstance(item.get("core_decisions"), list):
             decisions = [row for row in item["core_decisions"] if isinstance(row, dict)]
         elif isinstance(item, list) and item and all(isinstance(row, dict) for row in item):
@@ -99,51 +148,118 @@ def format_live_report(
     ended = datetime.fromtimestamp(ended_at_ms / 1000, tz=timezone.utc)
     elapsed_ms = max(0, ended_at_ms - started_at_ms)
     status_icon = "🟢" if exit_code == 0 else "🔴"
+    entry_count = int(session_trade_status.get("daily_entry_count", 0) or 0)
+    max_entries = int(session_trade_status.get("max_daily_entries", 0) or 0)
+    entry_rows = [
+        row
+        for row in session_trade_status.get("entries", [])
+        if isinstance(row, dict)
+    ]
+    traded_symbols = {
+        str(row.get("symbol", "")).upper() for row in entry_rows if row.get("symbol")
+    }
+    position_rows = [
+        row
+        for row in session_trade_status.get("current_positions", [])
+        if isinstance(row, dict)
+    ]
+    positions = {
+        str(row.get("symbol", "")).upper(): int(float(row.get("quantity", 0) or 0))
+        for row in position_rows
+    }
+    entry_limit_reached = max_entries > 0 and entry_count >= max_entries
+    execution_action, execution_reason = _execution_blocker(output, exit_code)
+    if positions:
+        position_text = "、".join(
+            f"{symbol} {quantity}股" for symbol, quantity in positions.items()
+        )
+        headline = f"🟡 当前持仓：{position_text}；不再新开仓，但仍可能卖出退场"
+    elif traded_symbols:
+        traded_text = "、".join(sorted(traded_symbols))
+        follow_up = (
+            "今日不会再次开仓"
+            if entry_limit_reached
+            else "仍可能再次开仓"
+        )
+        headline = f"🟢 今日 {traded_text} 已成交并清仓；{follow_up}"
+    elif exit_code != 0:
+        headline = "🔴 本轮失败关闭；未执行订单"
+    else:
+        headline = "⚪ 今日尚未成交；后续是否下单取决于信号与风控条件"
     lines = [
         f"{status_icon} V2 实盘轮询｜退出码 {exit_code}",
-        "核心执行结论",
-        (
-            "- 本次策略执行本金："
-            f"{_value(capital.get('usable_cash'))} USD；"
-            f"已预留 {_value(capital.get('cash_reserve_usd'))} USD；"
-            f"来源={capital.get('source', '不可用')}；状态={capital.get('status', '不可用')}"
-        ),
-        (
-            f"- 执行耗时：{elapsed_ms} ms；结束时间："
-            f"{ended.astimezone(NEW_YORK).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]} ET / "
-            f"{ended.astimezone(SHANGHAI).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]} CST"
-        ),
-        (
-            f"- QQQ：latest_trade_price={_value(benchmark.get('latest_trade_price'))}；"
-            "基准标的，不产生交易信号。"
-        ),
+        headline,
+        f"本轮结论：{execution_action}｜{execution_reason}",
+        "",
+        "| 标的 | 最新价 | 今日交易状态 | 当前状态 | 技术信号 | 后续订单 | 原因 |",
+        "|---|---:|---|---|---|---|---|",
     ]
 
-    for symbol, row in zip(("SOXL", "SOXS"), decisions, strict=False):
+    row_by_symbol = {
+        str(row.get("symbol", "")).upper(): row for row in decisions
+    }
+    for symbol in ("SOXL", "SOXS"):
+        row = row_by_symbol.get(symbol, {})
+        holding = symbol in positions
+        traded = symbol in traded_symbols
+        marker = _trade_marker(traded=traded, holding=holding, failed=exit_code != 0)
+        current_status = f"持仓 {positions[symbol]}股" if holding else "空仓"
+        action = str(row.get("action", "不可用"))
+        signal = row.get("signal")
+        signal_text = f"{action} / {'是' if signal else '否'}" if signal is not None else "不可用"
+        if exit_code != 0:
+            future_order = "不会：策略失败关闭"
+        elif holding:
+            future_order = "会：止盈/止损/退场卖出"
+        elif entry_limit_reached:
+            future_order = f"不会：入场额度 {entry_count}/{max_entries}"
+        else:
+            future_order = "可能：满足条件后买入"
+        reason = str(row.get("reason", "不可用")).replace("|", "/")
         lines.append(
-            f"- {symbol}：latest_trade_price={_value(row.get('latest_trade_price'))}；"
-            f"fast_ema={_value(row.get('fast_ema'), digits=6)}；"
-            f"slow_ema={_value(row.get('slow_ema'), digits=6)}；"
-            f"position_status={row.get('position_status', '不可用')}；"
-            f"strategy_status={row.get('strategy_status', '不可用')}；"
-            f"信号={_value(row.get('signal'))}（{row.get('action', '不可用')}）；"
-            f"原因：{row.get('reason', '不可用')}。"
+            f"| {symbol} | {_value(row.get('latest_trade_price'))} | {marker} | "
+            f"{current_status} | {signal_text} | "
+            f"{future_order} | {reason} |"
         )
-    if not decisions:
-        lines.append("- SOXL/SOXS：策略在生成决策前失败，指标不可用。")
-    lines.append(f"- 订单最终结果：{_order_result(output, exit_code)}。")
 
-    lines.extend(["", "风险与保护"])
-    for symbol, row in zip(("SOXL", "SOXS"), decisions, strict=False):
-        lines.append(
-            f"- {symbol}：stop_loss_pct={_value(row.get('stop_loss_pct'), digits=4)}；"
-            f"take_profit_pct={_value(row.get('take_profit_pct'), digits=4)}；"
-            f"calculated_stop_price={_value(row.get('calculated_stop_price'))}；"
-            f"calculated_take_price={_value(row.get('calculated_take_price'))}；"
-            f"active_stop_price={_value(row.get('active_stop_price'))}；"
-            f"active_take_price={_value(row.get('active_take_price'))}；"
-            f"protection_status={row.get('protection_status', '不可用')}。"
-        )
+    lines.extend(
+        [
+            "",
+            "资金与运行",
+            (
+                "- 当前可用于新开仓现金："
+                f"{_value(capital.get('usable_cash'))} USD；"
+                f"已预留 {_value(capital.get('cash_reserve_usd'))} USD；"
+                f"来源={capital.get('source', '不可用')}；状态={capital.get('status', '不可用')}"
+            ),
+            (
+                f"- 执行耗时：{elapsed_ms} ms；结束时间："
+                f"{ended.astimezone(NEW_YORK).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]} ET / "
+                f"{ended.astimezone(SHANGHAI).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]} CST"
+            ),
+            f"- QQQ 最新价：{_value(benchmark.get('latest_trade_price'))}（仅作趋势基准）。",
+        ]
+    )
+
+    holding_decisions = [
+        row for row in decisions if str(row.get("symbol", "")).upper() in positions
+    ]
+    if holding_decisions:
+        lines.extend(["", "持仓保护"])
+        for row in holding_decisions:
+            symbol = str(row.get("symbol", ""))
+            lines.append(
+                f"- {symbol}：止损={_value(row.get('active_stop_price'))}；"
+                f"止盈={_value(row.get('active_take_price'))}；"
+                f"保护状态={row.get('protection_status', '不可用')}。"
+            )
+
+    lines.extend(
+        [
+            "",
+            "运行诊断",
+        ]
+    )
 
     exchanges = sorted(
         {
@@ -167,8 +283,6 @@ def format_live_report(
         bar_counts = f"{bar_counts}, {strategy_bar_counts}"
     lines.extend(
         [
-            "",
-            "运行诊断",
             (
                 f"- bar_data_exchange={','.join(exchanges) or '不可用'}；"
                 f"live_bar_source={_source_line(output, 'live_bar_source')}。"
