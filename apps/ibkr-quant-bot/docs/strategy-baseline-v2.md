@@ -31,6 +31,16 @@ the bot cancels any strategy-owned BUY remainder left by a crashed invocation
 and confirms the cancellation before continuing. This cleanup also runs in the
 mandatory flatten window, including when no position has appeared yet.
 
+An accepted run has a hard 60-second process deadline. If it does not finish,
+the watchdog closes the runtime lock and terminates the process with exit code
+`124`; the next invocation must perform the normal broker order/position/OCA
+reconciliation before it can evaluate a new entry. IBKR remote requests made
+by `intraday-momentum` use a 3-second request timeout and fail the invocation
+with a non-zero exit code. Local indicator, state, and decision stages do not
+have separate deadlines. The existing entry-fill and cancellation waits remain
+unchanged because they confirm broker order safety rather than schedule local
+work.
+
 Known positions are reconciled before signal market data is loaded. Complete
 broker-hosted OCA protection is left untouched. Missing or partial protection
 is rebuilt first from the exact stop/take prices persisted after the entry
