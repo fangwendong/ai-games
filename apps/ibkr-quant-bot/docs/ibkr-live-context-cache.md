@@ -1,10 +1,10 @@
 # IBKR Live Context Cache Runbook
 
 This runbook covers the read-only process that precomputes the current IBKR
-regular-session calendar and the completed SMART 5-minute bars used by the live
-rotation strategy. It removes repeated calendar and historical-bar requests
-from the one-minute strategy path without changing any strategy parameter or
-order rule.
+regular-session calendar, completed SMART 5-minute bars, and conservative
+tradable-capital value used by the live rotation strategy. It removes repeated
+calendar, historical-bar, and balance requests from the one-minute strategy
+path without changing signal or exit rules.
 
 Do not put account IDs, credentials, positions, orders, or prices in service
 health reports.
@@ -17,19 +17,25 @@ health reports.
 - default cache: `.ibkr_bot_state/semiconductor_rotation_intraday/live-context.json`
 - source: one complete SMART group for QQQ, SOXL, and SOXS
 - calendar refresh: once per New York trading date
-- file/bar refresh: once per completed 5-minute bucket
+- file/capital refresh: once per minute
+- bar refresh: once per completed 5-minute bucket
 - consumer stale threshold: 420 seconds
+- tradable-capital stale threshold: 90 seconds
 - singleton guard: a non-blocking advisory lock rejects a second writer
 
 The file is flushed, `fsync`ed, and atomically replaced and contains one current-session bar array per
-symbol. It does not grow across days. The strategy accepts the cache only when
+symbol plus one USD amount; it contains no account identifier and does not grow
+across days. The capital amount is the lower of `TotalCashValue` and
+`AvailableFunds`; `BuyingPower` is never used. The strategy accepts the cache only when
 the version, date, source, bar size, complete symbol group, file age, per-bar
 timestamps, and normal live freshness checks all pass.
 
-If any check fails, the strategy immediately uses the original IBKR calendar or
-historical-bar request. It does not sleep waiting for the cache. If both cache
+If a calendar or bar check fails, the strategy immediately uses the original
+IBKR request. It does not sleep waiting for the cache. If both cache
 and direct IBKR data fail validation, the strategy fails closed and submits no
-new order. Mandatory pre-close flatten still runs before bar loading.
+new order. If only tradable capital is missing, stale, or invalid, the strategy
+reports the fallback and uses configured `IBKR_MAX_ORDER_NOTIONAL` (4000 USD in
+live). Mandatory pre-close flatten still runs before bar loading.
 
 ## Safety Environment
 
@@ -81,8 +87,9 @@ stat -c 'cache bytes=%s modified=%y' \
   /home/fwd/work/ai-games-wt-codex-live/apps/ibkr-quant-bot/.ibkr_bot_state/semiconductor_rotation_intraday/live-context.json
 ```
 
-During an active session the file should normally change once per five-minute
-bucket. The strategy reports `market_session_source=cache` and
+The file should normally change once per minute, while its bar arrays change
+only after a completed five-minute bucket. The strategy reports
+`market_session_source=cache` and
 `live_bar_source=cache` on a cache hit. A `broker` source with `cache_reason`
 means the safe direct fallback was used.
 

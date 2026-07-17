@@ -12,6 +12,7 @@ from ibkr_quant_bot.market_context_cache import (
     MarketContextCacheError,
     load_cached_market_session,
     load_fresh_cached_bars,
+    load_fresh_cached_tradable_capital,
     write_market_context_cache,
 )
 from ibkr_quant_bot.models import Bar, MarketSession
@@ -52,6 +53,7 @@ class MarketContextCacheTest(unittest.TestCase):
                 bars_by_symbol=self.bars,
                 source="SMART",
                 bar_size="5 mins",
+                tradable_capital_usd=4388.50,
                 generated_at=self.now.astimezone(timezone.utc),
             )
 
@@ -72,9 +74,68 @@ class MarketContextCacheTest(unittest.TestCase):
                 max_age_seconds=420,
                 now=self.now,
             )
+            capital = load_fresh_cached_tradable_capital(
+                path,
+                session_date=self.session.session_date,
+                max_age_seconds=90,
+                now=self.now,
+            )
 
             self.assertEqual(self.session, session)
             self.assertEqual(self.bars, loaded)
+            self.assertEqual(4388.50, capital)
+
+    def test_rejects_missing_stale_or_invalid_tradable_capital(self) -> None:
+        with TemporaryDirectory() as temporary:
+            path = Path(temporary) / "context.json"
+            write_market_context_cache(
+                path,
+                session_date=self.session.session_date,
+                session=self.session,
+                bars_by_symbol=self.bars,
+                source="SMART",
+                bar_size="5 mins",
+                generated_at=self.now.astimezone(timezone.utc),
+            )
+            with self.assertRaisesRegex(MarketContextCacheError, "tradable capital"):
+                load_fresh_cached_tradable_capital(
+                    path,
+                    session_date=self.session.session_date,
+                    max_age_seconds=90,
+                    now=self.now,
+                )
+
+            for value, message in ((0, "unusable"), ("bad", "invalid")):
+                with self.subTest(value=value):
+                    payload = json.loads(path.read_text())
+                    payload["tradable_capital_usd"] = value
+                    path.write_text(json.dumps(payload))
+                    with self.assertRaisesRegex(MarketContextCacheError, message):
+                        load_fresh_cached_tradable_capital(
+                            path,
+                            session_date=self.session.session_date,
+                            max_age_seconds=90,
+                            now=self.now,
+                        )
+
+            write_market_context_cache(
+                path,
+                session_date=self.session.session_date,
+                session=self.session,
+                bars_by_symbol=self.bars,
+                source="SMART",
+                bar_size="5 mins",
+                tradable_capital_usd=4388.50,
+                generated_at=self.now.astimezone(timezone.utc)
+                - timedelta(seconds=91),
+            )
+            with self.assertRaisesRegex(MarketContextCacheError, "stale"):
+                load_fresh_cached_tradable_capital(
+                    path,
+                    session_date=self.session.session_date,
+                    max_age_seconds=90,
+                    now=self.now,
+                )
 
     def test_rejects_stale_or_incomplete_group(self) -> None:
         with TemporaryDirectory() as temporary:

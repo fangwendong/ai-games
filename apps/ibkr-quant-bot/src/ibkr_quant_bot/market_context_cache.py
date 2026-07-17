@@ -22,6 +22,7 @@ def write_market_context_cache(
     bars_by_symbol: dict[str, list[Bar]],
     source: str,
     bar_size: str,
+    tradable_capital_usd: float | None = None,
     generated_at: datetime | None = None,
 ) -> None:
     cache_path = Path(path).expanduser()
@@ -35,6 +36,7 @@ def write_market_context_cache(
         "bar_size": bar_size,
         "generated_at": generated.isoformat(),
         "session_date": session_date.isoformat(),
+        "tradable_capital_usd": tradable_capital_usd,
         "session": None
         if session is None
         else {
@@ -71,6 +73,32 @@ def write_market_context_cache(
             temporary.unlink(missing_ok=True)
         except OSError:
             pass
+
+
+def load_fresh_cached_tradable_capital(
+    path: str | Path,
+    *,
+    session_date: date,
+    max_age_seconds: float,
+    now: datetime | None = None,
+) -> float:
+    payload = _load_payload(
+        path,
+        session_date=session_date,
+        max_age_seconds=max_age_seconds,
+        now=now,
+    )
+    try:
+        value = float(payload["tradable_capital_usd"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise MarketContextCacheError(
+            "market context cache has invalid tradable capital"
+        ) from exc
+    if not math.isfinite(value) or value <= 0:
+        raise MarketContextCacheError(
+            "market context cache has unusable tradable capital"
+        )
+    return value
 
 
 def load_cached_market_session(
