@@ -1377,9 +1377,13 @@ def _tradable_capital_snapshot(
     settings: Settings,
     now: datetime,
 ) -> tuple[float, dict[str, object]]:
+    reserve = settings.entry_cash_reserve_usd
+    if not math.isfinite(reserve) or reserve < 0:
+        raise BrokerError("IBKR_ENTRY_CASH_RESERVE_USD must be finite and non-negative")
     summary: dict[str, object] = {
         "currency": "USD",
-        "sizing_basis": "min(TotalCashValue, AvailableFunds)",
+        "sizing_basis": "min(TotalCashValue, AvailableFunds) - cash reserve",
+        "cash_reserve_usd": round(reserve, 2),
         "uses_margin_buying_power": False,
     }
     try:
@@ -1390,7 +1394,7 @@ def _tradable_capital_snapshot(
             now=now,
         )
     except (MarketContextCacheError, OSError, ValueError) as exc:
-        fallback = settings.max_order_notional
+        fallback = max(0.0, settings.max_order_notional - reserve)
         return fallback, {
             **summary,
             "status": "fallback",
@@ -1398,10 +1402,11 @@ def _tradable_capital_snapshot(
             "reason": type(exc).__name__,
             "source": "configured_cap",
         }
-    return available, {
+    usable = max(0.0, available - reserve)
+    return usable, {
         **summary,
         "status": "available",
-        "usable_cash": round(available, 2),
+        "usable_cash": round(usable, 2),
         "reason": None,
         "source": "live_context_cache",
     }
