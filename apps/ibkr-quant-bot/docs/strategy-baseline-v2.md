@@ -23,6 +23,21 @@ and order state, but it does not need fresh QQQ/SOXL/SOXS indicator bars or a
 quote-cache sample. This keeps signal-data failure from blocking the final
 reduce-only exit attempt.
 
+The live command also holds a strategy-scoped, non-blocking runtime lock shared
+by every intraday profile. If a
+previous one-shot invocation is still running, the overlap exits without
+connecting or evaluating another order. At the start of every accepted run,
+the bot cancels any strategy-owned BUY remainder left by a crashed invocation
+and confirms the cancellation before continuing. This cleanup also runs in the
+mandatory flatten window, including when no position has appeared yet.
+
+Known positions are reconciled before signal market data is loaded. Complete
+broker-hosted OCA protection is left untouched. Missing or partial protection
+is rebuilt first from the exact stop/take prices persisted after the entry
+fill. Legacy state without those fields uses the fixed percentage stop/take as
+a conservative fallback. Protection is created before the daily entry state is
+recorded, so a state-write failure cannot precede broker-side risk protection.
+
 No new position may fill at or after 13:30 America/New_York. Because decisions
 use completed 5-minute bars, the 13:25 bar and all later bars are ineligible to
 create an entry. This restriction applies only to new entries. Existing

@@ -235,6 +235,20 @@ In live trading mode, the intraday scanners refuse delayed market data:
   legs are active, use the same non-empty OCA group, and cover the full current
   position. A partial strategy-owned pair is cancelled and rebuilt; an
   unrelated active sell order fails closed instead of being cancelled.
+- Each `intraday-momentum` run holds a non-blocking advisory lock for the
+  complete position-check, decision, and order lifecycle. An overlapping run
+  from any profile skips before connecting to IBKR instead of racing the first
+  run over the same positions and order state.
+- A strategy-owned BUY order is expected to live only inside the one-shot run
+  that submitted it. A later run treats any remaining `momentum-...-entry-...`
+  BUY as orphaned, cancels it, and refuses to continue until IBKR confirms that
+  no strategy entry remainder is active. The mandatory flatten path performs
+  the same cleanup even when there is not yet a position.
+- Position and OCA completeness are checked before the full quote/bar group is
+  loaded. Missing protection is rebuilt from the entry state's persisted
+  stop/take prices. A legacy entry without those fields receives a conservative
+  fixed-percentage fallback, so a simultaneous signal-data outage cannot leave
+  a known position unprotected.
 
 The market data troubleshooting runbook is
 [docs/ibkr-market-data-troubleshooting.md](docs/ibkr-market-data-troubleshooting.md).

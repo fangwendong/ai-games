@@ -18,14 +18,17 @@ from ibkr_quant_bot.cli import (
     _build_parser,
     _benchmark_quote_summary,
     _completed_bars_since_entry,
+    _cancel_orphaned_strategy_entry_orders,
     _daily_entry_count,
     _daily_entry_limit_reached,
     _fresh_historical_bars,
     _flatten_strategy_positions_if_due,
     _ensure_protective_oca,
+    _ensure_positions_protected_before_market_data,
     _has_price_scale_discontinuity,
     _is_market_hours,
     _latest_entry_time,
+    _latest_entry_protective_prices,
     _latest_trade_price_fields,
     _live_context_cache_path,
     _load_intraday_market_data,
@@ -434,6 +437,173 @@ class LiveDataGuardsTest(unittest.TestCase):
         self.assertEqual("SELL", broker.placed[0].action)
         self.assertTrue(broker.placed[0].reduce_only)
 
+    def test_orphaned_entry_buy_is_cancelled_before_next_run(self) -> None:
+        trade = SimpleNamespace(
+            contract=SimpleNamespace(symbol="SOXL"),
+            order=SimpleNamespace(
+                action="BUY",
+                totalQuantity=5,
+                orderType="LMT",
+                lmtPrice=100.0,
+                tif="DAY",
+                orderRef="momentum-2026-07-16-SOXL-entry-120000",
+            ),
+            orderStatus=SimpleNamespace(
+                status="Submitted", filled=2, remaining=3
+            ),
+            fills=[],
+            log=[],
+        )
+
+        class EntryBroker:
+            def __init__(self):
+                self.cancelled = []
+
+            def active_trades_for(self, symbol, action):
+                if (
+                    symbol == "SOXL"
+                    and action == "BUY"
+                    and trade.orderStatus.remaining > 0
+                ):
+                    return [trade]
+                return []
+
+            def cancel_order(self, active_trade):
+                active_trade.orderStatus.status = "Cancelled"
+                active_trade.orderStatus.remaining = 0
+                self.cancelled.append(active_trade)
+
+        broker = EntryBroker()
+        now = datetime(2026, 7, 16, 12, 1, tzinfo=NEW_YORK)
+        strategy = _build_momentum_strategy(
+            _build_parser().parse_args(
+                ["intraday-momentum", "--profile", "rotation-hysteresis-v2"]
+            ),
+            Settings(),
+        )
+        with TemporaryDirectory() as tmpdir:
+            cancelled = _cancel_orphaned_strategy_entry_orders(
+                broker,
+                Settings(
+                    state_dir=tmpdir,
+                    readonly=False,
+                    dry_run=False,
+                ),
+                strategy,
+                now,
+            )
+
+        self.assertEqual(1, cancelled)
+        self.assertEqual([trade], broker.cancelled)
+
+    def test_unresolved_orphaned_entry_buy_fails_closed(self) -> None:
+        trade = SimpleNamespace(
+            contract=SimpleNamespace(symbol="SOXL"),
+            order=SimpleNamespace(
+                action="BUY",
+                totalQuantity=5,
+                orderType="LMT",
+                lmtPrice=100.0,
+                tif="DAY",
+                orderRef="momentum-2026-07-16-SOXL-entry-120000",
+            ),
+            orderStatus=SimpleNamespace(
+                status="PendingCancel", filled=2, remaining=3
+            ),
+            fills=[],
+            log=[],
+        )
+
+        class EntryBroker:
+            def active_trades_for(self, symbol, action):
+                return [trade] if symbol == "SOXL" and action == "BUY" else []
+
+            def cancel_order(self, active_trade):
+                return active_trade
+
+        strategy = _build_momentum_strategy(
+            _build_parser().parse_args(
+                ["intraday-momentum", "--profile", "rotation-hysteresis-v2"]
+            ),
+            Settings(),
+        )
+        with TemporaryDirectory() as tmpdir:
+            with self.assertRaisesRegex(BrokerError, "cancellation unresolved"):
+                _cancel_orphaned_strategy_entry_orders(
+                    EntryBroker(),
+                    Settings(
+                        state_dir=tmpdir,
+                        readonly=False,
+                        dry_run=False,
+                    ),
+                    strategy,
+                    datetime(2026, 7, 16, 12, 1, tzinfo=NEW_YORK),
+                )
+
+    def test_flatten_window_cancels_orphaned_buy_even_without_position(self) -> None:
+        trade = SimpleNamespace(
+            contract=SimpleNamespace(symbol="SOXL"),
+            order=SimpleNamespace(
+                action="BUY",
+                totalQuantity=5,
+                orderType="LMT",
+                lmtPrice=100.0,
+                tif="DAY",
+                orderRef="momentum-2026-07-16-SOXL-entry-154900",
+            ),
+            orderStatus=SimpleNamespace(
+                status="Submitted", filled=0, remaining=5
+            ),
+            fills=[],
+            log=[],
+        )
+
+        class FlattenBroker:
+            def __init__(self):
+                self.cancelled = []
+
+            def active_trades_for(self, symbol, action):
+                if action == "BUY" and trade.orderStatus.remaining > 0:
+                    return [trade]
+                return []
+
+            def cancel_order(self, active_trade):
+                active_trade.orderStatus.status = "Cancelled"
+                active_trade.orderStatus.remaining = 0
+                self.cancelled.append(active_trade)
+
+            def positions(self):
+                return []
+
+        now = datetime(2026, 7, 16, 15, 50, tzinfo=NEW_YORK)
+        session = MarketSession(
+            now.date(),
+            now.replace(hour=9, minute=30),
+            now.replace(hour=16, minute=0),
+        )
+        strategy = _build_momentum_strategy(
+            _build_parser().parse_args(
+                ["intraday-momentum", "--profile", "rotation-hysteresis-v2"]
+            ),
+            Settings(),
+        )
+        broker = FlattenBroker()
+        with TemporaryDirectory() as tmpdir:
+            handled = _flatten_strategy_positions_if_due(
+                broker,
+                Settings(
+                    state_dir=tmpdir,
+                    readonly=False,
+                    dry_run=False,
+                ),
+                strategy,
+                now,
+                session,
+            )
+
+        self.assertTrue(handled)
+        self.assertEqual([trade], broker.cancelled)
+
     def test_mandatory_flatten_does_not_cancel_or_duplicate_eod_sell(self) -> None:
         existing = SimpleNamespace(
             order=SimpleNamespace(
@@ -587,6 +757,90 @@ class LiveDataGuardsTest(unittest.TestCase):
         self.assertEqual("recreated", status)
         self.assertEqual(1, len(broker.cancelled))
         self.assertEqual(1, len(broker.created))
+
+    def test_missing_protection_is_rebuilt_from_entry_state_without_market_data(
+        self,
+    ) -> None:
+        def protective_trade(order_ref, order_type, price):
+            return SimpleNamespace(
+                order=SimpleNamespace(
+                    orderRef=order_ref,
+                    orderType=order_type,
+                    totalQuantity=5,
+                    action="SELL",
+                    tif="GTC",
+                    lmtPrice=price if order_type == "LMT" else None,
+                    auxPrice=price if order_type == "STP" else None,
+                ),
+                orderStatus=SimpleNamespace(
+                    status="Submitted", filled=0, remaining=5
+                ),
+                fills=[],
+                log=[],
+            )
+
+        class ProtectionBroker:
+            def __init__(self):
+                self.created = []
+
+            def protective_oca_is_complete(self, *args, **kwargs):
+                return False
+
+            def active_trades_for(self, symbol, action):
+                return []
+
+            def active_order_quantity(self, symbol, action):
+                return 0.0
+
+            def place_protective_oca(
+                self, symbol, quantity, stop_price, take_price, *, order_ref
+            ):
+                self.created.append((stop_price, take_price))
+                return (
+                    protective_trade(f"{order_ref}-stop", "STP", stop_price),
+                    protective_trade(f"{order_ref}-take", "LMT", take_price),
+                )
+
+        now = datetime(2026, 7, 16, 12, 1, tzinfo=NEW_YORK)
+        strategy = _build_momentum_strategy(
+            _build_parser().parse_args(
+                ["intraday-momentum", "--profile", "rotation-hysteresis-v2"]
+            ),
+            Settings(),
+        )
+        request = TradeRequest(
+            symbol="SOXL", action="BUY", quantity=5, order_ref="entry"
+        )
+        broker = ProtectionBroker()
+        with TemporaryDirectory() as tmpdir:
+            settings = Settings(
+                state_dir=tmpdir,
+                readonly=False,
+                dry_run=False,
+            )
+            _record_daily_entry(
+                settings,
+                request,
+                now=now,
+                filled_quantity=5,
+                average_fill_price=100,
+                protective_stop_price=97.5,
+                protective_take_price=104.25,
+            )
+            self.assertEqual(
+                (97.5, 104.25),
+                _latest_entry_protective_prices(settings, "SOXL", now),
+            )
+
+            _ensure_positions_protected_before_market_data(
+                broker,
+                settings,
+                strategy,
+                {"SOXL": {"position": "5", "avgCost": "100"}},
+                now,
+            )
+
+        self.assertEqual([(97.5, 104.25)], broker.created)
 
     def test_incomplete_protection_does_not_cancel_unrelated_sell(self) -> None:
         unrelated = SimpleNamespace(
@@ -1048,6 +1302,8 @@ class LiveDataGuardsTest(unittest.TestCase):
                 filled_quantity=3.0,
                 average_fill_price=101.25,
                 strategy_version="rotation-hysteresis-v2",
+                protective_stop_price=99.5,
+                protective_take_price=105.05,
             )
 
             path = next(Path(tmpdir).glob("entries-*.json"))
@@ -1055,6 +1311,8 @@ class LiveDataGuardsTest(unittest.TestCase):
             self.assertEqual(3.0, row["filled_quantity"])
             self.assertEqual(101.25, row["average_fill_price"])
             self.assertEqual("rotation-hysteresis-v2", row["strategy_version"])
+            self.assertEqual(99.5, row["protective_stop_price"])
+            self.assertEqual(105.05, row["protective_take_price"])
             self.assertEqual("DAY", row["time_in_force"])
             self.assertEqual(now, _latest_entry_time(settings, "SOXL", now))
 
