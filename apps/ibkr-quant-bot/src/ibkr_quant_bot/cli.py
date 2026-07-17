@@ -2432,12 +2432,14 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 print(risk_decision.reason)
                 if risk_decision.allowed:
-                    _submit_or_print(
+                    exit_trade = _submit_or_print(
                         broker,
                         settings,
                         request,
                         f"exit candidate: {decision.symbol} qty={request.quantity}",
                     )
+                    if exit_trade is not None:
+                        print(f"exit_order_result={_trade_lifecycle(exit_trade)}")
                 return 0
 
             if current_positions:
@@ -2579,6 +2581,7 @@ def main(argv: list[str] | None = None) -> int:
                             broker.cancel_order(trade)
                             _record_order_state(settings, request, trade)
                         print("entry order not filled; daily entry state not recorded")
+                        print("entry_order_result=not_filled")
                         return 0
                     if remaining > 0:
                         broker.cancel_order(trade)
@@ -2641,6 +2644,12 @@ def main(argv: list[str] | None = None) -> int:
                             f"entry filled quantity={filled}; protection created "
                             "before daily entry state was recorded"
                         )
+                        fill_result = (
+                            "fully_filled"
+                            if filled_quantity == request.quantity
+                            else "partially_filled"
+                        )
+                        print(f"entry_order_result={fill_result}")
             return 0
 
         if args.command == "backtest-momentum":
