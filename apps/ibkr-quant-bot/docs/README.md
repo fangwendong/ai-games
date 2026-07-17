@@ -21,6 +21,9 @@ Start here after reading the repository `AGENTS.md` and the application
   and completed 5-minute bars, validation, fallback, and maintenance.
 - [Live strategy review log](live-strategy-review-log.md): sanitized session
   execution history, reconciliation, net PnL, and review notes.
+- [Live strategy audit - 2026-07-17](live-strategy-audit-2026-07-17.md):
+  prioritized safety findings, fault-injection evidence, repair order, and
+  acceptance criteria.
 
 ## Historical Data And Backtesting
 
