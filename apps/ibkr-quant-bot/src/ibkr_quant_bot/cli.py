@@ -93,6 +93,11 @@ ROTATION_HYSTERESIS_V2_PARAMETERS: dict[str, object] = {
     "profit_lock_drawdown_pct": 0.006,
     "entry_fill_cutoff_et_minutes": 13 * 60 + 30,
 }
+ROTATION_RANGE_GATED_V1_VERSION = "rotation-range-gated-v1"
+ROTATION_RANGE_GATED_V1_PARAMETERS: dict[str, object] = {
+    **ROTATION_HYSTERESIS_V2_PARAMETERS,
+    "benchmark_min_intraday_range": 0.0075,
+}
 MOMENTUM_PROFILE_CHOICES = [
     "balanced",
     "high-frequency",
@@ -100,6 +105,7 @@ MOMENTUM_PROFILE_CHOICES = [
     "rotation-hysteresis",
     "rotation-hysteresis-v1",
     "rotation-hysteresis-v2",
+    "rotation-range-gated-v1",
 ]
 
 
@@ -1630,6 +1636,7 @@ def _build_momentum_strategy(args: argparse.Namespace, settings: Settings):
         "rotation-hysteresis",
         "rotation-hysteresis-v1",
         "rotation-hysteresis-v2",
+        "rotation-range-gated-v1",
     }:
         hysteresis = profile != "rotation"
         if hysteresis:
@@ -1639,11 +1646,12 @@ def _build_momentum_strategy(args: argparse.Namespace, settings: Settings):
                     f"{profile} freezes benchmark_symbol=QQQ; "
                     "create a new candidate profile instead of overriding the baseline"
                 )
-            parameters = (
-                ROTATION_HYSTERESIS_V2_PARAMETERS
-                if profile == ROTATION_HYSTERESIS_V2_VERSION
-                else FROZEN_ROTATION_HYSTERESIS_PARAMETERS
-            )
+            if profile == ROTATION_RANGE_GATED_V1_VERSION:
+                parameters = ROTATION_RANGE_GATED_V1_PARAMETERS
+            elif profile == ROTATION_HYSTERESIS_V2_VERSION:
+                parameters = ROTATION_HYSTERESIS_V2_PARAMETERS
+            else:
+                parameters = FROZEN_ROTATION_HYSTERESIS_PARAMETERS
             return SemiconductorRotationStrategy(
                 **parameters,
                 max_notional=args.max_notional or settings.max_order_notional,
@@ -2650,6 +2658,7 @@ def main(argv: list[str] | None = None) -> int:
                     "profit_lock_activation_pct": strategy.profit_lock_activation_pct,
                     "profit_lock_drawdown_pct": strategy.profit_lock_drawdown_pct,
                     "entry_fill_cutoff_et_minutes": strategy.entry_fill_cutoff_et_minutes,
+                    "benchmark_min_intraday_range": strategy.benchmark_min_intraday_range,
                     "max_notional": strategy.max_notional,
                     "long": {
                         "stop_loss_pct": strategy.long_stop_loss_pct,

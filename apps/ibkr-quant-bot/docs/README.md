@@ -35,6 +35,8 @@ Start here after reading the repository `AGENTS.md` and the application
 
 ## Isolated Research
 
+- [Rotation range-gated V1](strategy-range-gated-v1.md): isolated V2-derived
+  candidate that gates new entries on completed-bar QQQ intraday range.
 - [Gap reversion research](gap-reversion-research.md): isolated gap-down/VWAP
   recovery experiment and live-v2 comparison.
 - [Hybrid state research](hybrid-state-research.md): GapGuard Fusion causal state

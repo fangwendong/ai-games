@@ -317,6 +317,11 @@ The explicit `rotation-hysteresis-v1` profile and its `rotation-hysteresis`
 compatibility alias remain available for rollback. See
 [docs/strategy-baseline-v2.md](docs/strategy-baseline-v2.md).
 
+The isolated `rotation-range-gated-v1` research profile keeps all V2 behavior
+and requires the QQQ completed-bar intraday range to reach 0.75% before a new
+entry. It is opt-in and does not change the default or live profile. See
+[docs/strategy-range-gated-v1.md](docs/strategy-range-gated-v1.md).
+
 In the 2025-07-10 through 2026-07-09 research run,
 28 candidates were compared on 209 development sessions before opening a final
 42-session holdout. The hysteresis profile improved the holdout net return from
