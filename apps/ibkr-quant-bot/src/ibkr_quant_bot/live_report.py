@@ -206,8 +206,7 @@ def format_live_report(
         headline,
         f"本轮结论：{execution_action}｜{execution_reason}",
         "",
-        "| 项目 | 内容 |",
-        "|---|---|",
+        "【交易状态】",
     ]
 
     row_by_symbol = {
@@ -231,35 +230,34 @@ def format_live_report(
         else:
             future_order = "可能：满足条件后买入"
         reason = _short_reason(row.get("reason"))
-        lines.extend(
-            [
-                f"| {symbol} 最新价 | {_value(row.get('latest_trade_price'))} |",
-                f"| {symbol} 今日状态 | {marker} |",
-                f"| {symbol} 当前状态 | {current_status} |",
-                f"| {symbol} 技术信号 | {signal_text} |",
-                f"| {symbol} 后续订单 | {future_order} |",
-                f"| {symbol} 原因 | {reason} |",
-            ]
+        lines.append(
+            f"{marker.split()[0]} {symbol}｜{_value(row.get('latest_trade_price'))}｜"
+            f"{marker.partition(' ')[2]}｜{current_status}"
         )
+        lines.append(f"信号：{signal_text}｜后续：{future_order}")
+        lines.append(f"原因：{reason}")
 
     lines.extend(
         [
+            "",
+            "【资金与运行】",
             (
-                f"| 可用现金 | {_value(capital.get('usable_cash'))} USD |"
-            ),
-            f"| 现金来源 | {capital.get('source', '不可用')} |",
-            f"| 现金状态 | {capital.get('status', '不可用')} |",
-            f"| 预留现金 | {_value(capital.get('cash_reserve_usd'))} USD |",
-            f"| 执行耗时 | {elapsed_ms} ms |",
-            (
-                "| 结束时间 ET | "
-                f"{ended.astimezone(NEW_YORK).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]} |"
+                f"可用现金：{_value(capital.get('usable_cash'))} USD｜"
+                f"预留：{_value(capital.get('cash_reserve_usd'))} USD"
             ),
             (
-                "| 结束时间 CST | "
-                f"{ended.astimezone(SHANGHAI).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]} |"
+                f"现金状态：{capital.get('status', '不可用')}｜"
+                f"来源：{capital.get('source', '不可用')}"
             ),
-            f"| QQQ 最新价 | {_value(benchmark.get('latest_trade_price'))} |",
+            (
+                f"执行耗时：{elapsed_ms} ms｜结束："
+                f"{ended.astimezone(SHANGHAI).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]} CST"
+            ),
+            (
+                "美东时间："
+                f"{ended.astimezone(NEW_YORK).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]} ET"
+            ),
+            f"QQQ：{_value(benchmark.get('latest_trade_price'))}（趋势基准）",
         ]
     )
 
@@ -267,16 +265,13 @@ def format_live_report(
         row for row in decisions if str(row.get("symbol", "")).upper() in positions
     ]
     if holding_decisions:
+        lines.extend(["", "【持仓保护】"])
         for row in holding_decisions:
             symbol = str(row.get("symbol", ""))
             lines.append(
-                f"| {symbol} 保护状态 | {row.get('protection_status', '不可用')} |"
-            )
-            lines.append(
-                f"| {symbol} 止损价 | {_value(row.get('active_stop_price'))} |"
-            )
-            lines.append(
-                f"| {symbol} 止盈价 | {_value(row.get('active_take_price'))} |"
+                f"{symbol}：止损 {_value(row.get('active_stop_price'))}｜"
+                f"止盈 {_value(row.get('active_take_price'))}｜"
+                f"状态 {row.get('protection_status', '不可用')}"
             )
 
     exchanges = sorted(
@@ -301,18 +296,24 @@ def format_live_report(
         bar_counts = f"{bar_counts}, {strategy_bar_counts}"
     lines.extend(
         [
-            f"| Bar 交易所 | {','.join(exchanges) or '不可用'} |",
-            f"| Bar 来源 | {_source_line(output, 'live_bar_source')} |",
-            f"| Quote 交易所 | {','.join(quote_exchanges) or '不可用'} |",
-            f"| Quote 来源 | {_source_line(output, 'live_quote_source')} |",
-            f"| Quote 延迟 | {_value(benchmark.get('quote_age_ms'), digits=1)} ms |",
-            f"| Bar 数量 | {bar_counts} |",
+            "",
+            "【数据诊断】",
+            (
+                f"Bar：{','.join(exchanges) or '不可用'} / "
+                f"{_source_line(output, 'live_bar_source')}"
+            ),
+            (
+                f"Quote：{','.join(quote_exchanges) or '不可用'} / "
+                f"{_source_line(output, 'live_quote_source')} / "
+                f"{_value(benchmark.get('quote_age_ms'), digits=1)} ms"
+            ),
+            f"Bar 数量：{bar_counts}",
         ]
     )
     if exit_code != 0:
-        lines.append("| 异常 | 策略失败关闭；原始错误仅保留在本机脱敏日志 |")
+        lines.append("异常：策略失败关闭；原始错误仅保留在本机脱敏日志")
     else:
-        lines.append("| 异常 | 无 |")
+        lines.append("异常：无")
     return "\n".join(lines)
 
 
