@@ -50,6 +50,7 @@ from .strategy import (
 )
 
 NEW_YORK = ZoneInfo("America/New_York")
+LIVE_BAR_PUBLICATION_GRACE_SECONDS = 2.0
 DEFAULT_MOMENTUM_PROFILE = "rotation-hysteresis-v2"
 INTRADAY_MOMENTUM_RUNTIME_TIMEOUT_SECONDS = 60.0
 INTRADAY_MOMENTUM_REMOTE_REQUEST_TIMEOUT_SECONDS = 3.0
@@ -614,6 +615,56 @@ def _validate_historical_bars(
     return bars
 
 
+def _expected_latest_completed_bar_start(
+    session: MarketSession,
+    now: datetime,
+    *,
+    bar_size: str,
+    publication_grace_seconds: float = LIVE_BAR_PUBLICATION_GRACE_SECONDS,
+) -> datetime | None:
+    """Return the bar start that must exist after the publication grace."""
+
+    if publication_grace_seconds < 0:
+        raise ValueError("publication_grace_seconds must be non-negative")
+    bar_duration = timedelta(seconds=_bar_size_seconds(bar_size))
+    effective_now = now - timedelta(seconds=publication_grace_seconds)
+    effective_end = min(effective_now, session.closes_at)
+    elapsed = effective_end - session.opens_at
+    completed_intervals = int(elapsed.total_seconds() // bar_duration.total_seconds())
+    if completed_intervals <= 0:
+        return None
+    return session.opens_at + bar_duration * (completed_intervals - 1)
+
+
+def _require_latest_completed_bar_group(
+    bars_by_symbol: dict[str, list[Bar]],
+    symbols: tuple[str, ...],
+    session: MarketSession,
+    now: datetime,
+    *,
+    bar_size: str,
+) -> None:
+    """Fail closed when any symbol is behind the latest completed bar."""
+
+    expected = _expected_latest_completed_bar_start(
+        session,
+        now,
+        bar_size=bar_size,
+    )
+    if expected is None:
+        return
+    for symbol in symbols:
+        bars = bars_by_symbol.get(symbol, [])
+        if not bars:
+            raise BrokerError(f"missing completed bars for {symbol}")
+        latest = _normalize_bar_time(bars[-1].time)
+        if latest < expected:
+            raise BrokerError(
+                f"latest completed bar missing for {symbol}: "
+                f"have {latest.isoformat()}, expected {expected.isoformat()}"
+            )
+
+
 def _strategy_quote(
     broker: IbkrBroker,
     settings: Settings,
@@ -994,7 +1045,7 @@ def _load_intraday_market_data(
             cached_bars = None
             if settings.is_live and exchange == "SMART":
                 try:
-                    cached_bars = load_fresh_cached_bars(
+                    loaded_cached_bars = load_fresh_cached_bars(
                         _live_context_cache_path(settings),
                         symbols,
                         session_date=now.date(),
@@ -1003,26 +1054,35 @@ def _load_intraday_market_data(
                         max_age_seconds=settings.live_context_cache_max_age_seconds,
                         now=now,
                     )
+                    cached_bars = {
+                        symbol: _validate_historical_bars(
+                            loaded_cached_bars[symbol],
+                            settings,
+                            symbol,
+                            bar_size="5 mins",
+                            session_only=True,
+                            completed_only=True,
+                            session=session,
+                            now=now,
+                        )
+                        for symbol in symbols
+                    }
+                    _require_latest_completed_bar_group(
+                        cached_bars,
+                        symbols,
+                        session,
+                        now,
+                        bar_size="5 mins",
+                    )
                     print("live_bar_source=cache", file=sys.stderr)
-                except MarketContextCacheError as exc:
+                except (MarketContextCacheError, BrokerError) as exc:
+                    cached_bars = None
                     print(
                         f"live_bar_source=broker cache_reason={exc}",
                         file=sys.stderr,
                     )
             if cached_bars is not None:
-                bars_by_symbol = {
-                    symbol: _validate_historical_bars(
-                        cached_bars[symbol],
-                        settings,
-                        symbol,
-                        bar_size="5 mins",
-                        session_only=True,
-                        completed_only=True,
-                        session=session,
-                        now=now,
-                    )
-                    for symbol in symbols
-                }
+                bars_by_symbol = cached_bars
             else:
                 bars_by_symbol = {
                     symbol: _fresh_historical_bars(
@@ -1038,6 +1098,13 @@ def _load_intraday_market_data(
                     )
                     for symbol in symbols
                 }
+                _require_latest_completed_bar_group(
+                    bars_by_symbol,
+                    symbols,
+                    session,
+                    now,
+                    bar_size="5 mins",
+                )
         except BrokerError as exc:
             failures.append(f"{exchange}: {exc}")
             if pinned is not None:

@@ -31,6 +31,8 @@ The runner always forces live market data and disables ARCA fallback. It does
 not override the live/readonly/dry-run/allow-live-trading switches from `.env`.
 It runs only from 09:30 through 15:59 America/New_York on weekdays. The broker
 calendar remains authoritative; a holiday or early-close result is suppressed.
+The supervisor starts each poll at second 3 of the minute so the context cache
+has its two-second completed-bar publication grace before strategy validation.
 
 ## Safe validation
 
