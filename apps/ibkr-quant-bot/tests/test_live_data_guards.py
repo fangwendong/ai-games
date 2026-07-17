@@ -45,6 +45,7 @@ from ibkr_quant_bot.cli import (
     _run_live_quote_cache,
     _should_flatten,
     _strategy_quote,
+    _tradable_capital_snapshot,
     _trade_filled_quantity,
     _trade_lifecycle,
 )
@@ -189,6 +190,39 @@ class LiveDataGuardsTest(unittest.TestCase):
                     for tag in ("TotalCashValue", "AvailableFunds")
                 ]
             )
+
+    def test_tradable_capital_snapshot_reports_balance_without_account_details(self) -> None:
+        now = datetime(2026, 7, 17, 12, 1, tzinfo=NEW_YORK)
+        with TemporaryDirectory() as temporary:
+            settings = Settings(state_dir=temporary)
+            write_market_context_cache(
+                _live_context_cache_path(settings),
+                session_date=now.date(),
+                session=None,
+                bars_by_symbol={},
+                source="SMART",
+                bar_size="5 mins",
+                tradable_capital_usd=4388.50,
+                generated_at=now,
+            )
+            available, summary = _tradable_capital_snapshot(settings, now)
+
+        self.assertEqual(4388.50, available)
+        self.assertEqual("available", summary["status"])
+        self.assertEqual(4388.50, summary["usable_cash"])
+        self.assertFalse(summary["uses_margin_buying_power"])
+        self.assertNotIn("account", summary)
+
+    def test_tradable_capital_snapshot_uses_configured_fallback(self) -> None:
+        now = datetime(2026, 7, 17, 12, 1, tzinfo=NEW_YORK)
+        with TemporaryDirectory() as temporary:
+            settings = Settings(state_dir=temporary, max_order_notional=4000)
+            available, summary = _tradable_capital_snapshot(settings, now)
+
+        self.assertEqual(4000, available)
+        self.assertEqual("fallback", summary["status"])
+        self.assertEqual(4000, summary["usable_cash"])
+        self.assertEqual("configured_cap", summary["source"])
 
     def test_cache_daemons_require_readonly_dry_run_and_no_live_permission(self) -> None:
         runners = (_run_live_quote_cache, _run_live_context_cache)

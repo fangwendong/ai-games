@@ -31,6 +31,7 @@ from .market_context_cache import (
     MarketContextCacheError,
     load_cached_market_session,
     load_fresh_cached_bars,
+    load_fresh_cached_tradable_capital,
     write_market_context_cache,
 )
 from .quote_cache import QuoteCacheError, QuoteCacheWriter, load_fresh_quotes
@@ -1361,6 +1362,40 @@ def _available_cash_notional(rows: list[dict[str, str]]) -> float:
     return available
 
 
+def _tradable_capital_snapshot(
+    settings: Settings,
+    now: datetime,
+) -> tuple[float, dict[str, object]]:
+    summary: dict[str, object] = {
+        "currency": "USD",
+        "sizing_basis": "min(TotalCashValue, AvailableFunds)",
+        "uses_margin_buying_power": False,
+    }
+    try:
+        available = load_fresh_cached_tradable_capital(
+            _live_context_cache_path(settings),
+            session_date=now.date(),
+            max_age_seconds=settings.live_tradable_capital_cache_max_age_seconds,
+            now=now,
+        )
+    except (MarketContextCacheError, OSError, ValueError) as exc:
+        fallback = settings.max_order_notional
+        return fallback, {
+            **summary,
+            "status": "fallback",
+            "usable_cash": round(fallback, 2),
+            "reason": type(exc).__name__,
+            "source": "configured_cap",
+        }
+    return available, {
+        **summary,
+        "status": "available",
+        "usable_cash": round(available, 2),
+        "reason": None,
+        "source": "live_context_cache",
+    }
+
+
 def _ensure_protective_oca(
     broker: IbkrBroker,
     settings: Settings,
@@ -1736,9 +1771,11 @@ def _run_live_context_cache(settings: Settings, args: argparse.Namespace) -> int
         writer_lock = acquire_cache_writer_lock(cache_path)
     except RuntimeLockError as exc:
         raise BrokerError(f"cache-live-context refused duplicate writer: {exc}") from exc
-    last_refresh_bucket: tuple[object, ...] | None = None
+    last_bar_refresh_bucket: tuple[object, ...] | None = None
+    last_publish_bucket: tuple[object, ...] | None = None
     cached_session_date = None
     cached_session: MarketSession | None = None
+    cached_bars_by_symbol: dict[str, list[Bar]] = {}
     while True:
         # Keep the advisory-lock descriptor strongly referenced for this daemon.
         _ = writer_lock
@@ -1747,51 +1784,59 @@ def _run_live_context_cache(settings: Settings, args: argparse.Namespace) -> int
             broker.connect()
             while True:
                 now = datetime.now(NEW_YORK)
-                refresh_bucket = (
+                publish_bucket = (now.date(), now.hour, now.minute)
+                bar_refresh_bucket = (
                     now.date(),
                     now.hour,
                     now.minute // 5,
                 )
-                if refresh_bucket != last_refresh_bucket:
+                if publish_bucket != last_publish_bucket:
                     if cached_session_date != now.date():
                         cached_session = broker.market_session(symbols[0], now.date())
                         cached_session_date = now.date()
                     session = cached_session
-                    bars_by_symbol: dict[str, list[Bar]] = {}
-                    if session is not None and _is_market_hours(now, session):
-                        bars_by_symbol = {
-                            symbol: _fresh_historical_bars(
-                                broker,
-                                settings,
-                                symbol,
-                                bar_size="5 mins",
-                                session_only=True,
-                                completed_only=True,
-                                session=session,
-                                now=now,
-                                exchange="SMART",
-                            )
-                            for symbol in symbols
-                        }
+                    if bar_refresh_bucket != last_bar_refresh_bucket:
+                        cached_bars_by_symbol = {}
+                        if session is not None and _is_market_hours(now, session):
+                            cached_bars_by_symbol = {
+                                symbol: _fresh_historical_bars(
+                                    broker,
+                                    settings,
+                                    symbol,
+                                    bar_size="5 mins",
+                                    session_only=True,
+                                    completed_only=True,
+                                    session=session,
+                                    now=now,
+                                    exchange="SMART",
+                                )
+                                for symbol in symbols
+                            }
+                        last_bar_refresh_bucket = bar_refresh_bucket
+                    tradable_capital_usd = _available_cash_notional(
+                        broker.balance()
+                    )
                     write_market_context_cache(
                         cache_path,
                         session_date=now.date(),
                         session=session,
-                        bars_by_symbol=bars_by_symbol,
+                        bars_by_symbol=cached_bars_by_symbol,
                         source="SMART",
                         bar_size="5 mins",
+                        tradable_capital_usd=tradable_capital_usd,
                     )
-                    last_refresh_bucket = refresh_bucket
+                    last_publish_bucket = publish_bucket
                     print(
                         json.dumps(
                             {
                                 "bar_counts": {
-                                    symbol: len(bars_by_symbol.get(symbol, []))
+                                    symbol: len(cached_bars_by_symbol.get(symbol, []))
                                     for symbol in symbols
                                 },
                                 "cache_path": str(cache_path),
                                 "session_date": now.date().isoformat(),
                                 "source": "SMART",
+                                "tradable_capital_status": "available",
                             },
                             sort_keys=True,
                         ),
@@ -2073,6 +2118,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "intraday-momentum":
             strategy = _build_momentum_strategy(args, settings)
             now = datetime.now(NEW_YORK)
+            entry_notional_cap, tradable_capital_summary = (
+                _tradable_capital_snapshot(settings, now)
+            )
+            print(
+                json.dumps(
+                    {"tradable_capital": tradable_capital_summary},
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
             _cancel_orphaned_strategy_entry_orders(
                 broker, settings, strategy, now
             )
@@ -2441,7 +2496,6 @@ def main(argv: list[str] | None = None) -> int:
             decision = max(
                 buy_candidates, key=lambda item: float(item.meta.get("score", 0.0))
             )
-            entry_notional_cap = _available_cash_notional(broker.balance())
             strategy = replace(strategy, max_notional=entry_notional_cap)
             decision = strategy.decide(
                 decision.symbol,

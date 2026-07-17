@@ -195,8 +195,12 @@ For a new intraday-momentum entry, live sizing uses the lower of the account's
 current USD `TotalCashValue` and `AvailableFunds` as the notional ceiling. It
 does not use margin `BuyingPower`. The ATR-based `IBKR_MAX_RISK_PER_TRADE`
 limit still applies, so the order quantity is the lower of the cash-sized and
-risk-sized quantities. A missing, ambiguous, non-USD, or non-positive balance
-snapshot fails closed and does not affect position exits or mandatory flattening.
+risk-sized quantities. The read-only live-context process refreshes this value
+in advance; strategy execution reads only the local cache and does not request
+the balance from IBKR. Every run prints the usable USD amount near the start of
+its report and reuses that same value if it reaches a new-entry decision. A
+missing, stale, or invalid cached value is explicitly marked as a fallback and
+uses the configured `IBKR_MAX_ORDER_NOTIONAL` (4000 USD in the live checkout).
 
 Run the scanner and exit manager with the current default
 `rotation-hysteresis-v2` profile:
