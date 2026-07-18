@@ -349,6 +349,16 @@ an open-to-low pullback approximation for entry fills so the backtest can pick
 up some intrabar price improvement; you can still force `--entry-fill-model
 next-bar-open` for a strict historical baseline.
 
+The shared public cache keeps one source/bar-size pair per directory. For the
+current v2 comparison path, the recommended layouts are:
+
+- `/home/fwd/data/ibkr-quant-bot/historical/5-min-rth`
+- `/home/fwd/data/ibkr-quant-bot/historical/1-min-rth`
+- `/home/fwd/data/ibkr-quant-bot/historical/30-sec-rth`
+
+Use the same bar size for `refresh-history`, `backtest-momentum`, and the audit
+step so the cache, validation, and result comparison stay aligned.
+
 The tuning workflow used for this branch is documented in
 [docs/backtest-parameter-tuning.md](docs/backtest-parameter-tuning.md).
 The versioned parameters and change-control rules are documented in

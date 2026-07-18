@@ -480,6 +480,26 @@ class IbkrBroker:
             raise ValueError(f"unsupported duration: {duration}")
         return value * multipliers[unit]
 
+    @staticmethod
+    def _bar_size_seconds(bar_size: str) -> int:
+        parts = bar_size.strip().lower().split()
+        if len(parts) < 2:
+            raise ValueError(f"unsupported bar size: {bar_size}")
+        try:
+            value = int(parts[0])
+        except ValueError as exc:
+            raise ValueError(f"unsupported bar size: {bar_size}") from exc
+        unit = parts[1]
+        if unit.startswith("sec"):
+            return value
+        if unit.startswith("min"):
+            return value * 60
+        if unit.startswith("hour"):
+            return value * 60 * 60
+        if unit.startswith("day"):
+            return value * 24 * 60 * 60
+        raise ValueError(f"unsupported bar size: {bar_size}")
+
     def historical_bars_paged(
         self,
         symbol: str,
@@ -487,7 +507,7 @@ class IbkrBroker:
         *,
         bar_size: str = "5 mins",
         what_to_show: str = "TRADES",
-        chunk_duration: str = "1 W",
+        chunk_duration: str | None = None,
         end_time: datetime | None = None,
         page_callback: Callable[[list[Bar]], None] | None = None,
         exchange: str = "SMART",
@@ -496,6 +516,14 @@ class IbkrBroker:
         end = end_time or datetime.now(timezone.utc)
         if end.tzinfo is None:
             end = end.replace(tzinfo=timezone.utc)
+        if chunk_duration is None:
+            bar_seconds = self._bar_size_seconds(bar_size)
+            if bar_seconds < 60:
+                chunk_duration = "1 D"
+            elif bar_seconds < 5 * 60:
+                chunk_duration = "2 D"
+            else:
+                chunk_duration = "1 W"
         cutoff = end - timedelta(days=self._duration_days(duration))
         rows_by_time: dict[datetime, Bar] = {}
         cursor = end
