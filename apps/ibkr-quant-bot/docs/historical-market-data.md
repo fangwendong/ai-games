@@ -210,6 +210,25 @@ PYTHONPATH=src python -m ibkr_quant_bot.cli backtest-momentum \
   --data-dir /home/fwd/data/ibkr-quant-bot/historical/5-min-rth-arca
 ```
 
+When you want 5-minute signal logic but finer-grain fill pricing, keep the
+signal cache on 5-minute bars and point the fill cache at the minute cache:
+
+```bash
+PYTHONPATH=src python -m ibkr_quant_bot.cli backtest-momentum \
+  --profile rotation-hysteresis-v2 \
+  --duration "6 M" \
+  --reuse-data \
+  --bar-size "5 mins" \
+  --fill-bar-size "1 min" \
+  --fill-data-dir /home/fwd/data/ibkr-quant-bot/historical/1-min-rth \
+  --market-data-exchange SMART \
+  --data-dir /home/fwd/data/ibkr-quant-bot/historical/5-min-rth
+```
+
+The same split applies to 30-second fills if that cache is available. Keep
+signal bars and fill bars in separate directories; do not mix sizes inside one
+cache root.
+
 ## Confirm Completeness
 
 Run the offline audit after a download and before every backtest:
