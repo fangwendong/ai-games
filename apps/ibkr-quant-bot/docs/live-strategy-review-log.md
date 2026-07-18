@@ -28,6 +28,27 @@ Do not copy raw runtime records into Git. They can contain account numbers,
 broker IDs, OCA group names, and other private metadata. Record only the
 sanitized fields used below.
 
+## Daily Close Automation
+
+The post-close maintenance command is
+`PYTHONPATH=src python -m ibkr_quant_bot.cli append-live-review-log`.
+It reads the current session's sanitized journals under
+`.ibkr_bot_state/semiconductor_rotation_intraday/` and appends a single
+session block to this document if the date is not already present. If the day
+has no filled entry yet, the command records a no-trade snapshot instead of
+inventing a result.
+
+When a late broker fill or commission lands after the first append, update the
+`Session Summary` row and the dated session section together in the same
+commit. Do not leave the summary row ahead of the dated block, and do not patch
+only a partial session note. If the local journal snapshot lags the broker
+record, treat the broker record as the source of truth and rewrite the dated
+section from the reconciled fill data.
+
+Run it after the regular US close, once the exit and commission records have
+settled. The scheduled task should stay separate from the live 10-second
+strategy runner, quote cache, and context cache.
+
 ## Session Summary
 
 | Session | Profile | Bar / execution source | Result | Exit | Net PnL | Net return |
@@ -36,13 +57,15 @@ sanitized fields used below.
 | 2026-07-13 | V1-compatible | SMART / SMART | SOXS round trip | Mandatory 15:50 flatten | +$23.61 | +0.59% |
 | 2026-07-14 | `rotation-hysteresis-v2` | SMART / none | No entry | No signal before cutoff | $0.00 | N/A |
 | 2026-07-15 | `rotation-hysteresis-v2` | ARCA / SMART | SOXS round trip | Protective take | +$146.30 | +3.70% |
+| 2026-07-16 | `rotation-hysteresis-v2` | SMART / SMART | SOXS round trip | Protective take | +$145.93 | +3.69% |
+| 2026-07-17 | `rotation-hysteresis-v2` | SMART / SMART | SOXL round trip | Protective take | +$107.41 | +3.68% |
 
-Across these four sessions, the strategy closed three attributable round
-trips for approximately $171.34 net realized PnL, or +2.06% of the three
-filled entry notionals pooled together. This pooled rate is descriptive and
-is not an account return or a compounded portfolio return. All three trades
-were profitable, but three trades are far too few to estimate a reliable win
-rate or expected return.
+Across these six sessions, the strategy closed five attributable round trips
+for approximately $424.68 net realized PnL, or +2.99% of the five filled entry
+notionals pooled together. This pooled rate is descriptive and is not an
+account return or a compounded portfolio return. All five trades were
+profitable, but five trades are far too few to estimate a reliable win rate or
+expected return.
 
 The July 10 and July 13 entry journals predate persistence of an explicit
 `strategy_version` field. The repository deployment timeline identifies them
@@ -181,6 +204,91 @@ The execution-model fix is commit `a166ec6` on `wt/codex-6`. A 60-session
 check changed net return from 30.38% to 30.15% while preserving 55 trades and
 the same 27/28 win-loss count, which supports treating it as an execution
 semantics correction rather than a one-day parameter fit.
+
+## 2026-07-16
+
+### Market-Data Context
+
+QQQ, SOXL, and SOXS signal bars used SMART for the complete session. Live
+quotes and order routing also used SMART. The standalone quote subscription
+was active, while the strategy retained its fail-closed SMART snapshot path
+for stale-cache handling. No ARCA fallback or mixed signal source occurred.
+
+### Execution
+
+- The 30-bar warm-up completed at 12:00. QQQ was bearish, SOXL was rejected,
+  and SOXS passed its EMA, trend, VWAP, score, and benchmark-regime filters.
+- Entry: bought 77 SOXS at 12:01:46 in two SMART-routed fills, weighted average
+  price $51.387477. The entry limit was $51.40.
+- Protective stop: $50.23 for all 77 shares.
+- Protective take: $53.31 for all 77 shares.
+- While held, SOXS retained a bullish fast/slow/trend EMA structure and QQQ
+  remained in the bearish regime. No technical, benchmark, or profit-lock
+  software exit occurred before the protective take.
+- Exit: the $53.31 protective take filled all 77 shares at 13:45:45. The OCA
+  stop was cancelled and no strategy order remained active.
+- Gross PnL from sanitized fills: approximately $148.03.
+- Broker USD realized PnL after the round trip: $145.93, implying approximately
+  $2.10 of total transaction costs.
+- Net return on the $3,956.84 filled entry notional: approximately +3.69%.
+- End state: SOXS and SOXL were flat, with no active strategy order.
+
+The broker execution query returned only this SOXS strategy round trip for the
+session. The recorded USD realized PnL therefore reconciles to the trade after
+the approximately $2.10 difference between gross fill PnL and realized PnL.
+No account identifier, order identifier, execution identifier, balance, or
+unrelated holding is retained in this log.
+
+### Review
+
+This session exercised the intended V2 path: wait for 30 completed bars, select
+the inverse semiconductor ETF only under a bearish QQQ regime, create complete
+broker-hosted OCA protection after the fill, and allow the protective take to
+close the position without waiting for the next polling cycle. The entry was
+filled before the 13:30 cutoff; after the 13:45 exit, the one-entry-per-session
+guard continued to prevent re-entry.
+
+A same-source historical replay has not yet been appended for this session.
+When added, it must use the complete 2026-07-16 SMART bar set and the corrected
+protective-OCA execution model; it must not substitute ARCA bars or infer the
+two live entry fills from a favorable bar extreme.
+
+## 2026-07-17
+
+### Market-Data Context
+
+- Bar / quote / order route: SMART / SMART / SMART
+- Source decision: all strategy symbols passed SMART validation
+
+### Execution
+
+- Session date and profile: 2026-07-17 / rotation-hysteresis-v2
+- Bar source / quote source / order route: SMART / SMART / SMART
+- Data completeness and corporate actions: entry journal recorded; no
+  corporate-action event is reflected in the session snapshot
+- Signals considered and rejected: SOXL entry signal was accepted; SOXS stayed
+  out of the bullish regime
+- Entry time, symbol, quantity, average fill, and reason: 12:00:04 ET, SOXL,
+  21, $138.88, entry signal satisfied
+- Protective stop/take created: stop $133.35 / take $144.09
+- Exit time, quantity, average fill, and reason: 13:08:15 ET, SOXL, 21,
+  $144.09; broker-side protective take filled in two executions (12 + 9) and
+  the stop leg was canceled
+- Gross PnL, commissions, broker net realized PnL, and net return on entry
+  notional: $109.41, approximately $2.00 round-trip commission from the live
+  cost calibration, approximately $107.41 net realized PnL, 3.68%
+- End-of-session position and open-order state: round trip closed on the
+  broker; the broker trade record is the source of truth, and the local journal
+  snapshot was lagging when it was first reviewed
+
+### Review
+
+The broker-side execution record confirms the 7/17 protective take and closed
+the round trip. The broker trade record should be treated as the source of
+truth for reconciliation; the local journal snapshot only acts as a delayed
+cache and should not be used to override confirmed broker fills. If this day
+needs another revision, rewrite the full dated block together with the summary
+row above instead of appending a partial correction.
 
 ## Follow-Up Items
 

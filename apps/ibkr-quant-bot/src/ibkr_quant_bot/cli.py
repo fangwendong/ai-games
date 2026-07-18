@@ -3,9 +3,13 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
+import sys
+import uuid
 from dataclasses import asdict, replace
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
+from time import sleep as blocking_sleep
 from zoneinfo import ZoneInfo
 
 from .broker import BrokerError, IbkrBroker, format_table
@@ -22,8 +26,23 @@ from .historical_cache import (
     save_bars_by_day,
 )
 from .history_refresh import schedule_lookback_days, validate_recent_cached_sessions
+from .live_review_log import append_review_log, current_session_date
 from .models import Bar, MarketSession, Quote, StrategyDecision, TradeRequest
+from .market_context_cache import (
+    MarketContextCacheError,
+    load_cached_market_session,
+    load_fresh_cached_bars,
+    load_fresh_cached_tradable_capital,
+    write_market_context_cache,
+)
+from .quote_cache import QuoteCacheError, QuoteCacheWriter, load_fresh_quotes
 from .risk import RiskManager
+from .runtime_lock import (
+    RuntimeLockError,
+    acquire_cache_writer_lock,
+    acquire_runtime_lock,
+    arm_runtime_lock_deadline,
+)
 from .strategy import (
     IntradayMomentumStrategy,
     MovingAverageStrategy,
@@ -32,7 +51,10 @@ from .strategy import (
 )
 
 NEW_YORK = ZoneInfo("America/New_York")
+LIVE_BAR_PUBLICATION_GRACE_SECONDS = 2.0
 DEFAULT_MOMENTUM_PROFILE = "rotation-hysteresis-v2"
+INTRADAY_MOMENTUM_RUNTIME_TIMEOUT_SECONDS = 60.0
+INTRADAY_MOMENTUM_REMOTE_REQUEST_TIMEOUT_SECONDS = 3.0
 FROZEN_ROTATION_HYSTERESIS_VERSION = "rotation-hysteresis-v1"
 FROZEN_ROTATION_HYSTERESIS_PARAMETERS: dict[str, object] = {
     "symbols": ("SOXL", "SOXS"),
@@ -73,6 +95,11 @@ ROTATION_HYSTERESIS_V2_PARAMETERS: dict[str, object] = {
     "profit_lock_drawdown_pct": 0.006,
     "entry_fill_cutoff_et_minutes": 13 * 60 + 30,
 }
+ROTATION_RANGE_GATED_V1_VERSION = "rotation-range-gated-v1"
+ROTATION_RANGE_GATED_V1_PARAMETERS: dict[str, object] = {
+    **ROTATION_HYSTERESIS_V2_PARAMETERS,
+    "benchmark_min_intraday_range": 0.0075,
+}
 MOMENTUM_PROFILE_CHOICES = [
     "balanced",
     "high-frequency",
@@ -80,7 +107,9 @@ MOMENTUM_PROFILE_CHOICES = [
     "rotation-hysteresis",
     "rotation-hysteresis-v1",
     "rotation-hysteresis-v2",
+    "rotation-range-gated-v1",
 ]
+ENTRY_FILL_MODEL_CHOICES = ["next-bar-open", "open-pullback", "profile-default"]
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -114,6 +143,49 @@ def _build_parser() -> argparse.ArgumentParser:
 
     quote = subparsers.add_parser("quote", help="fetch a market data snapshot")
     quote.add_argument("symbol")
+
+    stream_quotes = subparsers.add_parser(
+        "stream-live-quotes",
+        help="maintain an atomic bounded SMART quote cache",
+    )
+    stream_quotes.add_argument(
+        "--symbols", nargs="+", default=["QQQ", "SOXL", "SOXS"]
+    )
+    stream_quotes.add_argument("--cache-path", default=None)
+
+    cache_context = subparsers.add_parser(
+        "cache-live-context",
+        help="precompute the SMART session calendar and completed 5-minute bars",
+    )
+    cache_context.add_argument(
+        "--symbols", nargs="+", default=["QQQ", "SOXL", "SOXS"]
+    )
+    cache_context.add_argument("--cache-path", default=None)
+
+    review_log = subparsers.add_parser(
+        "append-live-review-log",
+        help="append the day's sanitized live-strategy review into the review log",
+    )
+    review_log.add_argument(
+        "--state-dir",
+        default=".ibkr_bot_state/semiconductor_rotation_intraday",
+        help="strategy state directory containing the daily journal files",
+    )
+    review_log.add_argument(
+        "--doc-path",
+        default="docs/live-strategy-review-log.md",
+        help="target markdown review log",
+    )
+    review_log.add_argument(
+        "--latest-summary-path",
+        default=".ibkr_bot_state/live-strategy-reporter/latest-summary.txt",
+        help="fallback summary used when no entry journal exists",
+    )
+    review_log.add_argument(
+        "--session-date",
+        default=None,
+        help="America/New_York session date to append (defaults to current trading date)",
+    )
 
     subparsers.add_parser("account", help="show account summary")
     subparsers.add_parser(
@@ -221,6 +293,27 @@ def _build_parser() -> argparse.ArgumentParser:
         help="single historical request used for chronological walk-forward evaluation",
     )
     backtest.add_argument(
+        "--bar-size",
+        default="5 mins",
+        help="historical bar size used for signal logic and cache lookup",
+    )
+    backtest.add_argument(
+        "--fill-bar-size",
+        default=None,
+        help=(
+            "historical bar size used for fill pricing and protective exits; "
+            "defaults to --bar-size"
+        ),
+    )
+    backtest.add_argument(
+        "--fill-data-dir",
+        default=None,
+        help=(
+            "historical cache root used for fill bars; defaults to --data-dir "
+            "when not provided"
+        ),
+    )
+    backtest.add_argument(
         "--train-days", type=int, default=252, help="walk-forward training window"
     )
     backtest.add_argument(
@@ -281,6 +374,15 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     backtest.add_argument(
         "--min-score", type=float, default=0.008, help="minimum momentum score required"
+    )
+    backtest.add_argument(
+        "--entry-fill-model",
+        choices=ENTRY_FILL_MODEL_CHOICES,
+        default="profile-default",
+        help=(
+            "entry fill approximation; profile-default uses open-pullback for "
+            "rotation-hysteresis-v2 and next-bar-open otherwise"
+        ),
     )
     backtest.add_argument(
         "--no-benchmark-confirmation",
@@ -345,7 +447,11 @@ def _doctor(settings: Settings) -> int:
 
 def _with_broker(settings: Settings) -> IbkrBroker:
     broker = IbkrBroker(settings)
-    broker.connect()
+    try:
+        broker.connect()
+    except Exception:
+        broker.disconnect()
+        raise
     return broker
 
 
@@ -491,7 +597,31 @@ def _fresh_historical_bars(
         what_to_show=what_to_show,
         exchange=exchange,
     )
+    return _validate_historical_bars(
+        bars,
+        settings,
+        symbol,
+        bar_size=bar_size,
+        session_only=session_only,
+        completed_only=completed_only,
+        session=session,
+        now=now,
+    )
+
+
+def _validate_historical_bars(
+    bars: list[Bar],
+    settings: Settings,
+    symbol: str,
+    *,
+    bar_size: str,
+    session_only: bool,
+    completed_only: bool,
+    session: MarketSession | None,
+    now: datetime | None,
+) -> list[Bar]:
     now = now or datetime.now(NEW_YORK)
+    bar_duration = timedelta(seconds=_bar_size_seconds(bar_size))
     if session_only:
         session_open = session.opens_at if session is not None else None
         session_close = session.closes_at if session is not None else None
@@ -507,35 +637,89 @@ def _fresh_historical_bars(
                 < time(16, 0)
             )
         ]
+    if completed_only:
+        bars = [
+            bar
+            for bar in bars
+            if _normalize_bar_time(bar.time) + bar_duration <= now
+        ]
     if settings.is_live:
         if not bars:
             raise BrokerError(f"no live bars returned for {symbol}")
 
         last_bar_time = _normalize_bar_time(bars[-1].time)
-        age_seconds = (now - last_bar_time).total_seconds()
+        freshness_time = (
+            last_bar_time + bar_duration if completed_only else last_bar_time
+        )
+        age_seconds = (now - freshness_time).total_seconds()
         max_age_seconds = max(
             settings.live_bar_max_age_seconds, _bar_size_seconds(bar_size) + 120
         )
         if age_seconds < -60:
             raise BrokerError(
-                f"latest bar for {symbol} is in the future: {last_bar_time.isoformat()}"
+                f"latest bar for {symbol} is in the future: "
+                f"{last_bar_time.isoformat()}"
             )
         if age_seconds > max_age_seconds:
             age_minutes = age_seconds / 60
             max_minutes = max_age_seconds / 60
             raise BrokerError(
                 f"latest bar for {symbol} is stale: {last_bar_time.isoformat()} "
-                f"({age_minutes:.1f} min old; max {max_minutes:.1f}); refusing delayed data"
+                f"(completed {freshness_time.isoformat()}; "
+                f"{age_minutes:.1f} min old; max {max_minutes:.1f}); "
+                "refusing delayed data"
             )
-
-    if completed_only:
-        bar_duration = timedelta(seconds=_bar_size_seconds(bar_size))
-        bars = [
-            bar
-            for bar in bars
-            if _normalize_bar_time(bar.time) + bar_duration <= now
-        ]
     return bars
+
+
+def _expected_latest_completed_bar_start(
+    session: MarketSession,
+    now: datetime,
+    *,
+    bar_size: str,
+    publication_grace_seconds: float = LIVE_BAR_PUBLICATION_GRACE_SECONDS,
+) -> datetime | None:
+    """Return the bar start that must exist after the publication grace."""
+
+    if publication_grace_seconds < 0:
+        raise ValueError("publication_grace_seconds must be non-negative")
+    bar_duration = timedelta(seconds=_bar_size_seconds(bar_size))
+    effective_now = now - timedelta(seconds=publication_grace_seconds)
+    effective_end = min(effective_now, session.closes_at)
+    elapsed = effective_end - session.opens_at
+    completed_intervals = int(elapsed.total_seconds() // bar_duration.total_seconds())
+    if completed_intervals <= 0:
+        return None
+    return session.opens_at + bar_duration * (completed_intervals - 1)
+
+
+def _require_latest_completed_bar_group(
+    bars_by_symbol: dict[str, list[Bar]],
+    symbols: tuple[str, ...],
+    session: MarketSession,
+    now: datetime,
+    *,
+    bar_size: str,
+) -> None:
+    """Fail closed when any symbol is behind the latest completed bar."""
+
+    expected = _expected_latest_completed_bar_start(
+        session,
+        now,
+        bar_size=bar_size,
+    )
+    if expected is None:
+        return
+    for symbol in symbols:
+        bars = bars_by_symbol.get(symbol, [])
+        if not bars:
+            raise BrokerError(f"missing completed bars for {symbol}")
+        latest = _normalize_bar_time(bars[-1].time)
+        if latest < expected:
+            raise BrokerError(
+                f"latest completed bar missing for {symbol}: "
+                f"have {latest.isoformat()}, expected {expected.isoformat()}"
+            )
 
 
 def _strategy_quote(
@@ -571,6 +755,183 @@ def _orders_state_path(settings: Settings, now: datetime | None = None) -> Path:
     now = now or datetime.now(NEW_YORK)
     state_dir = Path(settings.state_dir).expanduser()
     return state_dir / f"orders-{now.date().isoformat()}.jsonl"
+
+
+def _strategy_runtime_lock_path(settings: Settings, profile: str) -> Path:
+    del profile  # All intraday profiles share symbols, positions, and order state.
+    return Path(settings.state_dir).expanduser() / "intraday-momentum.run.lock"
+
+
+def _live_quote_cache_path(settings: Settings) -> Path:
+    if settings.live_quote_cache_path:
+        return Path(settings.live_quote_cache_path).expanduser()
+    return Path(settings.state_dir).expanduser() / "live-quotes.json"
+
+
+def _live_context_cache_path(settings: Settings) -> Path:
+    if settings.live_context_cache_path:
+        return Path(settings.live_context_cache_path).expanduser()
+    return Path(settings.state_dir).expanduser() / "live-context.json"
+
+
+def _cached_or_broker_market_session(
+    broker: IbkrBroker,
+    settings: Settings,
+    symbol: str,
+    now: datetime,
+) -> MarketSession | None:
+    if settings.is_live:
+        try:
+            session = load_cached_market_session(
+                _live_context_cache_path(settings),
+                session_date=now.date(),
+                source="SMART",
+                bar_size="5 mins",
+                max_age_seconds=settings.live_context_cache_max_age_seconds,
+                now=now,
+            )
+            print("market_session_source=cache", file=sys.stderr)
+            return session
+        except MarketContextCacheError as exc:
+            print(
+                f"market_session_source=broker cache_reason={exc}",
+                file=sys.stderr,
+            )
+    return broker.market_session(symbol, now.date())
+
+
+def _cached_or_snapshot_live_quotes(
+    broker: IbkrBroker,
+    settings: Settings,
+    symbols: tuple[str, ...],
+) -> dict[str, Quote]:
+    try:
+        quotes = load_fresh_quotes(
+            _live_quote_cache_path(settings),
+            symbols,
+            max_age_seconds=settings.live_quote_cache_max_age_seconds,
+        )
+        print("live_quote_source=cache", file=sys.stderr)
+        return quotes
+    except QuoteCacheError as exc:
+        print(
+            f"live_quote_source=snapshot cache_reason={exc}",
+            file=sys.stderr,
+        )
+        return broker.live_quote_snapshots(symbols, exchange="SMART")
+
+
+def _quote_timing_fields(quote: Quote, now: datetime) -> dict[str, object]:
+    age_ms: float | None = None
+    if quote.observed_at:
+        try:
+            observed_at = datetime.fromisoformat(quote.observed_at)
+            if observed_at.tzinfo is None:
+                observed_at = observed_at.replace(tzinfo=timezone.utc)
+            age_ms = max(
+                0.0,
+                (now.astimezone(timezone.utc) - observed_at).total_seconds(),
+            ) * 1000
+        except ValueError:
+            age_ms = None
+    return {
+        "quote_market_time": quote.market_time,
+        "quote_received_at": quote.received_at,
+        "quote_observed_at": quote.observed_at,
+        "quote_published_at": quote.published_at,
+        "quote_age_ms": None if age_ms is None else round(age_ms, 1),
+    }
+
+
+def _latest_trade_price_fields(quote: Quote) -> dict[str, object]:
+    try:
+        latest = float(quote.last) if quote.last is not None else None
+    except (TypeError, ValueError):
+        latest = None
+    if latest is None or not math.isfinite(latest) or latest <= 0:
+        return {
+            "latest_trade_price": None,
+            "latest_trade_price_available": False,
+        }
+    return {
+        "latest_trade_price": round(latest, 4),
+        "latest_trade_price_available": True,
+    }
+
+
+def _benchmark_quote_summary(
+    symbol: str,
+    quote: Quote,
+    market_data_exchange: str,
+    now: datetime,
+) -> dict[str, object]:
+    return {
+        "role": "benchmark",
+        "symbol": symbol,
+        "reference_price": round(quote.reference_price, 2),
+        **_latest_trade_price_fields(quote),
+        "market_data_exchange": market_data_exchange,
+        "bar_data_exchange": market_data_exchange,
+        "quote_data_exchange": "SMART",
+        **_quote_timing_fields(quote, now),
+    }
+
+
+def _protective_order_display(
+    broker: IbkrBroker,
+    strategy: IntradayMomentumStrategy | SemiconductorRotationStrategy,
+    symbol: str,
+    position_row: dict[str, str] | None,
+    bars: list[Bar],
+    now: datetime,
+) -> dict[str, object]:
+    display: dict[str, object] = {
+        "position_status": "holding" if position_row is not None else "flat",
+        "stop_loss_pct": strategy.stop_loss_pct_for(symbol),
+        "take_profit_pct": strategy.take_profit_pct_for(symbol),
+        "calculated_stop_price": None,
+        "calculated_take_price": None,
+        "active_stop_price": None,
+        "active_take_price": None,
+        "protection_status": "not_applicable",
+    }
+    if position_row is None:
+        return display
+
+    quantity = int(float(position_row["position"]))
+    average_cost = float(position_row["avgCost"])
+    stop_price, take_price = strategy.protective_prices(
+        symbol, average_cost, bars
+    )
+    display["calculated_stop_price"] = round(stop_price, 4)
+    display["calculated_take_price"] = round(take_price, 4)
+
+    order_ref_prefix = f"momentum-{now.date()}-{symbol}-protect"
+    matched = []
+    for trade in broker.active_trades_for(symbol, "SELL"):
+        order = getattr(trade, "order", None)
+        order_ref = str(getattr(order, "orderRef", "") or "")
+        if order_ref.startswith(order_ref_prefix):
+            matched.append(trade)
+            order_type = str(getattr(order, "orderType", "") or "").upper()
+            if order_type == "STP":
+                value = float(getattr(order, "auxPrice", 0) or 0)
+                if value > 0:
+                    display["active_stop_price"] = round(value, 4)
+            elif order_type == "LMT":
+                value = float(getattr(order, "lmtPrice", 0) or 0)
+                if value > 0:
+                    display["active_take_price"] = round(value, 4)
+
+    if broker.protective_oca_is_complete(
+        symbol, quantity, order_ref_prefix=order_ref_prefix
+    ):
+        display["protection_status"] = "complete"
+    elif matched:
+        display["protection_status"] = "incomplete"
+    else:
+        display["protection_status"] = "missing"
+    return display
 
 
 def _json_safe(value):
@@ -656,8 +1017,8 @@ def _record_market_data_exchange(
     if normalized not in {"SMART", "ARCA"}:
         raise ValueError(f"unsupported market-data exchange: {exchange}")
     path = _market_data_exchange_state_path(settings, now)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
+    _write_text_atomic(
+        path,
         json.dumps(
             {
                 # Keep exchange for compatibility with the first source-pin
@@ -671,8 +1032,24 @@ def _record_market_data_exchange(
             },
             indent=2,
             sort_keys=True,
-        )
+        ),
     )
+
+
+def _write_text_atomic(path: Path, payload: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temporary.open("w") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _load_intraday_market_data(
@@ -703,12 +1080,17 @@ def _load_intraday_market_data(
         exchanges = ("SMART",)
 
     try:
-        quotes_by_symbol = {
-            symbol: _strategy_quote(
-                broker, settings, symbol, exchange="SMART"
+        if settings.is_live:
+            quotes_by_symbol = _cached_or_snapshot_live_quotes(
+                broker, settings, symbols
             )
-            for symbol in symbols
-        }
+        else:
+            quotes_by_symbol = {
+                symbol: _strategy_quote(
+                    broker, settings, symbol, exchange="SMART"
+                )
+                for symbol in symbols
+            }
     except BrokerError as exc:
         raise BrokerError(
             f"complete SMART live quote group unavailable: {exc}"
@@ -717,20 +1099,69 @@ def _load_intraday_market_data(
     failures: list[str] = []
     for exchange in exchanges:
         try:
-            bars_by_symbol = {
-                symbol: _fresh_historical_bars(
-                    broker,
-                    settings,
-                    symbol,
+            cached_bars = None
+            if settings.is_live and exchange == "SMART":
+                try:
+                    loaded_cached_bars = load_fresh_cached_bars(
+                        _live_context_cache_path(settings),
+                        symbols,
+                        session_date=now.date(),
+                        source=exchange,
+                        bar_size="5 mins",
+                        max_age_seconds=settings.live_context_cache_max_age_seconds,
+                        now=now,
+                    )
+                    cached_bars = {
+                        symbol: _validate_historical_bars(
+                            loaded_cached_bars[symbol],
+                            settings,
+                            symbol,
+                            bar_size="5 mins",
+                            session_only=True,
+                            completed_only=True,
+                            session=session,
+                            now=now,
+                        )
+                        for symbol in symbols
+                    }
+                    _require_latest_completed_bar_group(
+                        cached_bars,
+                        symbols,
+                        session,
+                        now,
+                        bar_size="5 mins",
+                    )
+                    print("live_bar_source=cache", file=sys.stderr)
+                except (MarketContextCacheError, BrokerError) as exc:
+                    cached_bars = None
+                    print(
+                        f"live_bar_source=broker cache_reason={exc}",
+                        file=sys.stderr,
+                    )
+            if cached_bars is not None:
+                bars_by_symbol = cached_bars
+            else:
+                bars_by_symbol = {
+                    symbol: _fresh_historical_bars(
+                        broker,
+                        settings,
+                        symbol,
+                        bar_size="5 mins",
+                        session_only=True,
+                        completed_only=True,
+                        session=session,
+                        now=now,
+                        exchange=exchange,
+                    )
+                    for symbol in symbols
+                }
+                _require_latest_completed_bar_group(
+                    bars_by_symbol,
+                    symbols,
+                    session,
+                    now,
                     bar_size="5 mins",
-                    session_only=True,
-                    completed_only=True,
-                    session=session,
-                    now=now,
-                    exchange=exchange,
                 )
-                for symbol in symbols
-            }
         except BrokerError as exc:
             failures.append(f"{exchange}: {exc}")
             if pinned is not None:
@@ -759,6 +1190,8 @@ def _record_daily_entry(
     filled_quantity: float | None = None,
     average_fill_price: float | None = None,
     strategy_version: str | None = None,
+    protective_stop_price: float | None = None,
+    protective_take_price: float | None = None,
 ) -> None:
     now = now or datetime.now(NEW_YORK)
     path = _entry_state_path(settings, now)
@@ -773,6 +1206,8 @@ def _record_daily_entry(
             "quantity": request.quantity,
             "filled_quantity": filled_quantity,
             "average_fill_price": average_fill_price,
+            "protective_stop_price": protective_stop_price,
+            "protective_take_price": protective_take_price,
             "strategy_version": strategy_version,
             "order_type": request.order_type,
             "limit_price": request.limit_price,
@@ -783,8 +1218,35 @@ def _record_daily_entry(
     )
     state["entry_count"] = _daily_entry_count(settings, now) + 1
     state["entries"] = entries
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, indent=2, sort_keys=True))
+    _write_text_atomic(path, json.dumps(state, indent=2, sort_keys=True))
+
+
+def _latest_entry_protective_prices(
+    settings: Settings, symbol: str, now: datetime | None = None
+) -> tuple[float, float] | None:
+    now = now or datetime.now(NEW_YORK)
+    entries = _load_entry_state(settings, now).get("entries", [])
+    if not isinstance(entries, list):
+        return None
+    for entry in reversed(entries):
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("symbol", "")).upper() != symbol.upper():
+            continue
+        try:
+            stop_price = float(entry["protective_stop_price"])
+            take_price = float(entry["protective_take_price"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        if (
+            not math.isfinite(stop_price)
+            or not math.isfinite(take_price)
+            or stop_price <= 0
+            or take_price <= stop_price
+        ):
+            return None
+        return stop_price, take_price
+    return None
 
 
 def _latest_entry_time(
@@ -881,6 +1343,84 @@ def _record_order_state(
         file.write("\n")
 
 
+def _is_strategy_entry_trade(trade, symbols: tuple[str, ...]) -> bool:
+    order = getattr(trade, "order", None)
+    symbol = str(getattr(getattr(trade, "contract", None), "symbol", "")).upper()
+    action = str(getattr(order, "action", "") or "").upper()
+    order_ref = str(getattr(order, "orderRef", "") or "")
+    return (
+        symbol in {item.upper() for item in symbols}
+        and action == "BUY"
+        and order_ref.startswith("momentum-")
+        and "-entry-" in order_ref
+    )
+
+
+def _cancel_orphaned_strategy_entry_orders(
+    broker: IbkrBroker,
+    settings: Settings,
+    strategy: IntradayMomentumStrategy | SemiconductorRotationStrategy,
+    now: datetime,
+) -> int:
+    """Cancel entry orders left behind by a previous one-shot strategy run."""
+    active_by_identity = {
+        id(trade): trade
+        for symbol in strategy.symbols
+        for trade in broker.active_trades_for(symbol, "BUY")
+        if _is_strategy_entry_trade(trade, strategy.symbols)
+    }
+    active = list(active_by_identity.values())
+    if not active:
+        return 0
+    if settings.readonly or settings.dry_run:
+        print(
+            f"dry-run: detected {len(active)} orphaned strategy BUY order(s); "
+            "not cancelled"
+        )
+        return len(active)
+
+    for trade in active:
+        order = getattr(trade, "order", None)
+        symbol = str(
+            getattr(getattr(trade, "contract", None), "symbol", "")
+        ).upper()
+        quantity_value = getattr(order, "totalQuantity", None)
+        if quantity_value is None:
+            quantity_value = getattr(getattr(trade, "orderStatus", None), "remaining", 0)
+        try:
+            quantity = max(1, int(round(float(quantity_value or 0))))
+        except (TypeError, ValueError):
+            quantity = 1
+        broker.cancel_order(trade)
+        _record_order_state(
+            settings,
+            TradeRequest(
+                symbol=symbol,
+                action="BUY",
+                quantity=quantity,
+                order_type=str(getattr(order, "orderType", "LMT") or "LMT"),
+                limit_price=getattr(order, "lmtPrice", None),
+                time_in_force=str(getattr(order, "tif", "DAY") or "DAY"),
+                order_ref=str(getattr(order, "orderRef", "") or ""),
+            ),
+            trade,
+            now,
+        )
+
+    unresolved = {
+        id(trade): trade
+        for symbol in strategy.symbols
+        for trade in broker.active_trades_for(symbol, "BUY")
+        if _is_strategy_entry_trade(trade, strategy.symbols)
+    }
+    if unresolved:
+        raise BrokerError(
+            "orphaned strategy BUY cancellation unresolved; refusing strategy run"
+        )
+    print(f"cancelled orphaned strategy BUY orders={len(active)}")
+    return len(active)
+
+
 def _parse_position_rows(
     rows: list[dict[str, str]], symbols: tuple[str, ...]
 ) -> dict[str, dict[str, str]]:
@@ -898,6 +1438,298 @@ def _parse_position_rows(
             continue
         positions[symbol] = row
     return positions
+
+
+def _validate_strategy_positions(
+    positions: dict[str, dict[str, str]],
+) -> None:
+    for symbol, position_row in positions.items():
+        position = float(position_row["position"])
+        if not math.isclose(position, round(position), abs_tol=1e-6):
+            raise BrokerError(
+                f"fractional {symbol} strategy position {position:g}; "
+                "possible corporate action; refusing automation"
+            )
+
+
+def _available_cash_notional(rows: list[dict[str, str]]) -> float:
+    """Return a conservative USD entry cap from the current IBKR balance.
+
+    TotalCashValue prevents the strategy from treating margin buying power as
+    cash. AvailableFunds prevents it from spending cash that IBKR has already
+    reserved for margin or other account obligations. Requiring both fields
+    makes a missing or ambiguous account snapshot fail closed.
+    """
+    usd_rows = [
+        row
+        for row in rows
+        if str(row.get("currency", "")).upper() == "USD"
+        and str(row.get("tag", "")) in {"TotalCashValue", "AvailableFunds"}
+    ]
+    accounts = {str(row.get("account", "")) for row in usd_rows}
+    if len(accounts) != 1:
+        raise BrokerError(
+            "cannot determine one USD account balance for dynamic entry sizing"
+        )
+
+    values: dict[str, float] = {}
+    for row in usd_rows:
+        tag = str(row.get("tag", ""))
+        try:
+            value = float(row.get("value", ""))
+        except (TypeError, ValueError) as exc:
+            raise BrokerError(f"invalid USD {tag} value for dynamic entry sizing") from exc
+        if not math.isfinite(value):
+            raise BrokerError(f"non-finite USD {tag} value for dynamic entry sizing")
+        if tag in values and not math.isclose(values[tag], value, abs_tol=0.01):
+            raise BrokerError(f"ambiguous USD {tag} values for dynamic entry sizing")
+        values[tag] = value
+
+    missing = {"TotalCashValue", "AvailableFunds"} - values.keys()
+    if missing:
+        raise BrokerError(
+            "missing USD account balance fields for dynamic entry sizing: "
+            + ",".join(sorted(missing))
+        )
+    available = min(values["TotalCashValue"], values["AvailableFunds"])
+    if available <= 0:
+        raise BrokerError("no positive USD cash is available for a new strategy entry")
+    return available
+
+
+def _tradable_capital_snapshot(
+    settings: Settings,
+    now: datetime,
+) -> tuple[float, dict[str, object]]:
+    reserve = settings.entry_cash_reserve_usd
+    if not math.isfinite(reserve) or reserve < 0:
+        raise BrokerError("IBKR_ENTRY_CASH_RESERVE_USD must be finite and non-negative")
+    summary: dict[str, object] = {
+        "currency": "USD",
+        "sizing_basis": "min(TotalCashValue, AvailableFunds) - cash reserve",
+        "cash_reserve_usd": round(reserve, 2),
+        "uses_margin_buying_power": False,
+    }
+    try:
+        available = load_fresh_cached_tradable_capital(
+            _live_context_cache_path(settings),
+            session_date=now.date(),
+            max_age_seconds=settings.live_tradable_capital_cache_max_age_seconds,
+            now=now,
+        )
+    except (MarketContextCacheError, OSError, ValueError) as exc:
+        fallback = max(0.0, settings.max_order_notional - reserve)
+        return fallback, {
+            **summary,
+            "status": "fallback",
+            "usable_cash": round(fallback, 2),
+            "reason": type(exc).__name__,
+            "source": "configured_cap",
+        }
+    usable = max(0.0, available - reserve)
+    return usable, {
+        **summary,
+        "status": "available",
+        "usable_cash": round(usable, 2),
+        "reason": None,
+        "source": "live_context_cache",
+    }
+
+
+def _ensure_protective_oca(
+    broker: IbkrBroker,
+    settings: Settings,
+    strategy: IntradayMomentumStrategy | SemiconductorRotationStrategy,
+    symbol: str,
+    position_row: dict[str, str],
+    bars: list[Bar],
+    now: datetime,
+    protective_prices: tuple[float, float] | None = None,
+) -> str:
+    quantity = int(float(position_row["position"]))
+    average_cost = float(position_row["avgCost"])
+    order_ref_prefix = f"momentum-{now.date()}-{symbol}-protect"
+    if broker.protective_oca_is_complete(
+        symbol, quantity, order_ref_prefix=order_ref_prefix
+    ):
+        return "complete"
+
+    active_sells = broker.active_trades_for(symbol, "SELL")
+    incomplete_strategy_orders = []
+    conflicting_orders = []
+    for trade in active_sells:
+        order = getattr(trade, "order", None)
+        order_ref = str(getattr(order, "orderRef", "") or "")
+        if order_ref.startswith(order_ref_prefix) or (
+            order_ref.startswith("momentum-") and "-protect-" in order_ref
+        ):
+            incomplete_strategy_orders.append(trade)
+        else:
+            conflicting_orders.append(trade)
+    if conflicting_orders:
+        raise BrokerError(
+            f"active non-protective SELL order exists for {symbol}; "
+            "refusing to replace protection"
+        )
+
+    for trade in incomplete_strategy_orders:
+        broker.cancel_order(trade)
+        order = getattr(trade, "order", None)
+        _record_order_state(
+            settings,
+            TradeRequest(
+                symbol=symbol,
+                action="SELL",
+                quantity=quantity,
+                order_type=str(getattr(order, "orderType", "MKT") or "MKT"),
+                limit_price=getattr(order, "lmtPrice", None),
+                time_in_force=str(getattr(order, "tif", "GTC") or "GTC"),
+                order_ref=str(getattr(order, "orderRef", "") or ""),
+                reduce_only=True,
+            ),
+            trade,
+            now,
+        )
+    if broker.active_order_quantity(symbol, "SELL") > 0:
+        raise BrokerError(
+            f"incomplete protective SELL cancellation unresolved for {symbol}"
+        )
+
+    if protective_prices is None:
+        stop_price, take_price = strategy.protective_prices(
+            symbol, average_cost, bars
+        )
+    else:
+        stop_price, take_price = protective_prices
+    trades = broker.place_protective_oca(
+        symbol,
+        quantity,
+        stop_price,
+        take_price,
+        order_ref=order_ref_prefix,
+    )
+    for order_type, trade, price in (
+        ("STP", trades[0], stop_price),
+        ("LMT", trades[1], take_price),
+    ):
+        _record_order_state(
+            settings,
+            TradeRequest(
+                symbol=symbol,
+                action="SELL",
+                quantity=quantity,
+                order_type=order_type,
+                limit_price=price if order_type == "LMT" else None,
+                time_in_force="GTC",
+                reduce_only=True,
+            ),
+            trade,
+            now,
+        )
+    return "recreated" if incomplete_strategy_orders else "created"
+
+
+def _ensure_positions_protected_before_market_data(
+    broker: IbkrBroker,
+    settings: Settings,
+    strategy: IntradayMomentumStrategy | SemiconductorRotationStrategy,
+    positions: dict[str, dict[str, str]],
+    now: datetime,
+) -> None:
+    """Repair broker-hosted protection without requiring signal market data."""
+    if not positions or settings.readonly or settings.dry_run:
+        return
+    for symbol, position_row in positions.items():
+        stored_prices = _latest_entry_protective_prices(settings, symbol, now)
+        if stored_prices is None:
+            average_cost = float(position_row["avgCost"])
+            stored_prices = strategy.protective_prices(symbol, average_cost, [])
+            price_source = "fixed-percent fallback"
+        else:
+            price_source = "entry state"
+        status = _ensure_protective_oca(
+            broker,
+            settings,
+            strategy,
+            symbol,
+            position_row,
+            [],
+            now,
+            protective_prices=stored_prices,
+        )
+        print(
+            f"protective OCA preflight {symbol}: {status} "
+            f"price_source={price_source}"
+        )
+
+
+def _flatten_strategy_positions_if_due(
+    broker: IbkrBroker,
+    settings: Settings,
+    strategy: IntradayMomentumStrategy | SemiconductorRotationStrategy,
+    now: datetime,
+    session: MarketSession,
+) -> bool:
+    if not _should_flatten(settings, now, session):
+        return False
+    _cancel_orphaned_strategy_entry_orders(
+        broker, settings, strategy, now
+    )
+    current_positions = _parse_position_rows(broker.positions(), strategy.symbols)
+    _validate_strategy_positions(current_positions)
+    if not current_positions:
+        print("mandatory flatten window: no strategy position")
+        return True
+
+    for symbol, position_row in current_positions.items():
+        quantity = int(float(position_row["position"]))
+        cancelled = []
+        for trade in broker.active_trades_for(symbol, "SELL"):
+            order_ref = str(
+                getattr(getattr(trade, "order", None), "orderRef", "") or ""
+            )
+            if order_ref.startswith("momentum-") and "-protect-" in order_ref:
+                broker.cancel_order(trade)
+                cancelled.append(trade)
+        for trade in cancelled:
+            _record_order_state(
+                settings,
+                TradeRequest(
+                    symbol=symbol,
+                    action="SELL",
+                    quantity=quantity,
+                    reduce_only=True,
+                ),
+                trade,
+                now,
+            )
+        request = TradeRequest(
+            symbol=symbol,
+            action="SELL",
+            quantity=quantity,
+            order_ref=f"momentum-{now.date()}-{symbol}-eod-exit",
+            reduce_only=True,
+        )
+        risk_settings = replace(
+            settings,
+            allowed_symbols=strategy.symbols,
+            max_order_notional=strategy.max_notional,
+        )
+        risk_decision = RiskManager(risk_settings).validate(
+            request,
+            0.0,
+            position_quantity=float(position_row["position"]),
+            pending_sell_quantity=broker.active_order_quantity(symbol, "SELL"),
+        )
+        print(risk_decision.reason)
+        if risk_decision.allowed:
+            _submit_or_print(
+                broker,
+                settings,
+                request,
+                f"mandatory end-of-day flatten: {symbol} qty={quantity}",
+            )
+    return True
 
 
 def _momentum_kwargs(args: argparse.Namespace) -> dict[str, object]:
@@ -938,6 +1770,7 @@ def _build_momentum_strategy(args: argparse.Namespace, settings: Settings):
         "rotation-hysteresis",
         "rotation-hysteresis-v1",
         "rotation-hysteresis-v2",
+        "rotation-range-gated-v1",
     }:
         hysteresis = profile != "rotation"
         if hysteresis:
@@ -947,11 +1780,12 @@ def _build_momentum_strategy(args: argparse.Namespace, settings: Settings):
                     f"{profile} freezes benchmark_symbol=QQQ; "
                     "create a new candidate profile instead of overriding the baseline"
                 )
-            parameters = (
-                ROTATION_HYSTERESIS_V2_PARAMETERS
-                if profile == ROTATION_HYSTERESIS_V2_VERSION
-                else FROZEN_ROTATION_HYSTERESIS_PARAMETERS
-            )
+            if profile == ROTATION_RANGE_GATED_V1_VERSION:
+                parameters = ROTATION_RANGE_GATED_V1_PARAMETERS
+            elif profile == ROTATION_HYSTERESIS_V2_VERSION:
+                parameters = ROTATION_HYSTERESIS_V2_PARAMETERS
+            else:
+                parameters = FROZEN_ROTATION_HYSTERESIS_PARAMETERS
             return SemiconductorRotationStrategy(
                 **parameters,
                 max_notional=args.max_notional or settings.max_order_notional,
@@ -985,6 +1819,223 @@ def _build_momentum_strategy(args: argparse.Namespace, settings: Settings):
     )
 
 
+def _backtest_core_parameters_report(
+    args: argparse.Namespace,
+    settings: Settings,
+    strategy,
+    entry_fill_model: str,
+) -> dict[str, object]:
+    requested_entry_fill_model = getattr(args, "entry_fill_model", None)
+    resolved_max_notional = getattr(strategy, "max_notional", None)
+    resolved_max_risk_per_trade = getattr(strategy, "max_risk_per_trade", None)
+    symbols = getattr(strategy, "symbols", ())
+    return {
+        "profile": getattr(args, "profile", None),
+        "benchmark_symbol": getattr(strategy, "benchmark_symbol", None),
+        "symbols": list(symbols) if symbols is not None else None,
+        "capital": args.capital,
+        "duration": args.duration,
+        "bar_size": args.bar_size,
+        "resolved_entry_fill_model": entry_fill_model,
+        "requested_entry_fill_model": requested_entry_fill_model,
+        "requested_max_notional": args.max_notional,
+        "resolved_max_notional": resolved_max_notional,
+        "resolved_max_risk_per_trade": resolved_max_risk_per_trade,
+        "entry_cash_reserve_usd": settings.entry_cash_reserve_usd,
+        "max_daily_entries": settings.max_daily_entries,
+        "live_tradable_capital_cache_max_age_seconds": (
+            settings.live_tradable_capital_cache_max_age_seconds
+        ),
+        "commission_per_order": args.commission_per_order,
+        "slippage_bps": args.slippage_bps,
+        "spread_bps": args.spread_bps,
+        "market_data_exchange": args.market_data_exchange,
+        "data_dir": str(Path(args.data_dir).resolve()),
+    }
+
+
+def _run_live_quote_cache(settings: Settings, args: argparse.Namespace) -> int:
+    if not settings.readonly or not settings.dry_run:
+        raise BrokerError(
+            "stream-live-quotes requires IBKR_READONLY=true and IBKR_DRY_RUN=true"
+        )
+    if settings.allow_live_trading:
+        raise BrokerError(
+            "stream-live-quotes requires IBKR_ALLOW_LIVE_TRADING=false"
+        )
+    symbols = tuple(
+        dict.fromkeys(item.strip().upper() for item in args.symbols if item.strip())
+    )
+    cache_path = (
+        Path(args.cache_path).expanduser()
+        if args.cache_path
+        else _live_quote_cache_path(settings)
+    )
+    try:
+        writer_lock = acquire_cache_writer_lock(cache_path)
+    except RuntimeLockError as exc:
+        raise BrokerError(f"stream-live-quotes refused duplicate writer: {exc}") from exc
+    writer = QuoteCacheWriter(
+        cache_path,
+        symbols,
+        max_samples_per_symbol=settings.live_quote_max_samples_per_symbol,
+        refresh_seconds=settings.live_quote_cache_refresh_seconds,
+    )
+    print(
+        json.dumps(
+            {
+                "cache_path": str(cache_path),
+                "max_samples_per_symbol": settings.live_quote_max_samples_per_symbol,
+                "refresh_seconds": settings.live_quote_cache_refresh_seconds,
+                "symbols": symbols,
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+    while True:
+        # Keep the advisory-lock descriptor strongly referenced for this daemon.
+        _ = writer_lock
+        broker = IbkrBroker(settings)
+        try:
+            broker.connect()
+            broker.stream_live_quotes(
+                symbols,
+                lambda quotes, market_times, received_times, observed_at: writer.update(
+                    quotes,
+                    market_times=market_times,
+                    received_times=received_times,
+                    observed_at=observed_at,
+                ),
+                exchange="SMART",
+            )
+        except KeyboardInterrupt:
+            return 0
+        except (BrokerError, ConnectionError, TimeoutError, OSError) as exc:
+            print(
+                f"live quote stream reconnecting after {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+        finally:
+            broker.disconnect()
+        try:
+            blocking_sleep(5)
+        except KeyboardInterrupt:
+            return 0
+
+
+def _run_live_context_cache(settings: Settings, args: argparse.Namespace) -> int:
+    if not settings.readonly or not settings.dry_run:
+        raise BrokerError(
+            "cache-live-context requires IBKR_READONLY=true and IBKR_DRY_RUN=true"
+        )
+    if settings.allow_live_trading:
+        raise BrokerError(
+            "cache-live-context requires IBKR_ALLOW_LIVE_TRADING=false"
+        )
+    symbols = tuple(
+        dict.fromkeys(item.strip().upper() for item in args.symbols if item.strip())
+    )
+    if not symbols:
+        raise ValueError("cache-live-context requires at least one symbol")
+    cache_path = (
+        Path(args.cache_path).expanduser()
+        if args.cache_path
+        else _live_context_cache_path(settings)
+    )
+    try:
+        writer_lock = acquire_cache_writer_lock(cache_path)
+    except RuntimeLockError as exc:
+        raise BrokerError(f"cache-live-context refused duplicate writer: {exc}") from exc
+    last_bar_refresh_bucket: tuple[object, ...] | None = None
+    last_publish_bucket: tuple[object, ...] | None = None
+    cached_session_date = None
+    cached_session: MarketSession | None = None
+    cached_bars_by_symbol: dict[str, list[Bar]] = {}
+    while True:
+        # Keep the advisory-lock descriptor strongly referenced for this daemon.
+        _ = writer_lock
+        broker = IbkrBroker(settings)
+        try:
+            broker.connect()
+            while True:
+                now = datetime.now(NEW_YORK)
+                publish_bucket = (now.date(), now.hour, now.minute)
+                bar_refresh_bucket = (
+                    now.date(),
+                    now.hour,
+                    now.minute // 5,
+                )
+                if publish_bucket != last_publish_bucket:
+                    if cached_session_date != now.date():
+                        cached_session = broker.market_session(symbols[0], now.date())
+                        cached_session_date = now.date()
+                    session = cached_session
+                    if bar_refresh_bucket != last_bar_refresh_bucket:
+                        cached_bars_by_symbol = {}
+                        if session is not None and _is_market_hours(now, session):
+                            cached_bars_by_symbol = {
+                                symbol: _fresh_historical_bars(
+                                    broker,
+                                    settings,
+                                    symbol,
+                                    bar_size="5 mins",
+                                    session_only=True,
+                                    completed_only=True,
+                                    session=session,
+                                    now=now,
+                                    exchange="SMART",
+                                )
+                                for symbol in symbols
+                            }
+                        last_bar_refresh_bucket = bar_refresh_bucket
+                    tradable_capital_usd = _available_cash_notional(
+                        broker.balance()
+                    )
+                    write_market_context_cache(
+                        cache_path,
+                        session_date=now.date(),
+                        session=session,
+                        bars_by_symbol=cached_bars_by_symbol,
+                        source="SMART",
+                        bar_size="5 mins",
+                        tradable_capital_usd=tradable_capital_usd,
+                    )
+                    last_publish_bucket = publish_bucket
+                    print(
+                        json.dumps(
+                            {
+                                "bar_counts": {
+                                    symbol: len(cached_bars_by_symbol.get(symbol, []))
+                                    for symbol in symbols
+                                },
+                                "cache_path": str(cache_path),
+                                "session_date": now.date().isoformat(),
+                                "source": "SMART",
+                                "tradable_capital_status": "available",
+                            },
+                            sort_keys=True,
+                        ),
+                        flush=True,
+                    )
+                blocking_sleep(1)
+        except KeyboardInterrupt:
+            return 0
+        except (BrokerError, ConnectionError, TimeoutError, OSError) as exc:
+            print(
+                f"live context cache reconnecting after {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+        finally:
+            broker.disconnect()
+        try:
+            blocking_sleep(5)
+        except KeyboardInterrupt:
+            return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     settings = load_settings()
@@ -992,10 +2043,49 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "doctor":
         return _doctor(settings)
 
+    if args.command == "stream-live-quotes":
+        return _run_live_quote_cache(settings, args)
+
+    if args.command == "cache-live-context":
+        return _run_live_context_cache(settings, args)
+
+    if args.command == "append-live-review-log":
+        state_dir = Path(args.state_dir)
+        doc_path = Path(args.doc_path)
+        latest_summary_path = Path(args.latest_summary_path)
+        session_date = args.session_date or current_session_date()
+        result = append_review_log(
+            state_dir=state_dir,
+            doc_path=doc_path,
+            session_date=session_date,
+            latest_summary_path=latest_summary_path,
+        )
+        print(result.message)
+        return 0
+
+    strategy_run_lock = None
+    strategy_run_deadline = None
+    if args.command == "intraday-momentum":
+        lock_path = _strategy_runtime_lock_path(settings, args.profile)
+        try:
+            strategy_run_lock = acquire_runtime_lock(lock_path)
+        except RuntimeLockError:
+            print(
+                f"intraday momentum skipped: another {args.profile} run is active"
+            )
+            return 0
+        strategy_run_deadline = arm_runtime_lock_deadline(
+            strategy_run_lock, INTRADAY_MOMENTUM_RUNTIME_TIMEOUT_SECONDS
+        )
+        settings = replace(
+            settings,
+            request_timeout=INTRADAY_MOMENTUM_REMOTE_REQUEST_TIMEOUT_SECONDS,
+        )
+
     broker = None
-    if not (args.command == "backtest-momentum" and args.reuse_data):
-        broker = _with_broker(settings)
     try:
+        if not (args.command == "backtest-momentum" and args.reuse_data):
+            broker = _with_broker(settings)
         if args.command == "heartbeat":
             print(broker.server_time().isoformat())
             return 0
@@ -1049,6 +2139,7 @@ def main(argv: list[str] | None = None) -> int:
                 sessions,
                 now=now,
                 recent_sessions=args.recent_sessions,
+                bar_size=args.bar_size,
             )
             print(
                 json.dumps(
@@ -1219,7 +2310,37 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "intraday-momentum":
             strategy = _build_momentum_strategy(args, settings)
             now = datetime.now(NEW_YORK)
-            session = broker.market_session(strategy.benchmark_symbol, now.date())
+            entry_notional_cap, tradable_capital_summary = (
+                _tradable_capital_snapshot(settings, now)
+            )
+            print(
+                json.dumps(
+                    {"tradable_capital": tradable_capital_summary},
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            _cancel_orphaned_strategy_entry_orders(
+                broker, settings, strategy, now
+            )
+            session = _cached_or_broker_market_session(
+                broker, settings, strategy.benchmark_symbol, now
+            )
+            current_positions = _parse_position_rows(
+                broker.positions(), strategy.symbols
+            )
+            _validate_strategy_positions(current_positions)
+            if session is not None and _flatten_strategy_positions_if_due(
+                broker, settings, strategy, now, session
+            ):
+                return 0
+            _ensure_positions_protected_before_market_data(
+                broker,
+                settings,
+                strategy,
+                current_positions,
+                now,
+            )
             if session is None:
                 print("exchange holiday: skipping intraday_momentum scan")
                 return 0
@@ -1234,16 +2355,19 @@ def main(argv: list[str] | None = None) -> int:
                 broker, settings, strategy, session, now
             )
             benchmark_bars = strategy_bars[strategy.benchmark_symbol]
+            benchmark_quote = strategy_quotes[strategy.benchmark_symbol]
+            benchmark_summary = _benchmark_quote_summary(
+                strategy.benchmark_symbol,
+                benchmark_quote,
+                market_data_exchange,
+                now,
+            )
+            benchmark_summary["bar_count"] = len(benchmark_bars)
 
             current_positions = _parse_position_rows(
                 broker.positions(), strategy.symbols
             )
-            for symbol, position_row in current_positions.items():
-                position = float(position_row["position"])
-                if not math.isclose(position, round(position), abs_tol=1e-6):
-                    raise BrokerError(
-                        f"fractional {symbol} strategy position {position:g}; possible corporate action; refusing automation"
-                    )
+            _validate_strategy_positions(current_positions)
             scan_rows: list[dict[str, object]] = []
             decisions: dict[str, object] = {}
             price_scale_discontinuities: set[str] = set()
@@ -1301,24 +2425,159 @@ def main(argv: list[str] | None = None) -> int:
                     )
 
                 decisions[symbol] = decision
+                bar_count = len(bars)
+                position_row = current_positions.get(symbol)
+                protection_display = _protective_order_display(
+                    broker,
+                    strategy,
+                    symbol,
+                    position_row,
+                    bars,
+                    now,
+                )
+                if position_row is not None:
+                    strategy_status = (
+                        "exit_candidate"
+                        if decision.signal and decision.action == "SELL"
+                        else "holding"
+                    )
+                    order_status = (
+                        "exit_candidate_not_submitted_yet"
+                        if strategy_status == "exit_candidate"
+                        else "protective_orders_active"
+                        if protection_display["protection_status"] == "complete"
+                        else "protection_requires_attention"
+                    )
+                else:
+                    strategy_status = (
+                        "entry_candidate"
+                        if decision.signal and decision.action == "BUY"
+                        else "flat_no_signal"
+                    )
+                    order_status = (
+                        "entry_candidate_not_submitted_yet"
+                        if strategy_status == "entry_candidate"
+                        else "no_order_action"
+                    )
                 scan_rows.append(
                     {
                         "symbol": symbol,
                         "action": decision.action,
+                        "entry_status": (
+                            "position_open"
+                            if position_row is not None
+                            else
+                            "entry_candidate"
+                            if decision.signal and decision.action == "BUY"
+                            else "not_entered"
+                        ),
+                        "strategy_status": strategy_status,
+                        "order_status": order_status,
                         "quantity": decision.quantity,
                         "reference_price": round(decision.reference_price, 2),
+                        **_latest_trade_price_fields(quote),
                         "limit_price": None
                         if decision.limit_price is None
                         else round(decision.limit_price, 2),
                         "signal": decision.signal,
                         "score": round(float(decision.meta.get("score", 0.0)), 6),
                         "reason": decision.reason,
+                        "bar_count": bar_count,
+                        "bars_required": strategy.min_bars,
+                        "bars_remaining": max(0, strategy.min_bars - bar_count),
+                        "fast_ema": (
+                            decision.meta.get("fast_ema")
+                            if bar_count >= strategy.fast_window
+                            else None
+                        ),
+                        "slow_ema": (
+                            decision.meta.get("slow_ema")
+                            if bar_count >= strategy.slow_window
+                            else None
+                        ),
+                        "trend_ema": (
+                            decision.meta.get("trend_ema")
+                            if bar_count >= strategy.trend_window
+                            else None
+                        ),
                         "market_data_exchange": market_data_exchange,
                         "bar_data_exchange": market_data_exchange,
                         "quote_data_exchange": "SMART",
+                        **protection_display,
+                        **_quote_timing_fields(quote, now),
                     }
                 )
 
+            print(
+                json.dumps(
+                    {
+                        "session_trade_status": {
+                            "daily_entry_count": _daily_entry_count(settings, now),
+                            "max_daily_entries": settings.max_daily_entries,
+                            "current_positions": [
+                                {
+                                    "symbol": symbol,
+                                    "quantity": int(float(position_row["position"])),
+                                }
+                                for symbol, position_row in current_positions.items()
+                            ],
+                            "entries": [
+                                {
+                                    "symbol": str(entry.get("symbol", "")).upper(),
+                                    "filled_quantity": entry.get("filled_quantity"),
+                                    "average_fill_price": entry.get(
+                                        "average_fill_price"
+                                    ),
+                                    "time": entry.get("time"),
+                                }
+                                for entry in _load_entry_state(settings, now).get(
+                                    "entries", []
+                                )
+                                if isinstance(entry, dict)
+                            ],
+                        },
+                        "core_decisions": [
+                            {
+                                key: row[key]
+                                for key in (
+                                    "symbol",
+                                    "action",
+                                    "signal",
+                                    "entry_status",
+                                    "strategy_status",
+                                    "order_status",
+                                    "position_status",
+                                    "latest_trade_price",
+                                    "latest_trade_price_available",
+                                    "fast_ema",
+                                    "slow_ema",
+                                    "stop_loss_pct",
+                                    "take_profit_pct",
+                                    "calculated_stop_price",
+                                    "calculated_take_price",
+                                    "active_stop_price",
+                                    "active_take_price",
+                                    "protection_status",
+                                    "bar_count",
+                                    "bars_required",
+                                    "bars_remaining",
+                                    "reason",
+                                )
+                            }
+                            for row in scan_rows
+                        ]
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            print(
+                json.dumps(
+                    {"benchmark_quote": benchmark_summary},
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
             print(json.dumps(scan_rows, indent=2, sort_keys=True))
 
             exit_candidates = [
@@ -1373,49 +2632,29 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 print(risk_decision.reason)
                 if risk_decision.allowed:
-                    _submit_or_print(
+                    exit_trade = _submit_or_print(
                         broker,
                         settings,
                         request,
                         f"exit candidate: {decision.symbol} qty={request.quantity}",
                     )
+                    if exit_trade is not None:
+                        print(f"exit_order_result={_trade_lifecycle(exit_trade)}")
                 return 0
 
             if current_positions:
                 if not settings.readonly and not settings.dry_run:
                     for symbol, position_row in current_positions.items():
-                        if broker.active_order_quantity(symbol, "SELL") > 0:
-                            continue
-                        quantity = int(float(position_row["position"]))
-                        average_cost = float(position_row["avgCost"])
-                        bars = strategy_bars[symbol]
-                        stop_price, take_price = strategy.protective_prices(
-                            symbol, average_cost, bars
-                        )
-                        trades = broker.place_protective_oca(
+                        status = _ensure_protective_oca(
+                            broker,
+                            settings,
+                            strategy,
                             symbol,
-                            quantity,
-                            stop_price,
-                            take_price,
-                            order_ref=f"momentum-{datetime.now(NEW_YORK).date()}-{symbol}-protect",
+                            position_row,
+                            strategy_bars[symbol],
+                            now,
                         )
-                        for order_type, trade, price in (
-                            ("STP", trades[0], stop_price),
-                            ("LMT", trades[1], take_price),
-                        ):
-                            _record_order_state(
-                                settings,
-                                TradeRequest(
-                                    symbol=symbol,
-                                    action="SELL",
-                                    quantity=quantity,
-                                    order_type=order_type,
-                                    limit_price=price if order_type == "LMT" else None,
-                                    time_in_force="GTC",
-                                    reduce_only=True,
-                                ),
-                                trade,
-                            )
+                        print(f"protective OCA {symbol}: {status}")
                 print("position already aligned: no new entry")
                 return 0
 
@@ -1433,10 +2672,22 @@ def main(argv: list[str] | None = None) -> int:
                     f"{','.join(sorted(price_scale_discontinuities))}; no new entry"
                 )
                 return 0
-            if settings.is_live and _daily_entry_limit_reached(settings):
+            broker_entry_count = sum(
+                broker.filled_order_ref_prefix_count(
+                    f"momentum-{now.date()}-{symbol}-entry-"
+                )
+                for symbol in strategy.symbols
+            )
+            effective_entry_count = max(
+                _daily_entry_count(settings), broker_entry_count
+            )
+            if settings.is_live and settings.max_daily_entries > 0 and (
+                effective_entry_count >= settings.max_daily_entries
+            ):
                 print(
                     f"daily entry limit reached: "
-                    f"{_daily_entry_count(settings)}/{settings.max_daily_entries}; no new entry"
+                    f"{effective_entry_count}/{settings.max_daily_entries}; "
+                    "no new entry"
                 )
                 return 0
             if _should_flatten(settings, now, session):
@@ -1464,6 +2715,22 @@ def main(argv: list[str] | None = None) -> int:
 
             decision = max(
                 buy_candidates, key=lambda item: float(item.meta.get("score", 0.0))
+            )
+            strategy = replace(strategy, max_notional=entry_notional_cap)
+            decision = strategy.decide(
+                decision.symbol,
+                strategy_quotes[decision.symbol],
+                strategy_bars[decision.symbol],
+                benchmark_bars=benchmark_bars,
+            )
+            if not decision.signal or decision.action != "BUY":
+                raise BrokerError(
+                    "entry signal changed while applying current available cash sizing"
+                )
+            print(
+                "dynamic entry sizing: "
+                f"current usable USD cash={entry_notional_cap:.2f}, "
+                f"risk budget={strategy.max_risk_per_trade:.2f}"
             )
             limit_price = _marketable_buy_limit_price(
                 decision.reference_price, decision.limit_price, settings
@@ -1514,6 +2781,7 @@ def main(argv: list[str] | None = None) -> int:
                             broker.cancel_order(trade)
                             _record_order_state(settings, request, trade)
                         print("entry order not filled; daily entry state not recorded")
+                        print("entry_order_result=not_filled")
                         return 0
                     if remaining > 0:
                         broker.cancel_order(trade)
@@ -1526,18 +2794,6 @@ def main(argv: list[str] | None = None) -> int:
                         )
                     filled_quantity = int(filled)
                     average_fill_price = _trade_average_fill_price(trade) or limit_price
-                    _record_daily_entry(
-                        settings,
-                        request,
-                        filled_quantity=filled,
-                        average_fill_price=average_fill_price,
-                        strategy_version=(
-                            ROTATION_HYSTERESIS_V2_VERSION
-                            if args.profile == ROTATION_HYSTERESIS_V2_VERSION
-                            else args.profile
-                        ),
-                    )
-                    print(f"entry filled quantity={filled}; daily entry state recorded")
                     if filled_quantity > 0:
                         bars = strategy_bars[decision.symbol]
                         stop_price, take_price = strategy.protective_prices(
@@ -1550,18 +2806,50 @@ def main(argv: list[str] | None = None) -> int:
                             take_price,
                             order_ref=f"momentum-{datetime.now(NEW_YORK).date()}-{decision.symbol}-protect",
                         )
-                        for protective_trade in protective_trades:
+                        for order_type, protective_trade, protective_price in (
+                            ("STP", protective_trades[0], stop_price),
+                            ("LMT", protective_trades[1], take_price),
+                        ):
                             _record_order_state(
                                 settings,
                                 TradeRequest(
                                     symbol=decision.symbol,
                                     action="SELL",
                                     quantity=filled_quantity,
+                                    order_type=order_type,
+                                    limit_price=(
+                                        protective_price
+                                        if order_type == "LMT"
+                                        else None
+                                    ),
                                     time_in_force="GTC",
                                     reduce_only=True,
                                 ),
                                 protective_trade,
                             )
+                        _record_daily_entry(
+                            settings,
+                            request,
+                            filled_quantity=filled,
+                            average_fill_price=average_fill_price,
+                            strategy_version=(
+                                ROTATION_HYSTERESIS_V2_VERSION
+                                if args.profile == ROTATION_HYSTERESIS_V2_VERSION
+                                else args.profile
+                            ),
+                            protective_stop_price=stop_price,
+                            protective_take_price=take_price,
+                        )
+                        print(
+                            f"entry filled quantity={filled}; protection created "
+                            "before daily entry state was recorded"
+                        )
+                        fill_result = (
+                            "fully_filled"
+                            if filled_quantity == request.quantity
+                            else "partially_filled"
+                        )
+                        print(f"entry_order_result={fill_result}")
             return 0
 
         if args.command == "backtest-momentum":
@@ -1570,6 +2858,18 @@ def main(argv: list[str] | None = None) -> int:
                 commission_per_order=args.commission_per_order,
                 slippage_bps=args.slippage_bps,
                 spread_bps=args.spread_bps,
+            )
+            entry_fill_model = args.entry_fill_model
+            fill_bar_size = args.fill_bar_size or args.bar_size
+            fill_data_dir = args.fill_data_dir or args.data_dir
+            if entry_fill_model == "profile-default":
+                entry_fill_model = (
+                    "open-pullback"
+                    if args.profile == ROTATION_HYSTERESIS_V2_VERSION
+                    else "next-bar-open"
+                )
+            core_parameters = _backtest_core_parameters_report(
+                args, settings, strategy, entry_fill_model
             )
             if isinstance(strategy, SemiconductorRotationStrategy):
                 strategy_report: dict[str, object] = {
@@ -1589,6 +2889,7 @@ def main(argv: list[str] | None = None) -> int:
                     "profit_lock_activation_pct": strategy.profit_lock_activation_pct,
                     "profit_lock_drawdown_pct": strategy.profit_lock_drawdown_pct,
                     "entry_fill_cutoff_et_minutes": strategy.entry_fill_cutoff_et_minutes,
+                    "benchmark_min_intraday_range": strategy.benchmark_min_intraday_range,
                     "max_notional": strategy.max_notional,
                     "long": {
                         "stop_loss_pct": strategy.long_stop_loss_pct,
@@ -1631,6 +2932,7 @@ def main(argv: list[str] | None = None) -> int:
                     "max_notional": getattr(strategy, "max_notional", None),
                 }
             report: dict[str, object] = {
+                "core_parameters": core_parameters,
                 "strategy": strategy_report,
                 "cost_model": {
                     "commission_per_order": cost_model.commission_per_order,
@@ -1638,26 +2940,33 @@ def main(argv: list[str] | None = None) -> int:
                     "spread_bps": cost_model.spread_bps,
                 },
                 "execution_model": {
-                    "entry": "next_bar_open",
+                    "entry": entry_fill_model,
+                    "signal_bar_size": args.bar_size,
+                    "fill_bar_size": fill_bar_size,
+                    "fill_data_dir": str(Path(fill_data_dir).resolve()),
                     "protective_oca": "intrabar_after_entry_bar",
                     "ambiguous_stop_take_bar": "protective_stop_first",
                     "software_exit": "completed_bar_then_next_bar_open",
                 },
-                "validation": {
-                    "method": "fixed-parameter chronological walk-forward",
-                    "selection_performed": False,
-                    "overlapping_lookbacks_treated_as_independent": False,
-                    "duration": args.duration,
-                    "train_days": args.train_days,
-                    "test_days": args.test_days,
-                    "step_days": args.step_days,
-                    "holdout_days": args.holdout_days,
-                    "data_source": "daily cache" if args.reuse_data else "IBKR",
-                    "market_data_exchange": args.market_data_exchange,
-                    "data_dir": str(Path(args.data_dir).resolve()),
-                },
-            }
+                    "validation": {
+                        "method": "fixed-parameter chronological walk-forward",
+                        "selection_performed": False,
+                        "overlapping_lookbacks_treated_as_independent": False,
+                        "duration": args.duration,
+                        "train_days": args.train_days,
+                        "test_days": args.test_days,
+                        "step_days": args.step_days,
+                        "holdout_days": args.holdout_days,
+                        "data_source": "daily cache" if args.reuse_data else "IBKR",
+                        "market_data_exchange": args.market_data_exchange,
+                        "bar_size": args.bar_size,
+                        "fill_bar_size": fill_bar_size,
+                        "fill_data_dir": str(Path(fill_data_dir).resolve()),
+                        "data_dir": str(Path(args.data_dir).resolve()),
+                    },
+                }
             bars_by_symbol: dict[str, list[Bar]] = {}
+            fill_bars_by_symbol: dict[str, list[Bar]] = {}
             if args.reuse_data:
                 try:
                     require_market_data_source(
@@ -1670,55 +2979,117 @@ def main(argv: list[str] | None = None) -> int:
             for symbol in strategy.symbols:
                 if args.reuse_data:
                     bars_by_symbol[symbol] = load_bars(
-                        args.data_dir, symbol, "5 mins", duration=args.duration
+                        args.data_dir, symbol, args.bar_size, duration=args.duration
                     )
+                    if fill_bar_size == args.bar_size:
+                        fill_bars_by_symbol[symbol] = bars_by_symbol[symbol]
+                    else:
+                        fill_bars_by_symbol[symbol] = load_bars(
+                            fill_data_dir,
+                            symbol,
+                            fill_bar_size,
+                            duration=args.duration,
+                        )
                 else:
                     bars_by_symbol[symbol] = broker.historical_bars_paged(
                         symbol,
                         duration=args.duration,
-                        bar_size="5 mins",
+                        bar_size=args.bar_size,
                         page_callback=lambda rows, cached_symbol=symbol: save_bars_by_day(
                             args.data_dir,
                             cached_symbol,
-                            "5 mins",
+                            args.bar_size,
                             rows,
                             exchange=args.market_data_exchange,
                         ),
                         exchange=args.market_data_exchange,
                     )
+                    if fill_bar_size == args.bar_size:
+                        fill_bars_by_symbol[symbol] = bars_by_symbol[symbol]
+                    else:
+                        fill_bars_by_symbol[symbol] = broker.historical_bars_paged(
+                            symbol,
+                            duration=args.duration,
+                            bar_size=fill_bar_size,
+                            page_callback=lambda rows, cached_symbol=symbol: save_bars_by_day(
+                                fill_data_dir,
+                                cached_symbol,
+                                fill_bar_size,
+                                rows,
+                                exchange=args.market_data_exchange,
+                            ),
+                            exchange=args.market_data_exchange,
+                        )
             benchmark = strategy.benchmark_symbol
             if args.reuse_data:
                 bars_by_symbol[benchmark] = load_bars(
-                    args.data_dir, benchmark, "5 mins", duration=args.duration
+                    args.data_dir, benchmark, args.bar_size, duration=args.duration
                 )
+                if fill_bar_size == args.bar_size:
+                    fill_bars_by_symbol[benchmark] = bars_by_symbol[benchmark]
+                else:
+                    fill_bars_by_symbol[benchmark] = load_bars(
+                        fill_data_dir,
+                        benchmark,
+                        fill_bar_size,
+                        duration=args.duration,
+                    )
             else:
                 bars_by_symbol[benchmark] = broker.historical_bars_paged(
                     benchmark,
                     duration=args.duration,
-                    bar_size="5 mins",
+                    bar_size=args.bar_size,
                     page_callback=lambda rows: save_bars_by_day(
                         args.data_dir,
                         benchmark,
-                        "5 mins",
+                        args.bar_size,
                         rows,
                         exchange=args.market_data_exchange,
-                    ),
+                        ),
                     exchange=args.market_data_exchange,
                 )
+                if fill_bar_size == args.bar_size:
+                    fill_bars_by_symbol[benchmark] = bars_by_symbol[benchmark]
+                else:
+                    fill_bars_by_symbol[benchmark] = broker.historical_bars_paged(
+                        benchmark,
+                        duration=args.duration,
+                        bar_size=fill_bar_size,
+                        page_callback=lambda rows: save_bars_by_day(
+                            fill_data_dir,
+                            benchmark,
+                            fill_bar_size,
+                            rows,
+                            exchange=args.market_data_exchange,
+                        ),
+                        exchange=args.market_data_exchange,
+                    )
             missing = [symbol for symbol, bars in bars_by_symbol.items() if not bars]
             if missing:
                 raise BrokerError(
                     "no historical bars available for " + ", ".join(sorted(missing))
                 )
+            missing_fill = [
+                symbol for symbol, bars in fill_bars_by_symbol.items() if not bars
+            ]
+            if missing_fill:
+                raise BrokerError(
+                    "no fill historical bars available for "
+                    + ", ".join(sorted(missing_fill))
+                )
             try:
                 historical_preflight = validate_historical_bar_coverage(
-                    bars_by_symbol, recent_sessions=2
+                    bars_by_symbol, recent_sessions=2, bar_size=args.bar_size
+                )
+                fill_preflight = validate_historical_bar_coverage(
+                    fill_bars_by_symbol, recent_sessions=2, bar_size=fill_bar_size
                 )
             except ValueError as exc:
                 raise BrokerError(
                     f"historical data preflight failed; refresh the cache before backtesting: {exc}"
                 ) from exc
             report["historical_preflight"] = historical_preflight
+            report["fill_historical_preflight"] = fill_preflight
             evaluation = evaluate_fixed_strategy_walk_forward(
                 bars_by_symbol,
                 strategy,
@@ -1728,6 +3099,8 @@ def main(argv: list[str] | None = None) -> int:
                 test_days=args.test_days,
                 step_days=args.step_days,
                 holdout_days=args.holdout_days,
+                entry_fill_model=entry_fill_model,
+                fill_bars_by_symbol=fill_bars_by_symbol,
             )
             if isinstance(strategy, SemiconductorRotationStrategy):
                 stability_strategies = {
@@ -1770,6 +3143,8 @@ def main(argv: list[str] | None = None) -> int:
                 test_days=args.test_days,
                 step_days=args.step_days,
                 holdout_days=args.holdout_days,
+                entry_fill_model=entry_fill_model,
+                fill_bars_by_symbol=fill_bars_by_symbol,
             )
 
             def result_report(result):
@@ -1819,9 +3194,22 @@ def main(argv: list[str] | None = None) -> int:
             }
             print(json.dumps(report, indent=2, sort_keys=True))
             return 0
+    except (BrokerError, ConnectionError, TimeoutError, OSError) as exc:
+        if args.command != "intraday-momentum":
+            raise
+        print(
+            f"intraday momentum failed: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+            flush=True,
+        )
+        return 1
     finally:
         if broker is not None:
             broker.disconnect()
+        if strategy_run_deadline is not None:
+            strategy_run_deadline.cancel()
+        if strategy_run_lock is not None:
+            strategy_run_lock.close()
 
     return 2
 

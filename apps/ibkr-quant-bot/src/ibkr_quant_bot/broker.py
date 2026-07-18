@@ -28,6 +28,28 @@ def _clean_number(value: Any) -> float | None:
     return number
 
 
+def _datetime_iso(value: Any) -> str | None:
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat()
+
+
+def _require_live_ticker(ticker: Any, symbol: str) -> None:
+    try:
+        market_data_type = int(getattr(ticker, "marketDataType"))
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise BrokerError(
+            f"IBKR did not confirm live market-data type for {symbol}"
+        ) from exc
+    if market_data_type != 1:
+        raise BrokerError(
+            f"IBKR returned market-data type {market_data_type} for {symbol}; "
+            "refusing non-live data"
+        )
+
+
 class IbkrBroker:
     BALANCE_TAGS = (
         "NetLiquidation",
@@ -266,6 +288,150 @@ class IbkrBroker:
             )
         return quote
 
+    def live_quote_snapshots(
+        self,
+        symbols: Iterable[str],
+        *,
+        exchange: str = "SMART",
+    ) -> dict[str, Quote]:
+        """Request one concurrent live snapshot group without a fixed sleep."""
+        normalized_symbols = tuple(
+            dict.fromkeys(symbol.strip().upper() for symbol in symbols if symbol.strip())
+        )
+        if not normalized_symbols:
+            raise ValueError("symbols must not be empty")
+        self._set_market_data_type("live")
+        requested = [
+            self._stock(symbol, exchange, "USD") for symbol in normalized_symbols
+        ]
+        qualified = self._ib.qualifyContracts(*requested)
+        if len(qualified) != len(requested):
+            raise BrokerError(
+                "could not qualify complete live quote group: "
+                + ", ".join(normalized_symbols)
+            )
+        quotes: dict[str, Quote] = {}
+        missing: list[str] = []
+        tickers = self._ib.reqTickers(*qualified)
+        if len(tickers) != len(normalized_symbols):
+            raise BrokerError("IBKR returned an incomplete live quote snapshot group")
+        for symbol, ticker in zip(normalized_symbols, tickers, strict=True):
+            _require_live_ticker(ticker, symbol)
+            observed_at = datetime.now(timezone.utc).isoformat()
+            quote = Quote(
+                symbol=symbol,
+                bid=_clean_number(ticker.bid),
+                ask=_clean_number(ticker.ask),
+                last=_clean_number(ticker.last),
+                close=_clean_number(ticker.close),
+                market_time=_datetime_iso(getattr(ticker, "rtTime", None)),
+                received_at=_datetime_iso(getattr(ticker, "time", None)),
+                observed_at=observed_at,
+            )
+            if quote.bid is None and quote.ask is None and quote.last is None:
+                missing.append(symbol)
+            else:
+                quotes[symbol] = quote
+        if missing:
+            raise BrokerError(
+                "live quote unavailable for "
+                + ", ".join(missing)
+                + "; refusing to use delayed data"
+            )
+        return quotes
+
+    def stream_live_quotes(
+        self,
+        symbols: Iterable[str],
+        consumer: Callable[
+            [
+                dict[str, Quote],
+                dict[str, datetime | None],
+                dict[str, datetime | None],
+                datetime,
+            ],
+            None,
+        ],
+        *,
+        exchange: str = "SMART",
+        poll_interval_seconds: float = 0.02,
+    ) -> None:
+        """Continuously consume a concurrent live subscription until interrupted."""
+        normalized_symbols = tuple(
+            dict.fromkeys(symbol.strip().upper() for symbol in symbols if symbol.strip())
+        )
+        if not normalized_symbols:
+            raise ValueError("symbols must not be empty")
+        if poll_interval_seconds <= 0:
+            raise ValueError("poll_interval_seconds must be positive")
+        self._set_market_data_type("live")
+        requested = [
+            self._stock(symbol, exchange, "USD") for symbol in normalized_symbols
+        ]
+        qualified = self._ib.qualifyContracts(*requested)
+        if len(qualified) != len(requested):
+            raise BrokerError(
+                "could not qualify complete live quote stream group: "
+                + ", ".join(normalized_symbols)
+            )
+        contracts = dict(zip(normalized_symbols, qualified, strict=True))
+        tickers: dict[str, Any] = {}
+        subscribed: list[Any] = []
+        signatures: dict[str, tuple[object, ...]] = {}
+        try:
+            for symbol, contract in contracts.items():
+                tickers[symbol] = self._ib.reqMktData(
+                    contract, "233", snapshot=False, regulatorySnapshot=False
+                )
+                subscribed.append(contract)
+            while True:
+                self._ib.sleep(poll_interval_seconds)
+                is_connected = getattr(self._ib, "isConnected", None)
+                if callable(is_connected) and not is_connected():
+                    raise BrokerError("IBKR live quote stream disconnected")
+                observed_at = datetime.now(timezone.utc)
+                changed: dict[str, Quote] = {}
+                market_times: dict[str, datetime | None] = {}
+                received_times: dict[str, datetime | None] = {}
+                for symbol, ticker in tickers.items():
+                    quote = Quote(
+                        symbol=symbol,
+                        bid=_clean_number(ticker.bid),
+                        ask=_clean_number(ticker.ask),
+                        last=_clean_number(ticker.last),
+                        close=_clean_number(ticker.close),
+                    )
+                    if quote.bid is None and quote.ask is None and quote.last is None:
+                        continue
+                    _require_live_ticker(ticker, symbol)
+                    signature = (
+                        getattr(ticker, "time", None),
+                        quote.bid,
+                        quote.ask,
+                        quote.last,
+                        quote.close,
+                    )
+                    if signature != signatures.get(symbol):
+                        changed[symbol] = quote
+                        market_time = getattr(ticker, "rtTime", None)
+                        market_times[symbol] = (
+                            market_time if isinstance(market_time, datetime) else None
+                        )
+                        received_time = getattr(ticker, "time", None)
+                        received_times[symbol] = (
+                            received_time
+                            if isinstance(received_time, datetime)
+                            else None
+                        )
+                        signatures[symbol] = signature
+                consumer(changed, market_times, received_times, observed_at)
+        finally:
+            for contract in subscribed:
+                try:
+                    self._ib.cancelMktData(contract)
+                except Exception:
+                    pass
+
     def historical_bars(
         self,
         symbol: str,
@@ -314,6 +480,26 @@ class IbkrBroker:
             raise ValueError(f"unsupported duration: {duration}")
         return value * multipliers[unit]
 
+    @staticmethod
+    def _bar_size_seconds(bar_size: str) -> int:
+        parts = bar_size.strip().lower().split()
+        if len(parts) < 2:
+            raise ValueError(f"unsupported bar size: {bar_size}")
+        try:
+            value = int(parts[0])
+        except ValueError as exc:
+            raise ValueError(f"unsupported bar size: {bar_size}") from exc
+        unit = parts[1]
+        if unit.startswith("sec"):
+            return value
+        if unit.startswith("min"):
+            return value * 60
+        if unit.startswith("hour"):
+            return value * 60 * 60
+        if unit.startswith("day"):
+            return value * 24 * 60 * 60
+        raise ValueError(f"unsupported bar size: {bar_size}")
+
     def historical_bars_paged(
         self,
         symbol: str,
@@ -321,7 +507,7 @@ class IbkrBroker:
         *,
         bar_size: str = "5 mins",
         what_to_show: str = "TRADES",
-        chunk_duration: str = "1 W",
+        chunk_duration: str | None = None,
         end_time: datetime | None = None,
         page_callback: Callable[[list[Bar]], None] | None = None,
         exchange: str = "SMART",
@@ -330,6 +516,14 @@ class IbkrBroker:
         end = end_time or datetime.now(timezone.utc)
         if end.tzinfo is None:
             end = end.replace(tzinfo=timezone.utc)
+        if chunk_duration is None:
+            bar_seconds = self._bar_size_seconds(bar_size)
+            if bar_seconds < 60:
+                chunk_duration = "1 D"
+            elif bar_seconds < 5 * 60:
+                chunk_duration = "2 D"
+            else:
+                chunk_duration = "1 W"
         cutoff = end - timedelta(days=self._duration_days(duration))
         rows_by_time: dict[datetime, Bar] = {}
         cursor = end
@@ -498,6 +692,84 @@ class IbkrBroker:
             for trade in self.active_trades()
             if self._trade_symbol(trade) == symbol
             and self._trade_action(trade) == action
+        )
+
+    def active_trades_for(self, symbol: str, action: str) -> list[Any]:
+        symbol = symbol.upper()
+        action = action.upper()
+        return [
+            trade
+            for trade in self.active_trades()
+            if self._trade_symbol(trade) == symbol
+            and self._trade_action(trade) == action
+            and self._trade_remaining(trade) > 0
+        ]
+
+    def filled_order_ref_prefix_exists(self, order_ref_prefix: str) -> bool:
+        return self.filled_order_ref_prefix_count(order_ref_prefix) > 0
+
+    def filled_order_ref_prefix_count(self, order_ref_prefix: str) -> int:
+        count = 0
+        seen_refs: set[str] = set()
+        for trade in [*self.active_trades(), *self.completed_trades()]:
+            order = getattr(trade, "order", None)
+            order_ref = str(getattr(order, "orderRef", "") or "")
+            if not order_ref.startswith(order_ref_prefix):
+                continue
+            if order_ref in seen_refs:
+                continue
+            seen_refs.add(order_ref)
+            order_status = getattr(trade, "orderStatus", None)
+            try:
+                filled = float(getattr(order_status, "filled", 0) or 0)
+            except (TypeError, ValueError):
+                filled = 0.0
+            if filled > 0 or bool(getattr(trade, "fills", None)):
+                count += 1
+        return count
+
+    def protective_oca_is_complete(
+        self,
+        symbol: str,
+        quantity: int,
+        *,
+        order_ref_prefix: str,
+    ) -> bool:
+        trades = [
+            trade
+            for trade in self.active_trades_for(symbol, "SELL")
+            if str(
+                getattr(getattr(trade, "order", None), "orderRef", "") or ""
+            ).startswith(order_ref_prefix)
+        ]
+        if len(trades) != 2:
+            return False
+        expected_refs = {
+            f"{order_ref_prefix}-stop",
+            f"{order_ref_prefix}-take",
+        }
+        refs = {
+            str(getattr(getattr(trade, "order", None), "orderRef", "") or "")
+            for trade in trades
+        }
+        order_types = {
+            str(getattr(getattr(trade, "order", None), "orderType", "") or "").upper()
+            for trade in trades
+        }
+        groups = {
+            str(getattr(getattr(trade, "order", None), "ocaGroup", "") or "")
+            for trade in trades
+        }
+        quantities_match = all(
+            math.isclose(self._trade_remaining(trade), float(quantity), abs_tol=1e-6)
+            for trade in trades
+        )
+        return (
+            refs == expected_refs
+            and order_types == {"STP", "LMT"}
+            and len(groups) == 1
+            and "" not in groups
+            and quantities_match
         )
 
     def cancel_active_orders(

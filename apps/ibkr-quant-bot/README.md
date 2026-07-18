@@ -70,8 +70,19 @@ ibkr-bot doctor
 For a logged-in live IB Gateway, the common API port is `4001`. Keep `IBKR_READONLY=true` for balance, position, and quote checks:
 
 The local IBC startup and login process is documented in [docs/ibc-gateway-startup.md](docs/ibc-gateway-startup.md).
+The canonical route to every bot runbook and research note is the
+[documentation index](docs/README.md). Server resource, botmux, Gateway
+heartbeat, cache-process, alert-threshold, and report-format maintenance is in
+[the health-monitor runbook](docs/server-health-monitor.md).
 The scheduled process, port, and authenticated API health checks are documented
 in [docs/ibkr-api-heartbeat.md](docs/ibkr-api-heartbeat.md).
+The standalone bounded SMART subscription process, atomic quote cache, health
+checks, restart procedure, latency fields, and reboot recovery are documented
+in [docs/ibkr-live-quote-cache.md](docs/ibkr-live-quote-cache.md).
+The separate read-only current-session calendar and completed 5-minute bar
+cache, including its direct-query fallback and maintenance procedure, is
+documented in
+[docs/ibkr-live-context-cache.md](docs/ibkr-live-context-cache.md).
 If quotes unexpectedly fall back to delayed data or the live strategy reports
 that live quotes are unavailable, use
 [docs/ibkr-market-data-troubleshooting.md](docs/ibkr-market-data-troubleshooting.md).
@@ -180,6 +191,19 @@ intraday setup in this branch is the momentum rotation rule:
 - exit on stop loss, take profit, or bearish reversal
 - one open position at a time across `SOXL`, `TQQQ`, and `TECL`
 
+For a new intraday-momentum entry, live sizing uses the lower of the account's
+current USD `TotalCashValue` and `AvailableFunds`, then subtracts
+`IBKR_ENTRY_CASH_RESERVE_USD` (default 10 USD) as a commission and cash safety
+buffer. It does not use margin `BuyingPower`. The ATR-based `IBKR_MAX_RISK_PER_TRADE`
+limit still applies, so the order quantity is the lower of the cash-sized and
+risk-sized quantities. The read-only live-context process refreshes this value
+in advance; strategy execution reads only the local cache and does not request
+the balance from IBKR. Every run prints the usable USD amount near the start of
+its report and reuses that same value if it reaches a new-entry decision. A
+missing, stale, or invalid cached value is explicitly marked as a fallback and
+uses the configured `IBKR_MAX_ORDER_NOTIONAL` minus the same cash reserve
+(3990 USD with the live checkout's 4000 USD configured cap).
+
 Run the scanner and exit manager with the current default
 `rotation-hysteresis-v2` profile:
 
@@ -201,6 +225,12 @@ In live trading mode, the intraday scanners refuse delayed market data:
 - Entry, technical-exit, benchmark-regime, and protective-price calculations
   use completed 5-minute bars only. A bar whose five-minute interval has not
   ended is excluded so live decisions match the backtest close-bar convention.
+- Live execution first reads an atomically published, complete SMART cache for
+  the current session calendar and completed QQQ/SOXL/SOXS 5-minute bars. The
+  read-only producer refreshes bars only when a new five-minute bucket is
+  available and resolves the calendar once per New York date. A missing,
+  stale, partial, wrong-date, or wrong-source cache falls through immediately
+  to the original IBKR requests; it never weakens freshness guards.
 - Strategy bars are restricted to the current New York regular session, so the
   opening signal cannot inherit the prior day's EMA or VWAP history.
 - A large mismatch between the prior close and current-session prices blocks
@@ -211,6 +241,32 @@ In live trading mode, the intraday scanners refuse delayed market data:
 - The scanner stops entering and liquidates positions during the final
   `IBKR_FLATTEN_BEFORE_CLOSE_MINUTES=10` minutes. Run the command on a schedule
   that includes this window; no software can flatten a position if it is not running.
+- The mandatory flatten path runs before signal-bar and quote loading. A stale
+  or incomplete three-symbol signal group therefore cannot prevent a known
+  strategy position from reaching the reduce-only end-of-day exit path.
+- Existing protection is considered healthy only when both expected GTC OCA
+  legs are active, use the same non-empty OCA group, and cover the full current
+  position. A partial strategy-owned pair is cancelled and rebuilt; an
+  unrelated active sell order fails closed instead of being cancelled.
+- Each `intraday-momentum` run holds a non-blocking advisory lock for the
+  complete position-check, decision, and order lifecycle. An overlapping run
+  from any profile skips before connecting to IBKR instead of racing the first
+  run over the same positions and order state. The accepted process has a hard
+  60-second lifetime: a watchdog closes the lock and terminates the process
+  with exit code `124` if it gets stuck. Intraday IBKR remote requests use a
+  3-second request timeout and exit non-zero on failure. Other local strategy
+  stages do not add separate deadlines; existing fill/cancel confirmation
+  windows remain order-safety controls.
+- A strategy-owned BUY order is expected to live only inside the one-shot run
+  that submitted it. A later run treats any remaining `momentum-...-entry-...`
+  BUY as orphaned, cancels it, and refuses to continue until IBKR confirms that
+  no strategy entry remainder is active. The mandatory flatten path performs
+  the same cleanup even when there is not yet a position.
+- Position and OCA completeness are checked before the full quote/bar group is
+  loaded. Missing protection is rebuilt from the entry state's persisted
+  stop/take prices. A legacy entry without those fields receives a conservative
+  fixed-percentage fallback, so a simultaneous signal-data outage cannot leave
+  a known position unprotected.
 
 The market data troubleshooting runbook is
 [docs/ibkr-market-data-troubleshooting.md](docs/ibkr-market-data-troubleshooting.md).
@@ -247,6 +303,12 @@ ibkr-bot intraday-momentum --profile rotation-hysteresis-v2
 ibkr-bot backtest-momentum --profile rotation-hysteresis-v2
 ```
 
+Each live scan prints `core_decisions` first. For SOXL and SOXS it includes
+the action/signal, entry status, available fast and slow EMA values, completed
+bar count, bars still required, and the direct reason no entry was created.
+An EMA remains `null` until its configured window is available. Benchmark and
+full market-data diagnostics follow this core block.
+
 V2 keeps the frozen V1 entries, risk budget, 0.60% stop, and 3.75% hard
 take-profit. It adds a close-based profit lock: after a completed 5-minute
 close reaches 3% above average cost, a 0.6% drawdown from the highest completed
@@ -256,6 +318,11 @@ their normal stop, take-profit, profit-lock, reversal, and session-close exits.
 The explicit `rotation-hysteresis-v1` profile and its `rotation-hysteresis`
 compatibility alias remain available for rollback. See
 [docs/strategy-baseline-v2.md](docs/strategy-baseline-v2.md).
+
+The isolated `rotation-range-gated-v1` research profile keeps all V2 behavior
+and requires the QQQ completed-bar intraday range to reach 0.75% before a new
+entry. It is opt-in and does not change the default or live profile. See
+[docs/strategy-range-gated-v1.md](docs/strategy-range-gated-v1.md).
 
 In the 2025-07-10 through 2026-07-09 research run,
 28 candidates were compared on 209 development sessions before opening a final
@@ -277,11 +344,25 @@ bar. Sell limits fill at their limit (or a better gap-open price), while sell
 stops fill at their stop (or a worse gap-open price). If a five-minute bar
 crosses both levels and tick ordering is unavailable, the stop is assumed to
 fill first. Profit-lock, technical, and benchmark exits remain close-confirmed
-and fill at the next bar open. Entry fills also remain next-bar-open estimates,
-so venue-specific SMART price improvement cannot be reconstructed from OHLCV.
+and fill at the next bar open. For the v2 live profile, the CLI now defaults to
+an open-to-low pullback approximation for entry fills so the backtest can pick
+up some intrabar price improvement; you can still force `--entry-fill-model
+next-bar-open` for a strict historical baseline.
+
+The shared public cache keeps one source/bar-size pair per directory. For the
+current v2 comparison path, the recommended layouts are:
+
+- `/home/fwd/data/ibkr-quant-bot/historical/5-min-rth`
+- `/home/fwd/data/ibkr-quant-bot/historical/1-min-rth`
+- `/home/fwd/data/ibkr-quant-bot/historical/30-sec-rth`
+
+Use the same bar size for `refresh-history`, `backtest-momentum`, and the audit
+step so the cache, validation, and result comparison stay aligned.
 
 The tuning workflow used for this branch is documented in
 [docs/backtest-parameter-tuning.md](docs/backtest-parameter-tuning.md).
+The latest live-aligned calibration run and its conclusions are documented in
+[docs/live-backtest-alignment-2026-07-18.md](docs/live-backtest-alignment-2026-07-18.md).
 The versioned parameters and change-control rules are documented in
 [docs/strategy-baseline-v2.md](docs/strategy-baseline-v2.md), with the frozen
 rollback baseline in [docs/strategy-baseline-v1.md](docs/strategy-baseline-v1.md).
@@ -396,6 +477,10 @@ scanner queries active and completed IBKR orders by deterministic order ref,
 rebuilds missing protection for an open position, and refuses duplicate entry
 tasks. Order snapshots distinguish active, partial, filled, cancelled, and
 rejected/inactive states.
+
+The daily-entry state file is published with an atomic replacement. The live
+scanner also checks filled IBKR entry order references for the current session,
+so a process failure after a fill cannot silently reset the one-entry limit.
 
 SOXL and SOXS are execution instruments with a daily 3x/-3x objective, not a
 promise of three times the index's cumulative multi-day return. See the

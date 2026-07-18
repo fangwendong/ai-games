@@ -5,6 +5,8 @@ required market-data source:
 
 ```text
 SMART: /home/fwd/data/ibkr-quant-bot/historical/5-min-rth
+SMART 1m: /home/fwd/data/ibkr-quant-bot/historical/1-min-rth
+SMART 30s: /home/fwd/data/ibkr-quant-bot/historical/30-sec-rth
 ARCA:  /home/fwd/data/ibkr-quant-bot/historical/5-min-rth-arca
 ```
 
@@ -14,7 +16,9 @@ canonical path explicitly with `--data-dir` or create a local symlink that
 points to it.
 
 The directories are generated state and must never be committed to Git. Never
-write SMART and ARCA bars into the same cache directory.
+write SMART and ARCA bars into the same cache directory. Do not mix bar sizes
+inside a cache directory either; one directory should contain one source/bar-size
+combination only.
 
 ## Source Parity Rule
 
@@ -47,6 +51,14 @@ The cache stores one JSON file per symbol and US trading session:
   2026-07-14/
     NVDA__5_mins.json
     QQQ__5_mins.json
+1-min-rth/
+  2026-07-13/
+    NVDA__1_min.json
+    QQQ__1_min.json
+30-sec-rth/
+  2026-07-13/
+    NVDA__30_secs.json
+    QQQ__30_secs.json
 ```
 
 Files are written by `save_bars_by_day`. Repeated downloads merge and
@@ -82,7 +94,8 @@ output in Git or task reports.
 ## Download Multi-Year History
 
 Use a single worker. Five-minute history is paged backward in one-week chunks,
-and every completed page is saved immediately.
+one-minute history is paged in tighter chunks, sub-minute history is paged in
+day-sized chunks, and every completed page is saved immediately.
 
 ```bash
 nice -n 10 taskset -c 0 \
@@ -108,6 +121,29 @@ nice -n 10 taskset -c 0 \
   --recent-sessions 2 \
   --market-data-exchange ARCA \
   --data-dir /home/fwd/data/ibkr-quant-bot/historical/5-min-rth-arca
+```
+
+For lower-latency evaluation caches, use the matching minute-based directory
+and bar size:
+
+```bash
+nice -n 10 taskset -c 0 \
+  python -m ibkr_quant_bot.cli refresh-history \
+  --symbols SOXL SOXS QQQ \
+  --duration "180 D" \
+  --bar-size "1 min" \
+  --recent-sessions 2 \
+  --market-data-exchange SMART \
+  --data-dir /home/fwd/data/ibkr-quant-bot/historical/1-min-rth
+
+nice -n 10 taskset -c 0 \
+  python -m ibkr_quant_bot.cli refresh-history \
+  --symbols SOXL SOXS QQQ \
+  --duration "60 D" \
+  --bar-size "30 secs" \
+  --recent-sessions 2 \
+  --market-data-exchange SMART \
+  --data-dir /home/fwd/data/ibkr-quant-bot/historical/30-sec-rth
 ```
 
 The tracked wrapper is preferred for unattended work because it processes one
@@ -169,9 +205,29 @@ PYTHONPATH=src python -m ibkr_quant_bot.cli backtest-momentum \
   --profile rotation-hysteresis-v2 \
   --duration "2 M" \
   --reuse-data \
+  --bar-size "5 mins" \
   --market-data-exchange ARCA \
   --data-dir /home/fwd/data/ibkr-quant-bot/historical/5-min-rth-arca
 ```
+
+When you want 5-minute signal logic but finer-grain fill pricing, keep the
+signal cache on 5-minute bars and point the fill cache at the minute cache:
+
+```bash
+PYTHONPATH=src python -m ibkr_quant_bot.cli backtest-momentum \
+  --profile rotation-hysteresis-v2 \
+  --duration "6 M" \
+  --reuse-data \
+  --bar-size "5 mins" \
+  --fill-bar-size "1 min" \
+  --fill-data-dir /home/fwd/data/ibkr-quant-bot/historical/1-min-rth \
+  --market-data-exchange SMART \
+  --data-dir /home/fwd/data/ibkr-quant-bot/historical/5-min-rth
+```
+
+The same split applies to 30-second fills if that cache is available. Keep
+signal bars and fill bars in separate directories; do not mix sizes inside one
+cache root.
 
 ## Confirm Completeness
 
@@ -191,9 +247,9 @@ The audit exits with code zero only when:
 
 - every requested active symbol reaches the same latest cached session
 - the latest requested sessions exist for every symbol
-- each internal regular session has 78 five-minute bars, or 42 bars for a
-  standard early close
-- timestamps inside a session remain five minutes apart
+- each internal regular session has the expected bar count for the selected bar
+  size, or the matching early-close count for that bar size
+- timestamps inside a session remain evenly spaced by the requested bar size
 - full sessions run from 09:30 through 15:55 America/New_York, and standard
   early-close sessions run from 09:30 through 12:55
 - there are no missing trading sessions between a symbol's first and latest
@@ -228,6 +284,29 @@ nice -n 10 taskset -c 0 \
   --recent-sessions 2 \
   --market-data-exchange SMART \
   --data-dir /home/fwd/data/ibkr-quant-bot/historical/5-min-rth
+```
+
+For 1-minute and 30-second caches, point the refresh at the matching public
+directory and reuse the same symbol list:
+
+```bash
+nice -n 10 taskset -c 0 \
+  python -m ibkr_quant_bot.cli refresh-history \
+  --symbols SOXL SOXS QQQ \
+  --duration "10 D" \
+  --bar-size "1 min" \
+  --recent-sessions 2 \
+  --market-data-exchange SMART \
+  --data-dir /home/fwd/data/ibkr-quant-bot/historical/1-min-rth
+
+nice -n 10 taskset -c 0 \
+  python -m ibkr_quant_bot.cli refresh-history \
+  --symbols SOXL SOXS QQQ \
+  --duration "10 D" \
+  --bar-size "30 secs" \
+  --recent-sessions 2 \
+  --market-data-exchange SMART \
+  --data-dir /home/fwd/data/ibkr-quant-bot/historical/30-sec-rth
 ```
 
 The equivalent retrying wrapper command is:

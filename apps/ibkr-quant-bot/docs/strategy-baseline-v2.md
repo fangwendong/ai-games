@@ -17,6 +17,37 @@ The percentage stop, ATR stop, technical reversal confirmation, benchmark
 reversal confirmation, daily entry limit, and mandatory end-of-session flatten
 remain unchanged.
 
+Operationally, the mandatory flatten check is evaluated before the normal
+three-symbol signal-data load. It needs the IBKR session calendar, position,
+and order state, but it does not need fresh QQQ/SOXL/SOXS indicator bars or a
+quote-cache sample. This keeps signal-data failure from blocking the final
+reduce-only exit attempt.
+
+The live command also holds a strategy-scoped, non-blocking runtime lock shared
+by every intraday profile. If a
+previous one-shot invocation is still running, the overlap exits without
+connecting or evaluating another order. At the start of every accepted run,
+the bot cancels any strategy-owned BUY remainder left by a crashed invocation
+and confirms the cancellation before continuing. This cleanup also runs in the
+mandatory flatten window, including when no position has appeared yet.
+
+An accepted run has a hard 60-second process deadline. If it does not finish,
+the watchdog closes the runtime lock and terminates the process with exit code
+`124`; the next invocation must perform the normal broker order/position/OCA
+reconciliation before it can evaluate a new entry. IBKR remote requests made
+by `intraday-momentum` use a 3-second request timeout and fail the invocation
+with a non-zero exit code. Local indicator, state, and decision stages do not
+have separate deadlines. The existing entry-fill and cancellation waits remain
+unchanged because they confirm broker order safety rather than schedule local
+work.
+
+Known positions are reconciled before signal market data is loaded. Complete
+broker-hosted OCA protection is left untouched. Missing or partial protection
+is rebuilt first from the exact stop/take prices persisted after the entry
+fill. Legacy state without those fields uses the fixed percentage stop/take as
+a conservative fallback. Protection is created before the daily entry state is
+recorded, so a state-write failure cannot precede broker-side risk protection.
+
 No new position may fill at or after 13:30 America/New_York. Because decisions
 use completed 5-minute bars, the 13:25 bar and all later bars are ineligible to
 create an entry. This restriction applies only to new entries. Existing

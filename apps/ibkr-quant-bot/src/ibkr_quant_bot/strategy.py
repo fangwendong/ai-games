@@ -373,7 +373,10 @@ class IntradayMomentumStrategy:
                 limit_price=None,
                 reason=f"need at least {self.min_bars} bars",
                 signal=False,
-                meta={"bars": len(bars)},
+                meta={
+                    "bars": len(bars),
+                    **(self._snapshot(bars) if bars else {}),
+                },
             )
 
         snapshot = self._snapshot(bars)
@@ -571,10 +574,13 @@ class SemiconductorRotationStrategy:
     profit_lock_activation_pct: float | None = None
     profit_lock_drawdown_pct: float | None = None
     entry_fill_cutoff_et_minutes: int | None = None
+    benchmark_min_intraday_range: float = 0.0
     long_strategy: IntradayMomentumStrategy = field(init=False, repr=False)
     short_strategy: IntradayMomentumStrategy = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
+        if self.benchmark_min_intraday_range < 0:
+            raise ValueError("benchmark_min_intraday_range must be non-negative")
         self.long_symbol = self.long_symbol.upper()
         self.short_symbol = self.short_symbol.upper()
         self.symbols = (self.long_symbol, self.short_symbol)
@@ -636,6 +642,16 @@ class SemiconductorRotationStrategy:
     def _benchmark_bullish(self, bars: list[Bar]) -> bool:
         return self.long_strategy._benchmark_bullish(bars)
 
+    def _diagnostic_snapshot(self, symbol: str, bars: list[Bar]) -> dict[str, float]:
+        if not bars:
+            return {}
+        strategy = (
+            self.long_strategy
+            if symbol.upper() == self.long_symbol
+            else self.short_strategy
+        )
+        return strategy._snapshot(bars)
+
     def _entry_fill_cutoff_reached(self, bars: list[Bar]) -> bool:
         cutoff = self.entry_fill_cutoff_et_minutes
         if cutoff is None or not bars:
@@ -646,6 +662,51 @@ class SemiconductorRotationStrategy:
         estimated_fill_time = bar_time.astimezone(NEW_YORK) + timedelta(minutes=5)
         fill_minutes = estimated_fill_time.hour * 60 + estimated_fill_time.minute
         return fill_minutes >= cutoff
+
+    def _apply_entry_range_gate(
+        self,
+        decision: StrategyDecision,
+        benchmark_bars: list[Bar],
+    ) -> StrategyDecision:
+        threshold = self.benchmark_min_intraday_range
+        if threshold <= 0:
+            return decision
+        valid_lows = [bar.low for bar in benchmark_bars if bar.low > 0]
+        benchmark_range = (
+            max(bar.high for bar in benchmark_bars) / min(valid_lows) - 1.0
+            if benchmark_bars and valid_lows
+            else 0.0
+        )
+        meta = {
+            **decision.meta,
+            "benchmark_intraday_range": benchmark_range,
+            "benchmark_min_intraday_range": threshold,
+            "benchmark_range_gate_passed": benchmark_range >= threshold,
+        }
+        if not decision.signal or decision.action != "BUY" or benchmark_range >= threshold:
+            return StrategyDecision(
+                symbol=decision.symbol,
+                action=decision.action,
+                quantity=decision.quantity,
+                reference_price=decision.reference_price,
+                limit_price=decision.limit_price,
+                reason=decision.reason,
+                signal=decision.signal,
+                meta=meta,
+            )
+        return StrategyDecision(
+            symbol=decision.symbol,
+            action="HOLD",
+            quantity=0,
+            reference_price=decision.reference_price,
+            limit_price=None,
+            reason=(
+                f"benchmark intraday range {benchmark_range:.4%} below "
+                f"minimum {threshold:.4%}"
+            ),
+            signal=False,
+            meta=meta,
+        )
 
     def stop_loss_pct_for(self, symbol: str) -> float:
         symbol = symbol.upper()
@@ -764,7 +825,7 @@ class SemiconductorRotationStrategy:
                 limit_price=None,
                 reason=f"need at least {self.min_bars} bars",
                 signal=False,
-                meta={"bars": len(bars)},
+                meta={"bars": len(bars), **self._diagnostic_snapshot(symbol, bars)},
             )
         if benchmark_bars is None:
             return StrategyDecision(
@@ -795,14 +856,18 @@ class SemiconductorRotationStrategy:
                     "bars": len(bars),
                     "entry_fill_cutoff_et_minutes": cutoff,
                     "entry_window_closed": True,
+                    **self._diagnostic_snapshot(symbol, bars),
                 },
             )
 
         bullish = self._benchmark_bullish(benchmark_bars)
         if symbol == self.long_symbol:
             if bullish:
-                return self.long_strategy.decide(
-                    symbol, quote, bars, benchmark_bars=benchmark_bars
+                return self._apply_entry_range_gate(
+                    self.long_strategy.decide(
+                        symbol, quote, bars, benchmark_bars=benchmark_bars
+                    ),
+                    benchmark_bars,
                 )
             return StrategyDecision(
                 symbol=symbol,
@@ -812,12 +877,19 @@ class SemiconductorRotationStrategy:
                 limit_price=None,
                 reason="regime bearish",
                 signal=False,
-                meta={"bars": len(bars), "benchmark_bullish": bullish},
+                meta={
+                    "bars": len(bars),
+                    "benchmark_bullish": bullish,
+                    **self._diagnostic_snapshot(symbol, bars),
+                },
             )
         if symbol == self.short_symbol:
             if not bullish:
-                return self.short_strategy.decide(
-                    symbol, quote, bars, benchmark_bars=None
+                return self._apply_entry_range_gate(
+                    self.short_strategy.decide(
+                        symbol, quote, bars, benchmark_bars=None
+                    ),
+                    benchmark_bars,
                 )
             return StrategyDecision(
                 symbol=symbol,
@@ -827,7 +899,11 @@ class SemiconductorRotationStrategy:
                 limit_price=None,
                 reason="regime bullish",
                 signal=False,
-                meta={"bars": len(bars), "benchmark_bullish": bullish},
+                meta={
+                    "bars": len(bars),
+                    "benchmark_bullish": bullish,
+                    **self._diagnostic_snapshot(symbol, bars),
+                },
             )
         return StrategyDecision(
             symbol=symbol,
@@ -837,7 +913,11 @@ class SemiconductorRotationStrategy:
             limit_price=None,
             reason="symbol not traded",
             signal=False,
-            meta={"bars": len(bars), "benchmark_bullish": bullish},
+            meta={
+                "bars": len(bars),
+                "benchmark_bullish": bullish,
+                **self._diagnostic_snapshot(symbol, bars),
+            },
         )
 
     def exit_decide(
