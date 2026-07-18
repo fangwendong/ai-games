@@ -161,6 +161,26 @@ class _OpenPosition:
 NEW_YORK = ZoneInfo("America/New_York")
 
 
+def _bar_size_seconds(bar_size: str) -> int:
+    parts = bar_size.strip().lower().split()
+    if len(parts) < 2:
+        raise ValueError(f"unsupported bar size: {bar_size}")
+    try:
+        value = int(parts[0])
+    except ValueError as exc:
+        raise ValueError(f"unsupported bar size: {bar_size}") from exc
+    unit = parts[1]
+    if unit.startswith("sec"):
+        return value
+    if unit.startswith("min"):
+        return value * 60
+    if unit.startswith("hour"):
+        return value * 60 * 60
+    if unit.startswith("day"):
+        return value * 24 * 60 * 60
+    raise ValueError(f"unsupported bar size: {bar_size}")
+
+
 def _time_key(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value
@@ -174,13 +194,21 @@ def _session_date(value: datetime) -> date:
 
 
 def validate_historical_bar_coverage(
-    bars_by_symbol: dict[str, list[Bar]], *, recent_sessions: int = 2
+    bars_by_symbol: dict[str, list[Bar]],
+    *,
+    recent_sessions: int = 2,
+    bar_size: str = "5 mins",
 ) -> dict[str, object]:
     """Fail closed when the newest cached 5-minute sessions are incomplete."""
     if recent_sessions < 1:
         raise ValueError("recent_sessions must be positive")
     if not bars_by_symbol:
         raise ValueError("historical preflight requires at least one symbol")
+    bar_seconds = _bar_size_seconds(bar_size)
+    if 390 * 60 % bar_seconds != 0 or 210 * 60 % bar_seconds != 0:
+        raise ValueError(f"unsupported bar size for session coverage checks: {bar_size}")
+    regular_count = (390 * 60) // bar_seconds
+    early_close_count = (210 * 60) // bar_seconds
 
     grouped: dict[str, dict[date, list[Bar]]] = {}
     latest_by_symbol: dict[str, date] = {}
@@ -224,18 +252,19 @@ def validate_historical_bar_coverage(
                 raise ValueError(
                     f"historical preflight found duplicate {symbol} bars on {session_key}"
                 )
-            if len(timeline) not in {42, 78}:
+            if len(timeline) not in {early_close_count, regular_count}:
                 raise ValueError(
-                    "historical preflight expected 78 regular-session bars or 42 "
+                    "historical preflight expected "
+                    f"{regular_count} regular-session bars or {early_close_count} "
                     f"early-close bars for {symbol} on {session_key}; found {len(timeline)}"
                 )
             gaps = [
                 (later - earlier).total_seconds()
                 for earlier, later in zip(timeline, timeline[1:])
             ]
-            if any(gap != 300 for gap in gaps):
+            if any(gap != bar_seconds for gap in gaps):
                 raise ValueError(
-                    f"historical preflight found a non-5-minute gap for {symbol} on {session_key}"
+                    f"historical preflight found a non-{bar_size} gap for {symbol} on {session_key}"
                 )
             timeline_by_symbol[symbol] = timeline
             counts[session_key][symbol] = len(timeline)

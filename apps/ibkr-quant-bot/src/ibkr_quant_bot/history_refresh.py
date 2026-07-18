@@ -5,6 +5,26 @@ from datetime import date, datetime, timedelta, timezone
 from .models import Bar, MarketSession
 
 
+def _bar_size_seconds(bar_size: str) -> int:
+    parts = bar_size.strip().lower().split()
+    if len(parts) < 2:
+        raise ValueError(f"unsupported bar size: {bar_size}")
+    try:
+        value = int(parts[0])
+    except ValueError as exc:
+        raise ValueError(f"unsupported bar size: {bar_size}") from exc
+    unit = parts[1]
+    if unit.startswith("sec"):
+        return value
+    if unit.startswith("min"):
+        return value * 60
+    if unit.startswith("hour"):
+        return value * 60 * 60
+    if unit.startswith("day"):
+        return value * 24 * 60 * 60
+    raise ValueError(f"unsupported bar size: {bar_size}")
+
+
 def schedule_lookback_days(recent_sessions: int) -> int:
     """Bound the IBKR schedule request to the recent validation window."""
     if recent_sessions < 1:
@@ -19,11 +39,12 @@ def _utc(value: datetime) -> datetime:
 
 
 def expected_session_timestamps(
-    session: MarketSession, *, bar_minutes: int = 5
+    session: MarketSession, *, bar_size: str = "5 mins"
 ) -> tuple[datetime, ...]:
-    if bar_minutes < 1:
-        raise ValueError("bar_minutes must be positive")
-    step = timedelta(minutes=bar_minutes)
+    step_seconds = _bar_size_seconds(bar_size)
+    if step_seconds < 1:
+        raise ValueError("bar_size must be positive")
+    step = timedelta(seconds=step_seconds)
     current = session.opens_at
     expected: list[datetime] = []
     while current < session.closes_at:
@@ -32,7 +53,7 @@ def expected_session_timestamps(
     if current != session.closes_at:
         raise ValueError(
             f"session {session.session_date.isoformat()} is not divisible into "
-            f"{bar_minutes}-minute bars"
+            f"{bar_size} bars"
         )
     return tuple(expected)
 
@@ -43,7 +64,7 @@ def validate_recent_cached_sessions(
     *,
     now: datetime,
     recent_sessions: int = 2,
-    bar_minutes: int = 5,
+    bar_size: str = "5 mins",
 ) -> dict[str, object]:
     """Validate cached bars against IBKR's completed historical RTH schedule."""
     if recent_sessions < 1:
@@ -66,7 +87,7 @@ def validate_recent_cached_sessions(
     report_counts: dict[str, dict[str, int]] = {}
     for session_date in checked:
         session = sessions[session_date]
-        expected = expected_session_timestamps(session, bar_minutes=bar_minutes)
+        expected = expected_session_timestamps(session, bar_size=bar_size)
         report_counts[session_date.isoformat()] = {}
         for raw_symbol, bars in bars_by_symbol.items():
             symbol = raw_symbol.upper()

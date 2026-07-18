@@ -293,6 +293,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="single historical request used for chronological walk-forward evaluation",
     )
     backtest.add_argument(
+        "--bar-size",
+        default="5 mins",
+        help="historical bar size used for the backtest and cache lookup",
+    )
+    backtest.add_argument(
         "--train-days", type=int, default=252, help="walk-forward training window"
     )
     backtest.add_argument(
@@ -2083,6 +2088,7 @@ def main(argv: list[str] | None = None) -> int:
                 sessions,
                 now=now,
                 recent_sessions=args.recent_sessions,
+                bar_size=args.bar_size,
             )
             print(
                 json.dumps(
@@ -2893,6 +2899,7 @@ def main(argv: list[str] | None = None) -> int:
                     "holdout_days": args.holdout_days,
                     "data_source": "daily cache" if args.reuse_data else "IBKR",
                     "market_data_exchange": args.market_data_exchange,
+                    "bar_size": args.bar_size,
                     "data_dir": str(Path(args.data_dir).resolve()),
                 },
             }
@@ -2909,17 +2916,17 @@ def main(argv: list[str] | None = None) -> int:
             for symbol in strategy.symbols:
                 if args.reuse_data:
                     bars_by_symbol[symbol] = load_bars(
-                        args.data_dir, symbol, "5 mins", duration=args.duration
+                        args.data_dir, symbol, args.bar_size, duration=args.duration
                     )
                 else:
                     bars_by_symbol[symbol] = broker.historical_bars_paged(
                         symbol,
                         duration=args.duration,
-                        bar_size="5 mins",
+                        bar_size=args.bar_size,
                         page_callback=lambda rows, cached_symbol=symbol: save_bars_by_day(
                             args.data_dir,
                             cached_symbol,
-                            "5 mins",
+                            args.bar_size,
                             rows,
                             exchange=args.market_data_exchange,
                         ),
@@ -2928,17 +2935,17 @@ def main(argv: list[str] | None = None) -> int:
             benchmark = strategy.benchmark_symbol
             if args.reuse_data:
                 bars_by_symbol[benchmark] = load_bars(
-                    args.data_dir, benchmark, "5 mins", duration=args.duration
+                    args.data_dir, benchmark, args.bar_size, duration=args.duration
                 )
             else:
                 bars_by_symbol[benchmark] = broker.historical_bars_paged(
                     benchmark,
                     duration=args.duration,
-                    bar_size="5 mins",
+                    bar_size=args.bar_size,
                     page_callback=lambda rows: save_bars_by_day(
                         args.data_dir,
                         benchmark,
-                        "5 mins",
+                        args.bar_size,
                         rows,
                         exchange=args.market_data_exchange,
                     ),
@@ -2951,7 +2958,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             try:
                 historical_preflight = validate_historical_bar_coverage(
-                    bars_by_symbol, recent_sessions=2
+                    bars_by_symbol, recent_sessions=2, bar_size=args.bar_size
                 )
             except ValueError as exc:
                 raise BrokerError(

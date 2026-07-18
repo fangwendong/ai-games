@@ -356,6 +356,35 @@ class BrokerSafetyTest(unittest.TestCase):
         self.assertGreater(calls[0], calls[1])
         self.assertGreater(calls[1], calls[2])
 
+    def test_historical_pagination_picks_smaller_chunks_for_subminute_bars(
+        self,
+    ) -> None:
+        broker = object.__new__(IbkrBroker)
+        broker.settings = Settings(historical_request_pause_seconds=0)
+        broker._ib = SimpleNamespace(sleep=lambda _: None)
+        calls = []
+
+        def historical(
+            symbol,
+            duration,
+            bar_size,
+            what_to_show,
+            end_time,
+            exchange="SMART",
+        ):
+            calls.append((duration, bar_size))
+            return []
+
+        broker.historical_bars = historical
+        broker.historical_bars_paged(
+            "SOXL",
+            "3 D",
+            bar_size="30 secs",
+            end_time=datetime(2026, 7, 10, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual([("1 D", "30 secs")], calls)
+
     def test_account_environment_mismatch_fails_closed(self) -> None:
         broker = make_broker(Settings(trading_mode="paper"), FakeIB("U123456"))
 
