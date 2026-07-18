@@ -344,8 +344,10 @@ bar. Sell limits fill at their limit (or a better gap-open price), while sell
 stops fill at their stop (or a worse gap-open price). If a five-minute bar
 crosses both levels and tick ordering is unavailable, the stop is assumed to
 fill first. Profit-lock, technical, and benchmark exits remain close-confirmed
-and fill at the next bar open. Entry fills also remain next-bar-open estimates,
-so venue-specific SMART price improvement cannot be reconstructed from OHLCV.
+and fill at the next bar open. For the v2 live profile, the CLI now defaults to
+an open-to-low pullback approximation for entry fills so the backtest can pick
+up some intrabar price improvement; you can still force `--entry-fill-model
+next-bar-open` for a strict historical baseline.
 
 The tuning workflow used for this branch is documented in
 [docs/backtest-parameter-tuning.md](docs/backtest-parameter-tuning.md).

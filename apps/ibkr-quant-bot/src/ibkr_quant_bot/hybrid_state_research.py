@@ -170,7 +170,11 @@ def evaluate_period(
         for symbol, bars in v2_bars.items()
     }
     v2_result = run_intraday_momentum_backtest(
-        bounded_v2, strategy, cost, gap_config.initial_capital
+        bounded_v2,
+        strategy,
+        cost,
+        gap_config.initial_capital,
+        entry_fill_model="open_pullback",
     )
     gap_result = run_gap_reversion_backtest(
         gap_bars, gap_config, start_date=start, end_date=end

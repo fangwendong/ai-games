@@ -224,6 +224,70 @@ class BacktestCostTest(unittest.TestCase):
         self.assertEqual(80, result.trades[0].gross_exit_price)
         self.assertEqual("signal", result.trades[0].exit_reason)
 
+    def test_open_pullback_entry_fill_uses_intrabar_low_improvement(self) -> None:
+        class EntryStrategy:
+            symbols = ("SOXL",)
+            benchmark_symbol = "QQQ"
+            min_bars = 1
+
+            def decide(self, symbol, quote, bars, benchmark_bars=None):
+                signal = len(bars) == 1
+                return StrategyDecision(
+                    symbol=symbol,
+                    action="BUY" if signal else "HOLD",
+                    quantity=1 if signal else 0,
+                    reference_price=quote.reference_price,
+                    limit_price=None,
+                    reason="entry",
+                    signal=signal,
+                    meta={"score": 1.0},
+                )
+
+            def exit_decide(
+                self, symbol, quote, bars, quantity, average_cost, benchmark_bars=None
+            ):
+                return StrategyDecision(
+                    symbol=symbol,
+                    action="HOLD",
+                    quantity=0,
+                    reference_price=quote.reference_price,
+                    limit_price=None,
+                    reason="hold",
+                    signal=False,
+                    meta={},
+                )
+
+        start = datetime(2026, 7, 8, 9, 30, tzinfo=timezone.utc)
+        bars = [
+            Bar(time=start, open=100, high=100, low=100, close=100, volume=1),
+            Bar(
+                time=start + timedelta(minutes=5),
+                open=100,
+                high=101,
+                low=90,
+                close=99,
+                volume=1,
+            ),
+            Bar(
+                time=start + timedelta(minutes=10),
+                open=99,
+                high=100,
+                low=98,
+                close=99,
+                volume=1,
+            ),
+        ]
+
+        result = run_intraday_momentum_backtest(
+            {"SOXL": bars, "QQQ": bars},
+            strategy=EntryStrategy(),
+            cost_model=BacktestCostModel(0, 0, 0),
+            entry_fill_model="open_pullback",
+        )
+
+        self.assertEqual(1, result.trade_count)
+        self.assertEqual(98.0, result.trades[0].gross_entry_price)
+
     def test_stop_take_uses_close_based_strategy_exit_not_intrabar_high_low(
         self,
     ) -> None:
