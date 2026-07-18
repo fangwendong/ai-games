@@ -361,6 +361,8 @@ step so the cache, validation, and result comparison stay aligned.
 
 The tuning workflow used for this branch is documented in
 [docs/backtest-parameter-tuning.md](docs/backtest-parameter-tuning.md).
+The latest live-aligned calibration run and its conclusions are documented in
+[docs/live-backtest-alignment-2026-07-18.md](docs/live-backtest-alignment-2026-07-18.md).
 The versioned parameters and change-control rules are documented in
 [docs/strategy-baseline-v2.md](docs/strategy-baseline-v2.md), with the frozen
 rollback baseline in [docs/strategy-baseline-v1.md](docs/strategy-baseline-v1.md).

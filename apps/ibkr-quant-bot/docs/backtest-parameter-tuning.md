@@ -195,3 +195,7 @@ Treat those as observations from the current sample, not as permanent truths.
 If you are comparing two candidates and one only wins by adding a lot more
 trading activity, prefer the one with the cleaner OOS profile unless the
 improvement is large enough to justify the additional turnover.
+
+For the most recent live-aligned calibration run, including the `core_parameters`
+report shape and the 2026-07-18 conclusions, see
+[live-backtest-alignment-2026-07-18.md](live-backtest-alignment-2026-07-18.md).
