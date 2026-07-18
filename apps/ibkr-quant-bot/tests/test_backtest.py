@@ -288,6 +288,71 @@ class BacktestCostTest(unittest.TestCase):
         self.assertEqual(1, result.trade_count)
         self.assertEqual(98.0, result.trades[0].gross_entry_price)
 
+    def test_mixed_signal_and_fill_bars_keep_signal_logic_on_five_minute_bars(
+        self,
+    ) -> None:
+        class MixedBarStrategy:
+            symbols = ("SOXL",)
+            benchmark_symbol = "QQQ"
+            min_bars = 1
+
+            def decide(self, symbol, quote, bars, benchmark_bars=None):
+                signal = len(bars) == 1
+                return StrategyDecision(
+                    symbol=symbol,
+                    action="BUY" if signal else "HOLD",
+                    quantity=1 if signal else 0,
+                    reference_price=quote.reference_price,
+                    limit_price=None,
+                    reason="entry",
+                    signal=signal,
+                    meta={"score": 1.0, "bars": len(bars)},
+                )
+
+            def exit_decide(
+                self, symbol, quote, bars, quantity, average_cost, benchmark_bars=None
+            ):
+                return StrategyDecision(
+                    symbol=symbol,
+                    action="HOLD",
+                    quantity=0,
+                    reference_price=quote.reference_price,
+                    limit_price=None,
+                    reason="hold",
+                    signal=False,
+                    meta={"bars": len(bars)},
+                )
+
+        signal_start = datetime(2026, 7, 8, 9, 30, tzinfo=timezone.utc)
+        signal_bars = [
+            Bar(signal_start, 100.0, 100.5, 99.5, 100.0, 1000),
+            Bar(signal_start + timedelta(minutes=5), 101.0, 101.5, 100.5, 101.0, 1000),
+            Bar(signal_start + timedelta(minutes=10), 102.0, 102.5, 101.5, 102.0, 1000),
+        ]
+        fill_bars = [
+            Bar(signal_start + timedelta(minutes=1), 111.0, 111.5, 110.5, 111.0, 100),
+            Bar(signal_start + timedelta(minutes=2), 112.0, 112.5, 111.5, 112.0, 100),
+            Bar(signal_start + timedelta(minutes=3), 113.0, 113.5, 112.5, 113.0, 100),
+            Bar(signal_start + timedelta(minutes=4), 114.0, 114.5, 113.5, 114.0, 100),
+            Bar(signal_start + timedelta(minutes=6), 115.0, 115.5, 114.5, 115.0, 100),
+            Bar(signal_start + timedelta(minutes=7), 116.0, 116.5, 115.5, 116.0, 100),
+        ]
+
+        result = run_intraday_momentum_backtest(
+            {"SOXL": signal_bars, "QQQ": signal_bars},
+            strategy=MixedBarStrategy(),
+            cost_model=BacktestCostModel(0, 0, 0),
+            fill_bars_by_symbol={"SOXL": fill_bars, "QQQ": signal_bars},
+        )
+
+        self.assertEqual(1, result.trade_count)
+        self.assertEqual(111.0, result.trades[0].gross_entry_price)
+        self.assertEqual(
+            (signal_start + timedelta(minutes=1)).replace(tzinfo=None),
+            result.trades[0].entry_time,
+        )
+        self.assertEqual(102.0, result.trades[0].gross_exit_price)
+
     def test_stop_take_uses_close_based_strategy_exit_not_intrabar_high_low(
         self,
     ) -> None:

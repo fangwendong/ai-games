@@ -295,7 +295,23 @@ def _build_parser() -> argparse.ArgumentParser:
     backtest.add_argument(
         "--bar-size",
         default="5 mins",
-        help="historical bar size used for the backtest and cache lookup",
+        help="historical bar size used for signal logic and cache lookup",
+    )
+    backtest.add_argument(
+        "--fill-bar-size",
+        default=None,
+        help=(
+            "historical bar size used for fill pricing and protective exits; "
+            "defaults to --bar-size"
+        ),
+    )
+    backtest.add_argument(
+        "--fill-data-dir",
+        default=None,
+        help=(
+            "historical cache root used for fill bars; defaults to --data-dir "
+            "when not provided"
+        ),
     )
     backtest.add_argument(
         "--train-days", type=int, default=252, help="walk-forward training window"
@@ -2809,6 +2825,8 @@ def main(argv: list[str] | None = None) -> int:
                 spread_bps=args.spread_bps,
             )
             entry_fill_model = args.entry_fill_model
+            fill_bar_size = args.fill_bar_size or args.bar_size
+            fill_data_dir = args.fill_data_dir or args.data_dir
             if entry_fill_model == "profile-default":
                 entry_fill_model = (
                     "open-pullback"
@@ -2884,26 +2902,32 @@ def main(argv: list[str] | None = None) -> int:
                 },
                 "execution_model": {
                     "entry": entry_fill_model,
+                    "signal_bar_size": args.bar_size,
+                    "fill_bar_size": fill_bar_size,
+                    "fill_data_dir": str(Path(fill_data_dir).resolve()),
                     "protective_oca": "intrabar_after_entry_bar",
                     "ambiguous_stop_take_bar": "protective_stop_first",
                     "software_exit": "completed_bar_then_next_bar_open",
                 },
-                "validation": {
-                    "method": "fixed-parameter chronological walk-forward",
-                    "selection_performed": False,
-                    "overlapping_lookbacks_treated_as_independent": False,
-                    "duration": args.duration,
-                    "train_days": args.train_days,
-                    "test_days": args.test_days,
-                    "step_days": args.step_days,
-                    "holdout_days": args.holdout_days,
-                    "data_source": "daily cache" if args.reuse_data else "IBKR",
-                    "market_data_exchange": args.market_data_exchange,
-                    "bar_size": args.bar_size,
-                    "data_dir": str(Path(args.data_dir).resolve()),
-                },
-            }
+                    "validation": {
+                        "method": "fixed-parameter chronological walk-forward",
+                        "selection_performed": False,
+                        "overlapping_lookbacks_treated_as_independent": False,
+                        "duration": args.duration,
+                        "train_days": args.train_days,
+                        "test_days": args.test_days,
+                        "step_days": args.step_days,
+                        "holdout_days": args.holdout_days,
+                        "data_source": "daily cache" if args.reuse_data else "IBKR",
+                        "market_data_exchange": args.market_data_exchange,
+                        "bar_size": args.bar_size,
+                        "fill_bar_size": fill_bar_size,
+                        "fill_data_dir": str(Path(fill_data_dir).resolve()),
+                        "data_dir": str(Path(args.data_dir).resolve()),
+                    },
+                }
             bars_by_symbol: dict[str, list[Bar]] = {}
+            fill_bars_by_symbol: dict[str, list[Bar]] = {}
             if args.reuse_data:
                 try:
                     require_market_data_source(
@@ -2918,6 +2942,15 @@ def main(argv: list[str] | None = None) -> int:
                     bars_by_symbol[symbol] = load_bars(
                         args.data_dir, symbol, args.bar_size, duration=args.duration
                     )
+                    if fill_bar_size == args.bar_size:
+                        fill_bars_by_symbol[symbol] = bars_by_symbol[symbol]
+                    else:
+                        fill_bars_by_symbol[symbol] = load_bars(
+                            fill_data_dir,
+                            symbol,
+                            fill_bar_size,
+                            duration=args.duration,
+                        )
                 else:
                     bars_by_symbol[symbol] = broker.historical_bars_paged(
                         symbol,
@@ -2932,11 +2965,36 @@ def main(argv: list[str] | None = None) -> int:
                         ),
                         exchange=args.market_data_exchange,
                     )
+                    if fill_bar_size == args.bar_size:
+                        fill_bars_by_symbol[symbol] = bars_by_symbol[symbol]
+                    else:
+                        fill_bars_by_symbol[symbol] = broker.historical_bars_paged(
+                            symbol,
+                            duration=args.duration,
+                            bar_size=fill_bar_size,
+                            page_callback=lambda rows, cached_symbol=symbol: save_bars_by_day(
+                                fill_data_dir,
+                                cached_symbol,
+                                fill_bar_size,
+                                rows,
+                                exchange=args.market_data_exchange,
+                            ),
+                            exchange=args.market_data_exchange,
+                        )
             benchmark = strategy.benchmark_symbol
             if args.reuse_data:
                 bars_by_symbol[benchmark] = load_bars(
                     args.data_dir, benchmark, args.bar_size, duration=args.duration
                 )
+                if fill_bar_size == args.bar_size:
+                    fill_bars_by_symbol[benchmark] = bars_by_symbol[benchmark]
+                else:
+                    fill_bars_by_symbol[benchmark] = load_bars(
+                        fill_data_dir,
+                        benchmark,
+                        fill_bar_size,
+                        duration=args.duration,
+                    )
             else:
                 bars_by_symbol[benchmark] = broker.historical_bars_paged(
                     benchmark,
@@ -2948,23 +3006,51 @@ def main(argv: list[str] | None = None) -> int:
                         args.bar_size,
                         rows,
                         exchange=args.market_data_exchange,
-                    ),
+                        ),
                     exchange=args.market_data_exchange,
                 )
+                if fill_bar_size == args.bar_size:
+                    fill_bars_by_symbol[benchmark] = bars_by_symbol[benchmark]
+                else:
+                    fill_bars_by_symbol[benchmark] = broker.historical_bars_paged(
+                        benchmark,
+                        duration=args.duration,
+                        bar_size=fill_bar_size,
+                        page_callback=lambda rows: save_bars_by_day(
+                            fill_data_dir,
+                            benchmark,
+                            fill_bar_size,
+                            rows,
+                            exchange=args.market_data_exchange,
+                        ),
+                        exchange=args.market_data_exchange,
+                    )
             missing = [symbol for symbol, bars in bars_by_symbol.items() if not bars]
             if missing:
                 raise BrokerError(
                     "no historical bars available for " + ", ".join(sorted(missing))
                 )
+            missing_fill = [
+                symbol for symbol, bars in fill_bars_by_symbol.items() if not bars
+            ]
+            if missing_fill:
+                raise BrokerError(
+                    "no fill historical bars available for "
+                    + ", ".join(sorted(missing_fill))
+                )
             try:
                 historical_preflight = validate_historical_bar_coverage(
                     bars_by_symbol, recent_sessions=2, bar_size=args.bar_size
+                )
+                fill_preflight = validate_historical_bar_coverage(
+                    fill_bars_by_symbol, recent_sessions=2, bar_size=fill_bar_size
                 )
             except ValueError as exc:
                 raise BrokerError(
                     f"historical data preflight failed; refresh the cache before backtesting: {exc}"
                 ) from exc
             report["historical_preflight"] = historical_preflight
+            report["fill_historical_preflight"] = fill_preflight
             evaluation = evaluate_fixed_strategy_walk_forward(
                 bars_by_symbol,
                 strategy,
@@ -2975,6 +3061,7 @@ def main(argv: list[str] | None = None) -> int:
                 step_days=args.step_days,
                 holdout_days=args.holdout_days,
                 entry_fill_model=entry_fill_model,
+                fill_bars_by_symbol=fill_bars_by_symbol,
             )
             if isinstance(strategy, SemiconductorRotationStrategy):
                 stability_strategies = {
@@ -3008,17 +3095,18 @@ def main(argv: list[str] | None = None) -> int:
                         min_trend_gap=strategy.min_trend_gap * 1.2,
                     ),
                 }
-                stability = evaluate_parameter_stability(
-                    bars_by_symbol,
-                    stability_strategies,
-                    cost_model,
-                    args.capital,
-                    train_days=args.train_days,
-                    test_days=args.test_days,
-                    step_days=args.step_days,
-                    holdout_days=args.holdout_days,
-                    entry_fill_model=entry_fill_model,
-                )
+            stability = evaluate_parameter_stability(
+                bars_by_symbol,
+                stability_strategies,
+                cost_model,
+                args.capital,
+                train_days=args.train_days,
+                test_days=args.test_days,
+                step_days=args.step_days,
+                holdout_days=args.holdout_days,
+                entry_fill_model=entry_fill_model,
+                fill_bars_by_symbol=fill_bars_by_symbol,
+            )
 
             def result_report(result):
                 return {

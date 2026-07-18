@@ -130,6 +130,10 @@ def _group_bars_by_day(
     return grouped
 
 
+def _bars_by_time(bars: list[Bar]) -> dict[datetime, Bar]:
+    return {_time_key(bar.time): bar for bar in bars}
+
+
 @dataclass(frozen=True)
 class _PendingOrder:
     symbol: str
@@ -421,6 +425,7 @@ def run_intraday_momentum_backtest(
     profit_lock_rule: ProfitLockRule | None = None,
     simulate_protective_oca: bool = True,
     entry_fill_model: str = "next_bar_open",
+    fill_bars_by_symbol: dict[str, list[Bar]] | None = None,
 ) -> BacktestResult:
     strategy = strategy or IntradayMomentumStrategy()
     cost_model = cost_model or BacktestCostModel()
@@ -430,6 +435,7 @@ def run_intraday_momentum_backtest(
         if activation_pct is not None and drawdown_pct is not None:
             profit_lock_rule = ProfitLockRule(activation_pct, drawdown_pct)
     grouped = _group_bars_by_day(bars_by_symbol)
+    fill_grouped = _group_bars_by_day(fill_bars_by_symbol or bars_by_symbol)
     all_days = sorted({day for daily in grouped.values() for day in daily})
 
     gross_cash = initial_capital
@@ -492,18 +498,33 @@ def run_intraday_momentum_backtest(
         )
 
     for day in all_days:
-        daily_bars_by_symbol = {
+        daily_signal_bars_by_symbol = {
             symbol: grouped.get(symbol.upper(), {}).get(day, [])
+            for symbol in strategy.symbols
+        }
+        daily_fill_bars_by_symbol = {
+            symbol: fill_grouped.get(symbol.upper(), {}).get(day, [])
             for symbol in strategy.symbols
         }
         benchmark_daily_bars = grouped.get(strategy.benchmark_symbol.upper(), {}).get(
             day, []
         )
-        bars_by_time = {
-            symbol: {_time_key(bar.time): bar for bar in bars}
-            for symbol, bars in daily_bars_by_symbol.items()
+        signal_bars_by_time = {
+            symbol: _bars_by_time(bars)
+            for symbol, bars in daily_signal_bars_by_symbol.items()
         }
-        timeline = sorted({moment for rows in bars_by_time.values() for moment in rows})
+        fill_bars_by_time = {
+            symbol: _bars_by_time(bars)
+            for symbol, bars in daily_fill_bars_by_symbol.items()
+        }
+        signal_timeline = sorted(
+            {moment for rows in signal_bars_by_time.values() for moment in rows}
+        )
+        fill_timeline = sorted(
+            {moment for rows in fill_bars_by_time.values() for moment in rows}
+        )
+        timeline = sorted(set(signal_timeline) | set(fill_timeline))
+        signal_timeline_set = set(signal_timeline)
         pending_order: _PendingOrder | None = None
         pending_exit: _PendingExit | None = None
         open_position: _OpenPosition | None = None
@@ -511,12 +532,17 @@ def run_intraday_momentum_backtest(
         day_closed = False
 
         for current_time in timeline:
+            if day_closed:
+                continue
+
             if (
                 pending_exit is not None
                 and current_time == pending_exit.fill_time
                 and open_position is not None
             ):
-                fill_bar = bars_by_time.get(open_position.symbol, {}).get(current_time)
+                fill_bar = fill_bars_by_time.get(open_position.symbol, {}).get(
+                    current_time
+                )
                 if fill_bar is not None:
                     close_position(
                         open_position,
@@ -530,7 +556,9 @@ def run_intraday_momentum_backtest(
                 pending_exit = None
 
             if pending_order is not None and current_time == pending_order.fill_time:
-                fill_bar = bars_by_time.get(pending_order.symbol, {}).get(current_time)
+                fill_bar = fill_bars_by_time.get(pending_order.symbol, {}).get(
+                    current_time
+                )
                 if fill_bar is not None:
                     raw_entry_price = _entry_fill_price(
                         fill_bar, mode=entry_fill_model
@@ -559,7 +587,7 @@ def run_intraday_momentum_backtest(
                             * (cost_model.slippage_bps / 10_000.0)
                         )
                         signal_bars = _prefix_at(
-                            daily_bars_by_symbol.get(pending_order.symbol, []),
+                            daily_signal_bars_by_symbol.get(pending_order.symbol, []),
                             pending_order.signal_time,
                         )
                         protective_stop_price: float | None = None
@@ -573,7 +601,7 @@ def run_intraday_momentum_backtest(
                                 pending_order.symbol,
                                 cost_model.buy_fill(raw_entry_price),
                                 signal_bars,
-                            )
+                        )
                         open_position = _OpenPosition(
                             symbol=pending_order.symbol,
                             quantity=shares,
@@ -592,7 +620,7 @@ def run_intraday_momentum_backtest(
                 and simulate_protective_oca
                 and current_time > open_position.entry_time
             ):
-                bar = bars_by_time.get(open_position.symbol, {}).get(current_time)
+                bar = fill_bars_by_time.get(open_position.symbol, {}).get(current_time)
                 protective_fill = (
                     _protective_fill(open_position, bar) if bar is not None else None
                 )
@@ -609,76 +637,89 @@ def run_intraday_momentum_backtest(
                     peak_close = None
                     day_closed = True
 
-            if open_position is not None and pending_exit is None:
-                bars = daily_bars_by_symbol.get(open_position.symbol, [])
-                bar = bars_by_time.get(open_position.symbol, {}).get(current_time)
-                if bar is not None:
-                    peak_close = max(peak_close or open_position.entry_price, bar.close)
-                    prefix = _prefix_at(bars, current_time)
-                    benchmark_prefix = _prefix_at(benchmark_daily_bars, current_time)
-                    quote = Quote(
-                        symbol=open_position.symbol,
-                        bid=bar.close,
-                        ask=bar.close,
-                        last=bar.close,
-                        close=bar.close,
+            if current_time in signal_timeline_set:
+                if open_position is not None and pending_exit is None:
+                    signal_bars = daily_signal_bars_by_symbol.get(open_position.symbol, [])
+                    signal_bar = signal_bars_by_time.get(open_position.symbol, {}).get(
+                        current_time
                     )
-                    exit_decision = _exit_decision(
-                        strategy,
-                        open_position.symbol,
-                        quote,
-                        prefix,
-                        open_position.quantity,
-                        open_position.entry_price,
-                        benchmark_prefix,
-                    )
-                    if exit_decision.signal:
-                        fill_time = _next_bar_time(bars, current_time)
-                        if fill_time is not None:
-                            pending_exit = _PendingExit(
-                                signal_time=current_time,
-                                fill_time=fill_time,
-                                reason=_exit_reason_from_decision(exit_decision.meta),
-                            )
-                    elif (
-                        profit_lock_rule is not None
-                        and peak_close
-                        >= open_position.entry_price
-                        * (1.0 + profit_lock_rule.activation_pct)
-                        and bar.close
-                        <= peak_close * (1.0 - profit_lock_rule.drawdown_pct)
-                    ):
-                        fill_time = _next_bar_time(bars, current_time)
-                        if fill_time is not None:
-                            pending_exit = _PendingExit(
-                                signal_time=current_time,
-                                fill_time=fill_time,
-                                reason="profit_lock",
-                            )
-
-            if day_closed:
-                continue
-
-            if open_position is None and pending_order is None and pending_exit is None:
-                signal = _select_signal(
-                    strategy, daily_bars_by_symbol, benchmark_daily_bars, current_time
-                )
-                if signal is not None:
-                    symbol, quantity, score = signal
-                    fill_time = _next_bar_time(
-                        daily_bars_by_symbol.get(symbol, []), current_time
-                    )
-                    if fill_time is not None:
-                        pending_order = _PendingOrder(
-                            symbol=symbol,
-                            quantity=quantity,
-                            signal_time=current_time,
-                            fill_time=fill_time,
-                            score=score,
+                    if signal_bar is not None:
+                        peak_close = max(
+                            peak_close or open_position.entry_price, signal_bar.close
                         )
+                        prefix = _prefix_at(signal_bars, current_time)
+                        benchmark_prefix = _prefix_at(benchmark_daily_bars, current_time)
+                        quote = Quote(
+                            symbol=open_position.symbol,
+                            bid=signal_bar.close,
+                            ask=signal_bar.close,
+                            last=signal_bar.close,
+                            close=signal_bar.close,
+                        )
+                        exit_decision = _exit_decision(
+                            strategy,
+                            open_position.symbol,
+                            quote,
+                            prefix,
+                            open_position.quantity,
+                            open_position.entry_price,
+                            benchmark_prefix,
+                        )
+                        if exit_decision.signal:
+                            fill_time = _next_bar_time(
+                                daily_fill_bars_by_symbol.get(open_position.symbol, []),
+                                current_time,
+                            )
+                            if fill_time is not None:
+                                pending_exit = _PendingExit(
+                                    signal_time=current_time,
+                                    fill_time=fill_time,
+                                    reason=_exit_reason_from_decision(
+                                        exit_decision.meta
+                                    ),
+                                )
+                        elif (
+                            profit_lock_rule is not None
+                            and peak_close
+                            >= open_position.entry_price
+                            * (1.0 + profit_lock_rule.activation_pct)
+                            and signal_bar.close
+                            <= peak_close * (1.0 - profit_lock_rule.drawdown_pct)
+                        ):
+                            fill_time = _next_bar_time(
+                                daily_fill_bars_by_symbol.get(open_position.symbol, []),
+                                current_time,
+                            )
+                            if fill_time is not None:
+                                pending_exit = _PendingExit(
+                                    signal_time=current_time,
+                                    fill_time=fill_time,
+                                    reason="profit_lock",
+                                )
+
+                if open_position is None and pending_order is None and pending_exit is None:
+                    signal = _select_signal(
+                        strategy,
+                        daily_signal_bars_by_symbol,
+                        benchmark_daily_bars,
+                        current_time,
+                    )
+                    if signal is not None:
+                        symbol, quantity, score = signal
+                        fill_time = _next_bar_time(
+                            daily_fill_bars_by_symbol.get(symbol, []), current_time
+                        )
+                        if fill_time is not None:
+                            pending_order = _PendingOrder(
+                                symbol=symbol,
+                                quantity=quantity,
+                                signal_time=current_time,
+                                fill_time=fill_time,
+                                score=score,
+                            )
 
         if open_position is not None:
-            bars = daily_bars_by_symbol.get(open_position.symbol, [])
+            bars = daily_signal_bars_by_symbol.get(open_position.symbol, [])
             if bars:
                 last_bar = bars[-1]
                 close_position(
@@ -721,6 +762,7 @@ def evaluate_fixed_strategy_walk_forward(
     step_days: int,
     holdout_days: int,
     entry_fill_model: str = "next_bar_open",
+    fill_bars_by_symbol: dict[str, list[Bar]] | None = None,
 ) -> WalkForwardResult:
     """Evaluate fixed parameters on chronological, non-overlapping OOS slices.
 
@@ -756,6 +798,7 @@ def evaluate_fixed_strategy_walk_forward(
         test_days,
         step_days,
         entry_fill_model,
+        fill_bars_by_symbol,
     )
     if not folds:
         raise ValueError("walk-forward settings produced no out-of-sample folds")
@@ -767,6 +810,11 @@ def evaluate_fixed_strategy_walk_forward(
         cost_model=cost_model,
         initial_capital=initial_capital,
         entry_fill_model=entry_fill_model,
+        fill_bars_by_symbol=(
+            _filter_days(fill_bars_by_symbol, set(holdout))
+            if fill_bars_by_symbol is not None
+            else None
+        ),
     )
     return WalkForwardResult(
         folds=tuple(folds),
@@ -786,6 +834,7 @@ def _evaluate_folds(
     test_days: int,
     step_days: int,
     entry_fill_model: str,
+    fill_bars_by_symbol: dict[str, list[Bar]] | None,
 ) -> list[WalkForwardFold]:
     if step_days < test_days:
         raise ValueError(
@@ -802,6 +851,11 @@ def _evaluate_folds(
             cost_model=cost_model,
             initial_capital=initial_capital,
             entry_fill_model=entry_fill_model,
+            fill_bars_by_symbol=(
+                _filter_days(fill_bars_by_symbol, set(testing))
+                if fill_bars_by_symbol is not None
+                else None
+            ),
         )
         folds.append(
             WalkForwardFold(
@@ -827,6 +881,7 @@ def evaluate_parameter_stability(
     step_days: int,
     holdout_days: int,
     entry_fill_model: str = "next_bar_open",
+    fill_bars_by_symbol: dict[str, list[Bar]] | None = None,
 ) -> tuple[ParameterStabilityResult, ...]:
     """Compare nearby fixed parameter sets without touching final holdout bars."""
     all_days = sorted(
@@ -845,6 +900,7 @@ def evaluate_parameter_stability(
             test_days,
             step_days,
             entry_fill_model,
+            fill_bars_by_symbol,
         )
         raw.append((name, [fold.result.net_return_pct for fold in folds]))
 
