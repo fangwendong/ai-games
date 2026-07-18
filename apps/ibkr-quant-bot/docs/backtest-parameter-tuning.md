@@ -101,9 +101,13 @@ The default intraday backtest models the two live exit paths separately:
   because OHLCV does not reveal tick ordering
 - software profit-lock, technical-reversal, and benchmark exits require a
   completed bar and fill at the next bar open
-- entries fill at the next bar open; SMART routing or dark-pool improvement is
-  not inferable from historical five-minute bars and remains represented only
-  by the configured spread/slippage assumptions
+- entries use a bar-level marketable-limit approximation. The v2 live profile
+  defaults to an open-to-low pullback model so fills can benefit from intrabar
+  price improvement when the signal bar trades below the opening print. You can
+  still force the older next-bar-open proxy with `--entry-fill-model
+  next-bar-open` when you want a strict historical baseline. SMART routing or
+  dark-pool improvement is not inferable from historical five-minute bars and
+  remains represented only by the configured spread/slippage assumptions.
 
 Protective prices are calculated from the modeled entry fill and only the bars
 that were complete when the entry signal fired. Do not use the entry bar's

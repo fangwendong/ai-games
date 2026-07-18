@@ -268,6 +268,15 @@ def _next_bar_time(bars: list[Bar], current_time: datetime) -> datetime | None:
     )
 
 
+def _entry_fill_price(fill_bar: Bar, *, mode: str) -> float:
+    if mode in {"next_bar_open", "next-bar-open"}:
+        return fill_bar.open
+    if mode in {"open_pullback", "open-pullback"}:
+        pullback = max(0.0, fill_bar.open - fill_bar.low)
+        return max(fill_bar.low, fill_bar.open - 0.2 * pullback)
+    raise ValueError(f"unsupported entry fill mode: {mode}")
+
+
 def _select_signal(
     strategy: IntradayMomentumStrategy,
     daily_bars_by_symbol: dict[str, list[Bar]],
@@ -382,6 +391,7 @@ def run_intraday_momentum_backtest(
     initial_capital: float = 1_000.0,
     profit_lock_rule: ProfitLockRule | None = None,
     simulate_protective_oca: bool = True,
+    entry_fill_model: str = "next_bar_open",
 ) -> BacktestResult:
     strategy = strategy or IntradayMomentumStrategy()
     cost_model = cost_model or BacktestCostModel()
@@ -493,7 +503,9 @@ def run_intraday_momentum_backtest(
             if pending_order is not None and current_time == pending_order.fill_time:
                 fill_bar = bars_by_time.get(pending_order.symbol, {}).get(current_time)
                 if fill_bar is not None:
-                    raw_entry_price = fill_bar.open
+                    raw_entry_price = _entry_fill_price(
+                        fill_bar, mode=entry_fill_model
+                    )
                     shares = min(
                         pending_order.quantity,
                         int(net_cash // cost_model.buy_fill(raw_entry_price)),
@@ -679,6 +691,7 @@ def evaluate_fixed_strategy_walk_forward(
     test_days: int,
     step_days: int,
     holdout_days: int,
+    entry_fill_model: str = "next_bar_open",
 ) -> WalkForwardResult:
     """Evaluate fixed parameters on chronological, non-overlapping OOS slices.
 
@@ -713,6 +726,7 @@ def evaluate_fixed_strategy_walk_forward(
         train_days,
         test_days,
         step_days,
+        entry_fill_model,
     )
     if not folds:
         raise ValueError("walk-forward settings produced no out-of-sample folds")
@@ -723,6 +737,7 @@ def evaluate_fixed_strategy_walk_forward(
         strategy=strategy,
         cost_model=cost_model,
         initial_capital=initial_capital,
+        entry_fill_model=entry_fill_model,
     )
     return WalkForwardResult(
         folds=tuple(folds),
@@ -741,6 +756,7 @@ def _evaluate_folds(
     train_days: int,
     test_days: int,
     step_days: int,
+    entry_fill_model: str,
 ) -> list[WalkForwardFold]:
     if step_days < test_days:
         raise ValueError(
@@ -756,6 +772,7 @@ def _evaluate_folds(
             strategy=strategy,
             cost_model=cost_model,
             initial_capital=initial_capital,
+            entry_fill_model=entry_fill_model,
         )
         folds.append(
             WalkForwardFold(
@@ -780,6 +797,7 @@ def evaluate_parameter_stability(
     test_days: int,
     step_days: int,
     holdout_days: int,
+    entry_fill_model: str = "next_bar_open",
 ) -> tuple[ParameterStabilityResult, ...]:
     """Compare nearby fixed parameter sets without touching final holdout bars."""
     all_days = sorted(
@@ -797,6 +815,7 @@ def evaluate_parameter_stability(
             train_days,
             test_days,
             step_days,
+            entry_fill_model,
         )
         raw.append((name, [fold.result.net_return_pct for fold in folds]))
 

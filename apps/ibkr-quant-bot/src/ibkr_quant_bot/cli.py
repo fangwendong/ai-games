@@ -109,6 +109,7 @@ MOMENTUM_PROFILE_CHOICES = [
     "rotation-hysteresis-v2",
     "rotation-range-gated-v1",
 ]
+ENTRY_FILL_MODEL_CHOICES = ["next-bar-open", "open-pullback", "profile-default"]
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -352,6 +353,15 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     backtest.add_argument(
         "--min-score", type=float, default=0.008, help="minimum momentum score required"
+    )
+    backtest.add_argument(
+        "--entry-fill-model",
+        choices=ENTRY_FILL_MODEL_CHOICES,
+        default="profile-default",
+        help=(
+            "entry fill approximation; profile-default uses open-pullback for "
+            "rotation-hysteresis-v2 and next-bar-open otherwise"
+        ),
     )
     backtest.add_argument(
         "--no-benchmark-confirmation",
@@ -2792,6 +2802,13 @@ def main(argv: list[str] | None = None) -> int:
                 slippage_bps=args.slippage_bps,
                 spread_bps=args.spread_bps,
             )
+            entry_fill_model = args.entry_fill_model
+            if entry_fill_model == "profile-default":
+                entry_fill_model = (
+                    "open-pullback"
+                    if args.profile == ROTATION_HYSTERESIS_V2_VERSION
+                    else "next-bar-open"
+                )
             if isinstance(strategy, SemiconductorRotationStrategy):
                 strategy_report: dict[str, object] = {
                     "benchmark_symbol": strategy.benchmark_symbol,
@@ -2860,7 +2877,7 @@ def main(argv: list[str] | None = None) -> int:
                     "spread_bps": cost_model.spread_bps,
                 },
                 "execution_model": {
-                    "entry": "next_bar_open",
+                    "entry": entry_fill_model,
                     "protective_oca": "intrabar_after_entry_bar",
                     "ambiguous_stop_take_bar": "protective_stop_first",
                     "software_exit": "completed_bar_then_next_bar_open",
@@ -2950,6 +2967,7 @@ def main(argv: list[str] | None = None) -> int:
                 test_days=args.test_days,
                 step_days=args.step_days,
                 holdout_days=args.holdout_days,
+                entry_fill_model=entry_fill_model,
             )
             if isinstance(strategy, SemiconductorRotationStrategy):
                 stability_strategies = {
@@ -2983,16 +3001,17 @@ def main(argv: list[str] | None = None) -> int:
                         min_trend_gap=strategy.min_trend_gap * 1.2,
                     ),
                 }
-            stability = evaluate_parameter_stability(
-                bars_by_symbol,
-                stability_strategies,
-                cost_model,
-                args.capital,
-                train_days=args.train_days,
-                test_days=args.test_days,
-                step_days=args.step_days,
-                holdout_days=args.holdout_days,
-            )
+                stability = evaluate_parameter_stability(
+                    bars_by_symbol,
+                    stability_strategies,
+                    cost_model,
+                    args.capital,
+                    train_days=args.train_days,
+                    test_days=args.test_days,
+                    step_days=args.step_days,
+                    holdout_days=args.holdout_days,
+                    entry_fill_model=entry_fill_model,
+                )
 
             def result_report(result):
                 return {
