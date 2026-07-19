@@ -229,4 +229,4 @@ improvement is large enough to justify the additional turnover.
 
 For the most recent live-aligned calibration run, including the `core_parameters`
 report shape and the 2026-07-18 conclusions, see
-[live-backtest-alignment-2026-07-18.md](live-backtest-alignment-2026-07-18.md).
+[live-backtest-alignment-2026-07-18.md](backtest/live-backtest-alignment-2026-07-18.md).

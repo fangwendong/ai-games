@@ -173,7 +173,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     review_log.add_argument(
         "--doc-path",
-        default="docs/live-strategy-review-log.md",
+        default="docs/live/live-strategy-review-log.md",
         help="target markdown review log",
     )
     review_log.add_argument(

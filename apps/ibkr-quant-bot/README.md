@@ -69,40 +69,40 @@ ibkr-bot doctor
 
 For a logged-in live IB Gateway, the common API port is `4001`. Keep `IBKR_READONLY=true` for balance, position, and quote checks:
 
-The local IBC startup and login process is documented in [docs/ibc-gateway-startup.md](docs/ibc-gateway-startup.md).
+The local IBC startup and login process is documented in [docs/live/ibc-gateway-startup.md](docs/live/ibc-gateway-startup.md).
 The canonical route to every bot runbook and research note is the
 [documentation index](docs/README.md). Server resource, botmux, Gateway
 heartbeat, cache-process, alert-threshold, and report-format maintenance is in
-[the health-monitor runbook](docs/server-health-monitor.md).
+[the health-monitor runbook](docs/live/server-health-monitor.md).
 The scheduled process, port, and authenticated API health checks are documented
-in [docs/ibkr-api-heartbeat.md](docs/ibkr-api-heartbeat.md).
+in [docs/live/ibkr-api-heartbeat.md](docs/live/ibkr-api-heartbeat.md).
 The standalone bounded SMART subscription process, atomic quote cache, health
 checks, restart procedure, latency fields, and reboot recovery are documented
-in [docs/ibkr-live-quote-cache.md](docs/ibkr-live-quote-cache.md).
+in [docs/live/ibkr-live-quote-cache.md](docs/live/ibkr-live-quote-cache.md).
 The separate read-only current-session calendar and completed 5-minute bar
 cache, including its direct-query fallback and maintenance procedure, is
 documented in
-[docs/ibkr-live-context-cache.md](docs/ibkr-live-context-cache.md).
+[docs/live/ibkr-live-context-cache.md](docs/live/ibkr-live-context-cache.md).
 If quotes unexpectedly fall back to delayed data or the live strategy reports
 that live quotes are unavailable, use
-[docs/ibkr-market-data-troubleshooting.md](docs/ibkr-market-data-troubleshooting.md).
+[docs/live/ibkr-market-data-troubleshooting.md](docs/live/ibkr-market-data-troubleshooting.md).
 That runbook also documents how to enable real-time market data in IBKR Client
 Portal and the required Market Data API acknowledgement.
 
 All worktrees should reuse the data-disk historical cache documented in
-[docs/historical-market-data.md](docs/historical-market-data.md). It includes
+[docs/data/historical-market-data.md](docs/data/historical-market-data.md). It includes
 the canonical path plus download, read, completeness-audit, and daily refresh
 commands.
 
 The isolated long gap-down/VWAP recovery experiment and its same-period
 comparison with live v2 are documented in
-[docs/gap-reversion-research.md](docs/gap-reversion-research.md).
+[docs/research/gap-reversion-research.md](docs/research/gap-reversion-research.md).
 The research-only **GapGuard Fusion v1** causal state machine is documented in
-[docs/hybrid-state-research.md](docs/hybrid-state-research.md).
+[docs/research/hybrid-state-research.md](docs/research/hybrid-state-research.md).
 
 Sanitized live fills, no-trade sessions, exit paths, and replay reconciliation
 are maintained in the append-only
-[live strategy review log](docs/live-strategy-review-log.md). Do not commit raw
+[live strategy review log](docs/live/live-strategy-review-log.md). Do not commit raw
 IBKR runtime journals; they contain private broker metadata.
 
 ```bash
@@ -269,7 +269,7 @@ In live trading mode, the intraday scanners refuse delayed market data:
   a known position unprotected.
 
 The market data troubleshooting runbook is
-[docs/ibkr-market-data-troubleshooting.md](docs/ibkr-market-data-troubleshooting.md).
+[docs/live/ibkr-market-data-troubleshooting.md](docs/live/ibkr-market-data-troubleshooting.md).
 It documents the previous failure mode where subscriptions were enabled but
 the active Gateway session still needed a restart and fresh 2FA before live
 quotes worked.
@@ -317,12 +317,12 @@ opening new positions at 13:30 America/New_York; positions already open keep
 their normal stop, take-profit, profit-lock, reversal, and session-close exits.
 The explicit `rotation-hysteresis-v1` profile and its `rotation-hysteresis`
 compatibility alias remain available for rollback. See
-[docs/strategy-baseline-v2.md](docs/strategy-baseline-v2.md).
+[docs/strategy/strategy-baseline-v2.md](docs/strategy/strategy-baseline-v2.md).
 
 The isolated `rotation-range-gated-v1` research profile keeps all V2 behavior
 and requires the QQQ completed-bar intraday range to reach 0.75% before a new
 entry. It is opt-in and does not change the default or live profile. See
-[docs/strategy-range-gated-v1.md](docs/strategy-range-gated-v1.md).
+[docs/strategy/strategy-range-gated-v1.md](docs/strategy/strategy-range-gated-v1.md).
 
 In the 2025-07-10 through 2026-07-09 research run,
 28 candidates were compared on 209 development sessions before opening a final
@@ -363,12 +363,12 @@ use the 30-second cache as the default fill proxy. Keep the 1-minute cache as a
 diagnostic / compatibility path only.
 
 The tuning workflow used for this branch is documented in
-[docs/backtest-parameter-tuning.md](docs/backtest-parameter-tuning.md).
+[docs/backtest/backtest-parameter-tuning.md](docs/backtest/backtest-parameter-tuning.md).
 The latest live-aligned calibration run and its conclusions are documented in
-[docs/live-backtest-alignment-2026-07-18.md](docs/live-backtest-alignment-2026-07-18.md).
+[docs/backtest/live-backtest-alignment-2026-07-18.md](docs/backtest/live-backtest-alignment-2026-07-18.md).
 The versioned parameters and change-control rules are documented in
-[docs/strategy-baseline-v2.md](docs/strategy-baseline-v2.md), with the frozen
-rollback baseline in [docs/strategy-baseline-v1.md](docs/strategy-baseline-v1.md).
+[docs/strategy/strategy-baseline-v2.md](docs/strategy/strategy-baseline-v2.md), with the frozen
+rollback baseline in [docs/strategy/strategy-baseline-v1.md](docs/strategy/strategy-baseline-v1.md).
 
 ### Historical Data Cache
 
@@ -500,7 +500,7 @@ keep the leveraged ETF confined to execution.
   end-of-day scheduling in the target paper account before enabling production.
 - Add external alerting for disconnects, rejected orders, partial fills, and stale data.
 - Run the bot under a process manager only after it can recover cleanly from TWS or Gateway restarts.
-- For this host's IBC/Gateway keepalive setup, daily restart, Sunday cold restart, and 2FA retry notes, see [docs/ibc-gateway-startup.md](docs/ibc-gateway-startup.md).
+- For this host's IBC/Gateway keepalive setup, daily restart, Sunday cold restart, and 2FA retry notes, see [docs/live/ibc-gateway-startup.md](docs/live/ibc-gateway-startup.md).
 
 ## Tests
 
