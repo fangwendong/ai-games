@@ -27,6 +27,18 @@ The only comparison that is meaningful for this branch is:
 If any one of those changes, the result is no longer a direct live-vs-backtest
 comparison. It becomes a different research experiment.
 
+For warm-up sensitivity checks, the backtest CLI can now run the frozen live
+baseline against a second `min_bars` value with:
+
+```bash
+PYTHONPATH=src python -m ibkr_quant_bot.cli backtest-momentum \
+  --profile rotation-hysteresis-v2 \
+  --compare-min-bars 34
+```
+
+That comparison keeps the live contract unchanged and only changes the warm-up
+threshold in the research run.
+
 ## Main Non-Reconciliation Sources
 
 ### 1. Exit handling is still more complex in live than in backtest

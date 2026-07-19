@@ -691,15 +691,36 @@ class LiveDataGuardsTest(unittest.TestCase):
         self.assertIn("slow_ema", decision.meta)
 
     def test_mandatory_flatten_does_not_require_signal_market_data(self) -> None:
+        trade = SimpleNamespace(
+            order=SimpleNamespace(
+                orderRef="momentum-2026-07-16-SOXL-eod-exit",
+                action="SELL",
+                totalQuantity=5,
+                orderType="MKT",
+                tif="DAY",
+            ),
+            orderStatus=SimpleNamespace(
+                status="Filled",
+                filled=5,
+                remaining=0,
+                avgFillPrice=101.25,
+            ),
+            fills=[],
+            log=[],
+        )
+
         class FlattenBroker:
             def __init__(self):
                 self.placed = []
+                self.position_qty = 5
 
             def positions(self):
+                if self.position_qty <= 0:
+                    return []
                 return [
                     {
                         "symbol": "SOXL",
-                        "position": "5",
+                        "position": str(self.position_qty),
                         "avgCost": "100",
                     }
                 ]
@@ -712,7 +733,11 @@ class LiveDataGuardsTest(unittest.TestCase):
 
             def place_order(self, request):
                 self.placed.append(request)
-                return SimpleNamespace()
+                return trade
+
+            def wait_for_trade_update(self, active_trade, timeout_seconds):
+                self.position_qty = 0
+                return active_trade
 
         broker = FlattenBroker()
         settings = Settings(readonly=False, dry_run=False, trading_mode="paper")

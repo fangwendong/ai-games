@@ -241,6 +241,9 @@ In live trading mode, the intraday scanners refuse delayed market data:
 - The scanner stops entering and liquidates positions during the final
   `IBKR_FLATTEN_BEFORE_CLOSE_MINUTES=10` minutes. Run the command on a schedule
   that includes this window; no software can flatten a position if it is not running.
+- A separate `eod-flatten-protect` command exists for the end-of-day flatten
+  safeguard. It uses its own runtime lock, rechecks the strategy scope, and
+  refuses to report success while any strategy position remains open.
 - The mandatory flatten path runs before signal-bar and quote loading. A stale
   or incomplete three-symbol signal group therefore cannot prevent a known
   strategy position from reaching the reduce-only end-of-day exit path.
@@ -478,7 +481,10 @@ The current live checkout sets `IBKR_MAX_RISK_PER_TRADE=120`; the committed
 Filled entries receive broker-hosted GTC stop/take OCA orders. On restart, the
 scanner queries active and completed IBKR orders by deterministic order ref,
 rebuilds missing protection for an open position, and refuses duplicate entry
-tasks. Order snapshots distinguish active, partial, filled, cancelled, and
+tasks. The backtest command also supports `--compare-min-bars 34` so the
+warm-up candidate can be compared against the frozen live baseline without
+changing the live profile.
+Order snapshots distinguish active, partial, filled, cancelled, and
 rejected/inactive states.
 
 The daily-entry state file is published with an atomic replacement. The live

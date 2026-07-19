@@ -15,9 +15,11 @@ from zoneinfo import ZoneInfo
 from .broker import BrokerError, IbkrBroker, format_table
 from .backtest import (
     BacktestCostModel,
+    compare_backtest_results,
     evaluate_fixed_strategy_walk_forward,
     evaluate_parameter_stability,
     validate_historical_bar_coverage,
+    summarize_backtest_result,
 )
 from .config import Settings, load_settings
 from .historical_cache import (
@@ -284,6 +286,23 @@ def _build_parser() -> argparse.ArgumentParser:
         help="allow entries without the close being above VWAP",
     )
 
+    flatten = subparsers.add_parser(
+        "eod-flatten-protect",
+        help="run the end-of-day reduce-only flatten safeguard independently of the main poll",
+    )
+    flatten.add_argument(
+        "--profile",
+        choices=MOMENTUM_PROFILE_CHOICES,
+        default=DEFAULT_MOMENTUM_PROFILE,
+        help="strategy preset used to resolve the traded symbols",
+    )
+    flatten.add_argument(
+        "--benchmark-symbol",
+        type=str,
+        default="QQQ",
+        help="market regime benchmark symbol used to resolve the market session",
+    )
+
     backtest = subparsers.add_parser(
         "backtest-momentum",
         help="backtest the intraday momentum rotation rule with transaction costs",
@@ -354,6 +373,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     backtest.add_argument(
         "--min-bars", type=int, default=30, help="minimum bars required before trading"
+    )
+    backtest.add_argument(
+        "--compare-min-bars",
+        type=int,
+        default=None,
+        help="optionally rerun the same backtest with a second min_bars value for comparison",
     )
     backtest.add_argument(
         "--stop-loss-pct", type=float, default=0.008, help="stop loss percentage"
@@ -795,6 +820,10 @@ def _orders_state_path(settings: Settings, now: datetime | None = None) -> Path:
 def _strategy_runtime_lock_path(settings: Settings, profile: str) -> Path:
     del profile  # All intraday profiles share symbols, positions, and order state.
     return Path(settings.state_dir).expanduser() / "intraday-momentum.run.lock"
+
+
+def _flatten_runtime_lock_path(settings: Settings) -> Path:
+    return Path(settings.state_dir).expanduser() / "eod-flatten-protect.run.lock"
 
 
 def _live_quote_cache_path(settings: Settings) -> Path:
@@ -1746,6 +1775,44 @@ def _submit_and_confirm_entry_protection(
     return stop_price, take_price
 
 
+def _submit_and_confirm_reduce_only_exit(
+    broker: IbkrBroker,
+    settings: Settings,
+    request: TradeRequest,
+    reason: str,
+    *,
+    fill_wait_seconds: float,
+) -> object | None:
+    exit_trade = _submit_or_print(broker, settings, request, reason)
+    if (
+        exit_trade is None
+        or settings.readonly
+        or settings.dry_run
+    ):
+        return exit_trade
+    broker.wait_for_trade_update(exit_trade, fill_wait_seconds)
+    _record_order_state(settings, request, exit_trade)
+    filled = _trade_filled_quantity(exit_trade)
+    remaining = _trade_remaining_quantity(exit_trade)
+    if filled <= 0:
+        if remaining > 0:
+            broker.cancel_order(exit_trade)
+            _record_order_state(settings, request, exit_trade)
+        raise BrokerError(
+            f"reduce-only exit for {request.symbol} was not filled"
+        )
+    if remaining > 0:
+        broker.cancel_order(exit_trade)
+        _record_order_state(settings, request, exit_trade)
+        filled = _trade_filled_quantity(exit_trade)
+        remaining = _trade_remaining_quantity(exit_trade)
+    if remaining > 0:
+        raise BrokerError(
+            f"reduce-only exit cancellation unresolved for {request.symbol}"
+        )
+    return exit_trade
+
+
 def _ensure_positions_protected_before_market_data(
     broker: IbkrBroker,
     settings: Settings,
@@ -1827,6 +1894,13 @@ def _flatten_strategy_positions_if_due(
             order_ref=f"momentum-{now.date()}-{symbol}-eod-exit",
             reduce_only=True,
         )
+        pending_sell_quantity = broker.active_order_quantity(symbol, "SELL")
+        if pending_sell_quantity >= quantity:
+            print(
+                f"mandatory end-of-day flatten already active for {symbol}; "
+                "no duplicate exit"
+            )
+            continue
         risk_settings = replace(
             settings,
             allowed_symbols=strategy.symbols,
@@ -1836,16 +1910,30 @@ def _flatten_strategy_positions_if_due(
             request,
             0.0,
             position_quantity=float(position_row["position"]),
-            pending_sell_quantity=broker.active_order_quantity(symbol, "SELL"),
+            pending_sell_quantity=pending_sell_quantity,
         )
         print(risk_decision.reason)
-        if risk_decision.allowed:
-            _submit_or_print(
-                broker,
-                settings,
-                request,
-                f"mandatory end-of-day flatten: {symbol} qty={quantity}",
+        if not risk_decision.allowed:
+            raise BrokerError(
+                f"mandatory end-of-day flatten risk check rejected {symbol}: "
+                f"{risk_decision.reason}"
             )
+        exit_trade = _submit_and_confirm_reduce_only_exit(
+            broker,
+            settings,
+            request,
+            f"mandatory end-of-day flatten: {symbol} qty={quantity}",
+            fill_wait_seconds=settings.entry_order_fill_wait_seconds,
+        )
+        if exit_trade is not None and not settings.readonly and not settings.dry_run:
+            remaining_positions = _parse_position_rows(
+                broker.positions(), strategy.symbols
+            )
+            if symbol in remaining_positions:
+                raise BrokerError(
+                    f"mandatory end-of-day flatten incomplete for {symbol}: "
+                    f"remaining position {remaining_positions[symbol]['position']}"
+                )
     return True
 
 
@@ -2185,6 +2273,20 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 f"intraday momentum skipped: another {args.profile} run is active"
             )
+            return 0
+        strategy_run_deadline = arm_runtime_lock_deadline(
+            strategy_run_lock, INTRADAY_MOMENTUM_RUNTIME_TIMEOUT_SECONDS
+        )
+        settings = replace(
+            settings,
+            request_timeout=INTRADAY_MOMENTUM_REMOTE_REQUEST_TIMEOUT_SECONDS,
+        )
+    elif args.command == "eod-flatten-protect":
+        lock_path = _flatten_runtime_lock_path(settings)
+        try:
+            strategy_run_lock = acquire_runtime_lock(lock_path)
+        except RuntimeLockError:
+            print("eod flatten protection skipped: another run is active")
             return 0
         strategy_run_deadline = arm_runtime_lock_deadline(
             strategy_run_lock, INTRADAY_MOMENTUM_RUNTIME_TIMEOUT_SECONDS
@@ -2943,6 +3045,40 @@ def main(argv: list[str] | None = None) -> int:
                         print(f"entry_order_result={fill_result}")
             return 0
 
+        if args.command == "eod-flatten-protect":
+            strategy = _build_momentum_strategy(args, settings)
+            now = datetime.now(NEW_YORK)
+            session = _cached_or_broker_market_session(
+                broker, settings, strategy.benchmark_symbol, now
+            )
+            if session is None:
+                print("exchange holiday: skipping eod-flatten-protect")
+                return 0
+            if not _should_flatten(settings, now, session):
+                print("outside flatten window: no action")
+                return 0
+            handled = _flatten_strategy_positions_if_due(
+                broker, settings, strategy, now, session
+            )
+            current_positions = _parse_position_rows(
+                broker.positions(), strategy.symbols
+            )
+            _validate_strategy_positions(current_positions)
+            if current_positions:
+                raise BrokerError(
+                    "end-of-day flatten protection incomplete; remaining positions: "
+                    + ", ".join(
+                        f"{symbol}={row['position']}"
+                        for symbol, row in sorted(current_positions.items())
+                    )
+                )
+            print(
+                "end-of-day flatten protection complete"
+                if handled
+                else "end-of-day flatten protection skipped"
+            )
+            return 0
+
         if args.command == "backtest-momentum":
             strategy = _build_momentum_strategy(args, settings)
             cost_model = BacktestCostModel(
@@ -3238,32 +3374,20 @@ def main(argv: list[str] | None = None) -> int:
                 fill_bars_by_symbol=fill_bars_by_symbol,
             )
 
-            def result_report(result):
-                return {
-                    "gross_return_pct": round(result.gross_return_pct, 2),
-                    "net_return_pct": round(result.net_return_pct, 2),
-                    "trade_count": result.trade_count,
-                    "win_count": result.win_count,
-                    "loss_count": result.loss_count,
-                    "commission_paid": round(result.total_commission, 2),
-                    "spread_cost": round(result.total_spread_cost, 2),
-                    "slippage_cost": round(result.total_slippage_cost, 2),
-                }
-
             report["walk_forward_folds"] = [
                 {
                     "train_start": fold.train_start.isoformat(),
                     "train_end": fold.train_end.isoformat(),
                     "test_start": fold.test_start.isoformat(),
                     "test_end": fold.test_end.isoformat(),
-                    **result_report(fold.result),
+                    **summarize_backtest_result(fold.result),
                 }
                 for fold in evaluation.folds
             ]
             report["final_holdout"] = {
                 "start": evaluation.holdout_start.isoformat(),
                 "end": evaluation.holdout_end.isoformat(),
-                **result_report(evaluation.holdout),
+                **summarize_backtest_result(evaluation.holdout),
             }
             report["parameter_stability"] = {
                 "holdout_accessed": False,
@@ -3283,6 +3407,46 @@ def main(argv: list[str] | None = None) -> int:
                     for item in stability
                 ],
             }
+            if args.compare_min_bars is not None:
+                compare_strategy = replace(
+                    strategy, min_bars=args.compare_min_bars
+                )
+                compare_evaluation = evaluate_fixed_strategy_walk_forward(
+                    bars_by_symbol,
+                    compare_strategy,
+                    cost_model,
+                    args.capital,
+                    train_days=args.train_days,
+                    test_days=args.test_days,
+                    step_days=args.step_days,
+                    holdout_days=args.holdout_days,
+                    entry_fill_model=entry_fill_model,
+                    fill_bars_by_symbol=fill_bars_by_symbol,
+                )
+                report["warmup_comparison"] = {
+                    "baseline_min_bars": getattr(strategy, "min_bars", None),
+                    "candidate_min_bars": args.compare_min_bars,
+                    "baseline_holdout": summarize_backtest_result(
+                        evaluation.holdout
+                    ),
+                    "candidate_holdout": summarize_backtest_result(
+                        compare_evaluation.holdout
+                    ),
+                    "baseline_folds": [
+                        summarize_backtest_result(fold.result)
+                        for fold in evaluation.folds
+                    ],
+                    "candidate_folds": [
+                        summarize_backtest_result(fold.result)
+                        for fold in compare_evaluation.folds
+                    ],
+                    "delta_holdout": compare_backtest_results(
+                        evaluation.holdout,
+                        compare_evaluation.holdout,
+                        baseline_min_bars=getattr(strategy, "min_bars", None),
+                        candidate_min_bars=args.compare_min_bars,
+                    )["delta"],
+                }
             print(json.dumps(report, indent=2, sort_keys=True))
             return 0
     except (BrokerError, ConnectionError, TimeoutError, OSError) as exc:

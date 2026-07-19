@@ -118,6 +118,14 @@ for 15:50-15:59 ET. It should reconcile tracked positions and active sells,
 submit only reduce-only exits, verify the result, and alert rather than depend
 on signal bars.
 
+Implemented follow-up:
+
+- `eod-flatten-protect` now exists as a dedicated CLI task that reuses the
+  same strategy scope, submits reduce-only exits, waits for fill or cancel
+  acknowledgement, and refuses to report success while positions remain. It
+  uses its own runtime lock so the safeguard can still run even if the main
+  intraday poll is wedged.
+
 ## Recommended Repair Order
 
 1. Bar timeline alignment and direct SMART fallback.
@@ -126,6 +134,10 @@ on signal bars.
 4. Corrupt state fail-closed handling.
 5. Backtest the 34-bar warm-up candidate before any strategy change.
 6. Add the independent end-of-day flatten protection task.
+
+The backtest CLI now supports `--compare-min-bars 34` so the 34-bar warm-up
+candidate can be compared against the frozen live baseline without changing
+the live profile itself.
 
 ## Change-Control Boundary
 
