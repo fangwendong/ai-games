@@ -218,10 +218,12 @@ just because the project launches.
 
 Path: `skills/`
 
-The current reusable skill is:
+The current reusable skills are:
 
 - `skills/godot-game-prototyper/`: guidance for building polished Godot 4 game
   prototypes.
+- `skills/ibkr-quant-bot-backtest-parity/`: live-aligned IBKR backtest fill
+  parity, canonical cache routing, and report-contract guidance.
 
 When a project creates a reusable workflow, checklist, Godot pattern, tuning
 method, or playtest rubric, extract it into `skills/` instead of leaving it

@@ -28,6 +28,20 @@ or all ARCA. Do not mix symbols or switch bar sources after the session source
 has been pinned. Live bid/ask/last used for execution always remains SMART; an
 ARCA bar fallback never changes the quote source or order route.
 
+## Current Fill Policy For V2 Comparisons
+
+The live-aligned `rotation-hysteresis-v2` comparison path uses:
+
+- 5-minute bars for signal generation
+- 30-second bars for fill pricing and protective-exit approximation
+- 1-minute bars only for diagnostics, sensitivity checks, or legacy
+  comparisons
+
+Keep signal bars and fill bars in separate cache roots. Do not mix 30-second
+and 1-minute fill data in the same result set. `QQQ` does not need a 1-minute
+cache for signal logic; the 1-minute cache is only useful when you want to
+study fill-resolution effects.
+
 Each cache root contains `market-data-source.json`. `refresh-history` records
 the selected source, refuses to merge another source into that directory, and
 `backtest-momentum --reuse-data` fails closed when `--market-data-exchange`
@@ -210,8 +224,8 @@ PYTHONPATH=src python -m ibkr_quant_bot.cli backtest-momentum \
   --data-dir /home/fwd/data/ibkr-quant-bot/historical/5-min-rth-arca
 ```
 
-When you want 5-minute signal logic but finer-grain fill pricing, keep the
-signal cache on 5-minute bars and point the fill cache at the minute cache:
+When you want 5-minute signal logic but live-aligned fill pricing, keep the
+signal cache on 5-minute bars and point the fill cache at the 30-second cache:
 
 ```bash
 PYTHONPATH=src python -m ibkr_quant_bot.cli backtest-momentum \
@@ -219,15 +233,15 @@ PYTHONPATH=src python -m ibkr_quant_bot.cli backtest-momentum \
   --duration "6 M" \
   --reuse-data \
   --bar-size "5 mins" \
-  --fill-bar-size "1 min" \
-  --fill-data-dir /home/fwd/data/ibkr-quant-bot/historical/1-min-rth \
+  --fill-bar-size "30 secs" \
+  --fill-data-dir /home/fwd/data/ibkr-quant-bot/historical/30-sec-rth \
   --market-data-exchange SMART \
   --data-dir /home/fwd/data/ibkr-quant-bot/historical/5-min-rth
 ```
 
-The same split applies to 30-second fills if that cache is available. Keep
-signal bars and fill bars in separate directories; do not mix sizes inside one
-cache root.
+If you are explicitly studying fill-resolution sensitivity, repeat the same
+run with `--fill-bar-size "1 min"` and the 1-minute cache. Keep signal bars and
+fill bars in separate directories; do not mix sizes inside one cache root.
 
 ## Confirm Completeness
 

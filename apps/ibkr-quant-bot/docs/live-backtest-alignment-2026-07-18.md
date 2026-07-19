@@ -83,6 +83,11 @@ The same setup was also checked with the lower live-tradable cash snapshot
 `1494.41 USD` to confirm that the strategy logic, not the current cash level,
 was the primary driver of the signal cadence.
 
+After the fill-resolution comparison settled, the default live-aligned fill
+proxy moved to 30-second bars. The 1-minute fill cache remains useful for
+diagnostics, but 30-second fill is the baseline for future live-vs-backtest
+comparisons.
+
 ## Results
 
 | Case | Final holdout net return | Trade count | Win / loss | Notes |
@@ -111,10 +116,12 @@ The parameter-sensitivity check remained positive across the three variants:
   live-aligned assumptions.
 - Higher starting capital changes dollar PnL more than it changes trade cadence;
   the entry/exit logic is still the dominant factor.
+- For the current strategy, 30-second fill bars are the recommended default
+  when comparing backtest behavior against live execution. Use 1-minute fill
+  only when you want a coarse sensitivity check.
 
 ## Related docs
 
 - [Backtest parameter tuning](backtest-parameter-tuning.md)
 - [Strategy baseline v2](strategy-baseline-v2.md)
 - [Live strategy review log](live-strategy-review-log.md)
-

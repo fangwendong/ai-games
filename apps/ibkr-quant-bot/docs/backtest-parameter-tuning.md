@@ -27,6 +27,8 @@ The current contract is:
 - `max_risk_per_trade=120`
 - `min_bars=30`
 - `entry_fill_model=profile-default` (resolved to `open-pullback` for v2)
+- `fill_bar_size=30 secs`
+- `fill_data_dir=/home/fwd/data/ibkr-quant-bot/historical/30-sec-rth`
 - `commission_per_order=1`
 - `slippage_bps=1`
 - `spread_bps=1`
@@ -35,6 +37,10 @@ The current contract is:
 
 If any of those drift, the run is not a strict live comparison. Label it as a
 research variant and do not compare it directly against live execution.
+
+For the current v2 tuning path, use 30-second fill bars as the default
+execution proxy. Keep the 1-minute fill cache only for diagnostics and
+comparison runs. Use 5-minute bars for signal logic only.
 
 The backtest command supports cached daily bars so the same input can be reused
 without reconnecting to IBKR:

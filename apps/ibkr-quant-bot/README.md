@@ -353,11 +353,14 @@ The shared public cache keeps one source/bar-size pair per directory. For the
 current v2 comparison path, the recommended layouts are:
 
 - `/home/fwd/data/ibkr-quant-bot/historical/5-min-rth`
-- `/home/fwd/data/ibkr-quant-bot/historical/1-min-rth`
 - `/home/fwd/data/ibkr-quant-bot/historical/30-sec-rth`
+- `/home/fwd/data/ibkr-quant-bot/historical/1-min-rth`
 
-Use the same bar size for `refresh-history`, `backtest-momentum`, and the audit
-step so the cache, validation, and result comparison stay aligned.
+Use the same signal bar size for `refresh-history`, `backtest-momentum`, and
+the audit step so the cache, validation, and result comparison stay aligned.
+For the current v2 comparison path, keep the signal cache on 5-minute bars and
+use the 30-second cache as the default fill proxy. Keep the 1-minute cache as a
+diagnostic / compatibility path only.
 
 The tuning workflow used for this branch is documented in
 [docs/backtest-parameter-tuning.md](docs/backtest-parameter-tuning.md).
