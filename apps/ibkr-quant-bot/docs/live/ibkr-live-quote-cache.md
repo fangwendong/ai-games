@@ -5,7 +5,7 @@ rotation strategy. The process maintains a bounded local cache for QQQ, SOXL,
 and SOXS. It is market-data-only and must never run with trading permission.
 
 The session-calendar and completed-bar producer is a separate process; see
-[ibkr-live-context-cache.md](live/ibkr-live-context-cache.md). Keeping the two
+[ibkr-live-context-cache.md](ibkr-live-context-cache.md). Keeping the two
 services separate prevents a historical-data refresh from blocking the
 real-time quote event loop.
 
@@ -269,6 +269,6 @@ sample counts remain capped.
 
 Related runbooks:
 
-- [Market-data troubleshooting](live/ibkr-market-data-troubleshooting.md)
-- [IBKR API heartbeat](live/ibkr-api-heartbeat.md)
-- [IBC Gateway startup](live/ibc-gateway-startup.md)
+- [Market-data troubleshooting](ibkr-market-data-troubleshooting.md)
+- [IBKR API heartbeat](ibkr-api-heartbeat.md)
+- [IBC Gateway startup](ibc-gateway-startup.md)

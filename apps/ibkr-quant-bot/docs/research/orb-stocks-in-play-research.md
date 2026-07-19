@@ -22,7 +22,7 @@ cost model. It has no order-submission command and no runtime state directory.
 All worktrees share the canonical data-disk cache at
 `/home/fwd/data/ibkr-quant-bot/historical/5-min-rth`. Download, read, audit,
 and incremental-refresh procedures are documented in
-[historical-market-data.md](data/historical-market-data.md). Generated cache files
+[historical-market-data.md](../data/historical-market-data.md). Generated cache files
 are ignored by Git.
 
 Use a read-only, dry-run Gateway connection. Keep the fetch single-worker and

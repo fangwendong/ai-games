@@ -43,6 +43,10 @@ run commands and validation path.
   git.
 - Route repository-wide documents through `docs/README.md`; keep subproject
   document indexes linked from the corresponding section in this file.
+- For `apps/ibkr-quant-bot/docs/`, start at `docs/README.md`, then use the
+  subdirectory indexes in `docs/live/`, `docs/data/`, `docs/backtest/`,
+  `docs/strategy/`, and `docs/research/` before drilling into individual
+  files.
 - Default to ASCII in repo files unless an existing file intentionally uses
   another character set.
 

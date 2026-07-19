@@ -6,6 +6,8 @@ Start here after reading the repository `AGENTS.md` and the application
 
 ## Live Operations
 
+- [Live Operations index](live/README.md): directory map for operational
+  runbooks, caches, and live-session notes.
 - [Server, botmux, and IBKR health monitor](live/server-health-monitor.md): scope,
   thresholds, protected tasks, report format, false-positive handling, and the
   safe schedule replacement procedure.
@@ -29,6 +31,8 @@ Start here after reading the repository `AGENTS.md` and the application
 
 ## Historical Data And Backtesting
 
+- [Historical Data And Backtesting index](data/README.md): directory map for
+  shared cache and backtest calibration notes.
 - [Shared historical market data](data/historical-market-data.md): canonical data-disk
   paths, download, reading, completeness audit, and recent-data refresh.
 - [Backtest parameter tuning](backtest/backtest-parameter-tuning.md): frozen parameters,
@@ -45,6 +49,10 @@ Start here after reading the repository `AGENTS.md` and the application
 
 ## Isolated Research
 
+- [Strategy index](strategy/README.md): frozen strategy contracts and rollback
+  baselines.
+- [Research index](research/README.md): isolated experiments and non-default
+  candidate notes.
 - [Rotation range-gated V1](strategy/strategy-range-gated-v1.md): isolated V2-derived
   candidate that gates new entries on completed-bar QQQ intraday range.
 - [Gap reversion research](research/gap-reversion-research.md): isolated gap-down/VWAP

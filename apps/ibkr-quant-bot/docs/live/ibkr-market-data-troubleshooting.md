@@ -316,7 +316,7 @@ or delayed. For live trading, both quote availability and bar freshness matter.
 ### Standalone Bounded Live Quote Cache
 
 For process lifecycle, health checks, upgrades, latency inspection, and reboot
-recovery, use the [live quote cache runbook](live/ibkr-live-quote-cache.md). The
+recovery, use the [live quote cache runbook](ibkr-live-quote-cache.md). The
 behavior summary below explains how this cache participates in live
 market-data safety.
 
@@ -375,7 +375,7 @@ the complete SMART quote group or both candidate bar groups fail validation,
 the strategy fails closed and does not submit an order.
 
 Backtests used to approve this behavior must generate signals from a cache
-carrying the same bar-source metadata. See `docs/data/historical-market-data.md`;
+carrying the same bar-source metadata. See `../data/historical-market-data.md`;
 do not compare an ARCA-bar live decision with a SMART-bar historical result.
 
 ## Code Paths To Inspect

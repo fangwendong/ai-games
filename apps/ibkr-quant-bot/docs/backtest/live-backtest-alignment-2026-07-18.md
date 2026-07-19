@@ -122,6 +122,6 @@ The parameter-sensitivity check remained positive across the three variants:
 
 ## Related docs
 
-- [Backtest parameter tuning](backtest/backtest-parameter-tuning.md)
-- [Strategy baseline v2](strategy/strategy-baseline-v2.md)
-- [Live strategy review log](live/live-strategy-review-log.md)
+- [Backtest parameter tuning](backtest-parameter-tuning.md)
+- [Strategy baseline v2](../strategy/strategy-baseline-v2.md)
+- [Live strategy review log](../live/live-strategy-review-log.md)

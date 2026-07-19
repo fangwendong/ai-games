@@ -120,7 +120,7 @@ heartbeat exits because the original lock appears to remain held.
 The canonical watchdog script is tracked at
 `scripts/ibkr-gateway-watchdog` and installed to
 `/home/fwd/.local/bin/ibkr-gateway-watchdog`.
-See [ibkr-api-heartbeat.md](live/ibkr-api-heartbeat.md) for the success stamp,
+See [ibkr-api-heartbeat.md](ibkr-api-heartbeat.md) for the success stamp,
 manual verification commands, bounded log retention, failure interpretation,
 and safety boundary.
 
@@ -334,7 +334,7 @@ Live quotes are unavailable even though subscriptions are enabled
 : Restart Gateway through IBC and complete a fresh IBKR Mobile 2FA approval,
   then force `IBKR_MARKET_DATA_TYPE=live` quote checks. The active Gateway
   session can be stale after subscription changes. See
-  [ibkr-market-data-troubleshooting.md](live/ibkr-market-data-troubleshooting.md).
+  [ibkr-market-data-troubleshooting.md](ibkr-market-data-troubleshooting.md).
 
 `INVALID_USERNAME_OR_BAD_IP` or `Authorization failed`
 
