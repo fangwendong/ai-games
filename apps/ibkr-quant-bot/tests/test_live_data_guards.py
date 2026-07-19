@@ -222,15 +222,15 @@ class LiveDataGuardsTest(unittest.TestCase):
         with TemporaryDirectory() as temporary:
             settings = Settings(
                 state_dir=temporary,
-                max_order_notional=4000,
                 entry_cash_reserve_usd=10,
             )
             available, summary = _tradable_capital_snapshot(settings, now)
 
-        self.assertEqual(3990, available)
+        self.assertEqual(4490, available)
         self.assertEqual("fallback", summary["status"])
-        self.assertEqual(3990, summary["usable_cash"])
-        self.assertEqual("configured_cap", summary["source"])
+        self.assertEqual(4490, summary["usable_cash"])
+        self.assertEqual("fixed_4500_cap", summary["source"])
+        self.assertEqual(4500, summary["strategy_capital_usd"])
 
     def test_tradable_capital_snapshot_rejects_invalid_cash_reserve(self) -> None:
         now = datetime(2026, 7, 17, 12, 1, tzinfo=NEW_YORK)

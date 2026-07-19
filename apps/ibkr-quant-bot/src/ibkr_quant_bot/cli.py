@@ -53,6 +53,7 @@ from .strategy import (
 NEW_YORK = ZoneInfo("America/New_York")
 LIVE_BAR_PUBLICATION_GRACE_SECONDS = 2.0
 DEFAULT_MOMENTUM_PROFILE = "rotation-hysteresis-v2"
+FIXED_LIVE_TRADABLE_CAPITAL_USD = 4500.0
 INTRADAY_MOMENTUM_RUNTIME_TIMEOUT_SECONDS = 60.0
 INTRADAY_MOMENTUM_REMOTE_REQUEST_TIMEOUT_SECONDS = 3.0
 FROZEN_ROTATION_HYSTERESIS_VERSION = "rotation-hysteresis-v1"
@@ -1506,9 +1507,10 @@ def _tradable_capital_snapshot(
         raise BrokerError("IBKR_ENTRY_CASH_RESERVE_USD must be finite and non-negative")
     summary: dict[str, object] = {
         "currency": "USD",
-        "sizing_basis": "min(TotalCashValue, AvailableFunds) - cash reserve",
+        "sizing_basis": "fixed strategy capital - cash reserve",
         "cash_reserve_usd": round(reserve, 2),
         "uses_margin_buying_power": False,
+        "strategy_capital_usd": FIXED_LIVE_TRADABLE_CAPITAL_USD,
     }
     try:
         available = load_fresh_cached_tradable_capital(
@@ -1518,13 +1520,13 @@ def _tradable_capital_snapshot(
             now=now,
         )
     except (MarketContextCacheError, OSError, ValueError) as exc:
-        fallback = max(0.0, settings.max_order_notional - reserve)
+        fallback = max(0.0, FIXED_LIVE_TRADABLE_CAPITAL_USD - reserve)
         return fallback, {
             **summary,
             "status": "fallback",
             "usable_cash": round(fallback, 2),
             "reason": type(exc).__name__,
-            "source": "configured_cap",
+            "source": "fixed_4500_cap",
         }
     usable = max(0.0, available - reserve)
     return usable, {
@@ -1533,6 +1535,7 @@ def _tradable_capital_snapshot(
         "usable_cash": round(usable, 2),
         "reason": None,
         "source": "live_context_cache",
+        "strategy_capital_usd": available,
     }
 
 
@@ -1987,9 +1990,7 @@ def _run_live_context_cache(settings: Settings, args: argparse.Namespace) -> int
                                 for symbol in symbols
                             }
                         last_bar_refresh_bucket = bar_refresh_bucket
-                    tradable_capital_usd = _available_cash_notional(
-                        broker.balance()
-                    )
+                    tradable_capital_usd = FIXED_LIVE_TRADABLE_CAPITAL_USD
                     write_market_context_cache(
                         cache_path,
                         session_date=now.date(),

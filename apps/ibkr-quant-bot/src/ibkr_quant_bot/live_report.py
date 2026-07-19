@@ -237,11 +237,12 @@ def format_live_report(
         lines.append(f"信号：{signal_text}｜后续：{future_order}")
         lines.append(f"原因：{reason}")
 
-    lines.extend(
+        lines.extend(
         [
             "",
             "【资金与运行】",
             (
+                f"策略本金：{_value(capital.get('strategy_capital_usd'))} USD｜"
                 f"可用现金：{_value(capital.get('usable_cash'))} USD｜"
                 f"预留：{_value(capital.get('cash_reserve_usd'))} USD"
             ),
