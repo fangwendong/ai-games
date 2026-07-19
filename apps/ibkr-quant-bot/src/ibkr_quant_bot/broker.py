@@ -68,6 +68,7 @@ class IbkrBroker:
 
     def __init__(self, settings: Settings):
         self.settings = settings
+        self._resolved_account_cache: str | None = None
         try:
             from ib_insync import IB, LimitOrder, MarketOrder, Stock, StopOrder  # type: ignore
         except ImportError as exc:
@@ -589,6 +590,7 @@ class IbkrBroker:
         return [row for row in self.account_summary() if row["tag"] in tags]
 
     def positions(self) -> list[dict[str, str]]:
+        account = self._strategy_account()
         return [
             {
                 "account": str(position.account),
@@ -600,7 +602,16 @@ class IbkrBroker:
                 "avgCost": str(position.avgCost),
             }
             for position in self._ib.positions()
+            if self._position_is_strategy_scope(position, account)
         ]
+
+    def _strategy_account(self) -> str:
+        cached = getattr(self, "_resolved_account_cache", None)
+        if cached:
+            return cached
+        account = self._resolved_trading_account()
+        self._resolved_account_cache = account
+        return account
 
     def _resolved_trading_account(self) -> str:
         accounts = [str(account) for account in self._ib.managedAccounts()]
@@ -635,30 +646,72 @@ class IbkrBroker:
             )
         return account
 
+    @staticmethod
+    def _trade_contract(trade: Any) -> Any:
+        return getattr(trade, "contract", None)
+
+    @staticmethod
+    def _trade_account(trade: Any) -> str:
+        account = getattr(trade, "account", None)
+        if account:
+            return str(account)
+        order = getattr(trade, "order", None)
+        return str(getattr(order, "account", "") or "")
+
     def position_quantity(self, symbol: str) -> float:
         symbol = symbol.upper()
-        account = self.settings.account
+        account = self._strategy_account()
         quantity = 0.0
         for position in self._ib.positions():
-            if str(position.contract.symbol).upper() != symbol:
+            if not self._position_is_strategy_scope(position, account):
                 continue
-            if account and str(position.account) != account:
+            if str(position.contract.symbol).upper() != symbol:
                 continue
             quantity += float(position.position)
         return quantity
+
+    @staticmethod
+    def _contract_is_strategy_scope(contract: Any) -> bool:
+        if contract is None:
+            return False
+        sec_type = str(getattr(contract, "secType", "") or "").upper()
+        currency = str(getattr(contract, "currency", "") or "").upper()
+        return sec_type == "STK" and currency == "USD"
+
+    def _position_is_strategy_scope(self, position: Any, account: str) -> bool:
+        if not self._contract_is_strategy_scope(getattr(position, "contract", None)):
+            return False
+        if str(getattr(position, "account", "") or "") != account:
+            return False
+        return True
+
+    def _trade_is_strategy_scope(self, trade: Any) -> bool:
+        contract = self._trade_contract(trade)
+        if not self._contract_is_strategy_scope(contract):
+            return False
+        account = self._trade_account(trade)
+        if not account:
+            return False
+        return account == self._strategy_account()
 
     def active_trades(self) -> list[Any]:
         requested = list(self._ib.reqAllOpenOrders())
         cached = list(self._ib.openTrades())
         trades: dict[tuple[object, object], Any] = {}
         for trade in [*requested, *cached]:
+            if not self._trade_is_strategy_scope(trade):
+                continue
             order = getattr(trade, "order", None)
             key = (getattr(order, "permId", None), getattr(order, "orderId", id(trade)))
             trades[key] = trade
         return list(trades.values())
 
     def completed_trades(self) -> list[Any]:
-        return list(self._ib.reqCompletedOrders(apiOnly=True))
+        return [
+            trade
+            for trade in self._ib.reqCompletedOrders(apiOnly=True)
+            if self._trade_is_strategy_scope(trade)
+        ]
 
     def order_ref_exists(self, order_ref: str) -> bool:
         for trade in [*self.active_trades(), *self.completed_trades()]:

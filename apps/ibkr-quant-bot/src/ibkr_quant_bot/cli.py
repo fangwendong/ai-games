@@ -723,6 +723,40 @@ def _require_latest_completed_bar_group(
             )
 
 
+def _require_identical_bar_timelines(
+    bars_by_symbol: dict[str, list[Bar]],
+    symbols: tuple[str, ...],
+) -> None:
+    """Fail closed when the strategy symbols do not share the same bar timeline."""
+
+    timelines: dict[str, list[datetime]] = {}
+    for symbol in symbols:
+        bars = bars_by_symbol.get(symbol, [])
+        if not bars:
+            raise BrokerError(f"missing bars for {symbol}")
+        timeline = [_normalize_bar_time(bar.time) for bar in bars]
+        for previous, current in zip(timeline, timeline[1:]):
+            if current <= previous:
+                raise BrokerError(
+                    f"non-monotonic bar timeline for {symbol}: "
+                    f"{previous.isoformat()} -> {current.isoformat()}"
+                )
+        if len(timeline) != len(set(timeline)):
+            raise BrokerError(f"duplicate bar timestamps for {symbol}")
+        timelines[symbol] = timeline
+
+    baseline_symbol = symbols[0]
+    baseline = timelines[baseline_symbol]
+    for symbol in symbols[1:]:
+        if timelines[symbol] != baseline:
+            raise BrokerError(
+                "bar timelines are not aligned across strategy symbols: "
+                f"{baseline_symbol}={baseline[-1].isoformat() if baseline else '[]'} "
+                f"vs {symbol}="
+                f"{timelines[symbol][-1].isoformat() if timelines[symbol] else '[]'}"
+            )
+
+
 def _strategy_quote(
     broker: IbkrBroker,
     settings: Settings,
@@ -955,12 +989,18 @@ def _load_entry_state(
         return {"entry_count": 0, "entries": []}
     try:
         data = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return {"entry_count": 0, "entries": []}
+    except OSError as exc:
+        raise BrokerError(f"unable to read entry state {path}: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise BrokerError(f"entry state is not valid JSON: {path}") from exc
     if not isinstance(data, dict):
-        return {"entry_count": 0, "entries": []}
-    data.setdefault("entry_count", 0)
-    data.setdefault("entries", [])
+        raise BrokerError(f"entry state is not a JSON object: {path}")
+    entry_count = data.get("entry_count")
+    entries = data.get("entries")
+    if not isinstance(entry_count, int) or entry_count < 0:
+        raise BrokerError(f"entry state has invalid entry_count: {path}")
+    if not isinstance(entries, list):
+        raise BrokerError(f"entry state has invalid entries list: {path}")
     return data
 
 
@@ -1125,6 +1165,7 @@ def _load_intraday_market_data(
                         )
                         for symbol in symbols
                     }
+                    _require_identical_bar_timelines(cached_bars, symbols)
                     _require_latest_completed_bar_group(
                         cached_bars,
                         symbols,
@@ -1156,6 +1197,7 @@ def _load_intraday_market_data(
                     )
                     for symbol in symbols
                 }
+                _require_identical_bar_timelines(bars_by_symbol, symbols)
                 _require_latest_completed_bar_group(
                     bars_by_symbol,
                     symbols,
@@ -1552,6 +1594,10 @@ def _ensure_protective_oca(
     quantity = int(float(position_row["position"]))
     average_cost = float(position_row["avgCost"])
     order_ref_prefix = f"momentum-{now.date()}-{symbol}-protect"
+    expected_refs = {
+        f"{order_ref_prefix}-stop",
+        f"{order_ref_prefix}-take",
+    }
     if broker.protective_oca_is_complete(
         symbol, quantity, order_ref_prefix=order_ref_prefix
     ):
@@ -1560,6 +1606,7 @@ def _ensure_protective_oca(
     active_sells = broker.active_trades_for(symbol, "SELL")
     incomplete_strategy_orders = []
     conflicting_orders = []
+    active_expected_orders = []
     for trade in active_sells:
         order = getattr(trade, "order", None)
         order_ref = str(getattr(order, "orderRef", "") or "")
@@ -1567,12 +1614,29 @@ def _ensure_protective_oca(
             order_ref.startswith("momentum-") and "-protect-" in order_ref
         ):
             incomplete_strategy_orders.append(trade)
+            if order_ref in expected_refs:
+                active_expected_orders.append(trade)
         else:
             conflicting_orders.append(trade)
     if conflicting_orders:
         raise BrokerError(
             f"active non-protective SELL order exists for {symbol}; "
             "refusing to replace protection"
+        )
+
+    if len(active_expected_orders) == 1:
+        missing_ref = (
+            expected_refs - {
+                str(
+                    getattr(getattr(active_expected_orders[0], "order", None), "orderRef", "")
+                    or ""
+                )
+            }
+        ).pop()
+        raise BrokerError(
+            f"protective OCA incomplete for {symbol}; "
+            f"preserving active leg {getattr(getattr(active_expected_orders[0], 'order', None), 'orderRef', '')} "
+            f"and waiting for {missing_ref}"
         )
 
     for trade in incomplete_strategy_orders:
@@ -1630,6 +1694,56 @@ def _ensure_protective_oca(
             now,
         )
     return "recreated" if incomplete_strategy_orders else "created"
+
+
+def _submit_and_confirm_entry_protection(
+    broker: IbkrBroker,
+    settings: Settings,
+    strategy: IntradayMomentumStrategy | SemiconductorRotationStrategy,
+    symbol: str,
+    filled_quantity: int,
+    average_fill_price: float,
+    bars: list[Bar],
+    now: datetime,
+) -> tuple[float, float]:
+    stop_price, take_price = strategy.protective_prices(
+        symbol, average_fill_price, bars
+    )
+    order_ref_prefix = f"momentum-{now.date()}-{symbol}-protect"
+    protective_trades = broker.place_protective_oca(
+        symbol,
+        filled_quantity,
+        stop_price,
+        take_price,
+        order_ref=order_ref_prefix,
+    )
+    for order_type, protective_trade, protective_price in (
+        ("STP", protective_trades[0], stop_price),
+        ("LMT", protective_trades[1], take_price),
+    ):
+        _record_order_state(
+            settings,
+            TradeRequest(
+                symbol=symbol,
+                action="SELL",
+                quantity=filled_quantity,
+                order_type=order_type,
+                limit_price=(
+                    protective_price if order_type == "LMT" else None
+                ),
+                time_in_force="GTC",
+                reduce_only=True,
+            ),
+            protective_trade,
+        )
+    if not broker.protective_oca_is_complete(
+        symbol, filled_quantity, order_ref_prefix=order_ref_prefix
+    ):
+        raise BrokerError(
+            f"protective OCA incomplete for {symbol}; "
+            "refusing to record daily entry without confirmed broker-hosted stop/take"
+        )
+    return stop_price, take_price
 
 
 def _ensure_positions_protected_before_market_data(
@@ -2794,37 +2908,16 @@ def main(argv: list[str] | None = None) -> int:
                     average_fill_price = _trade_average_fill_price(trade) or limit_price
                     if filled_quantity > 0:
                         bars = strategy_bars[decision.symbol]
-                        stop_price, take_price = strategy.protective_prices(
-                            decision.symbol, average_fill_price, bars
-                        )
-                        protective_trades = broker.place_protective_oca(
+                        stop_price, take_price = _submit_and_confirm_entry_protection(
+                            broker,
+                            settings,
+                            strategy,
                             decision.symbol,
                             filled_quantity,
-                            stop_price,
-                            take_price,
-                            order_ref=f"momentum-{datetime.now(NEW_YORK).date()}-{decision.symbol}-protect",
+                            average_fill_price,
+                            bars,
+                            now,
                         )
-                        for order_type, protective_trade, protective_price in (
-                            ("STP", protective_trades[0], stop_price),
-                            ("LMT", protective_trades[1], take_price),
-                        ):
-                            _record_order_state(
-                                settings,
-                                TradeRequest(
-                                    symbol=decision.symbol,
-                                    action="SELL",
-                                    quantity=filled_quantity,
-                                    order_type=order_type,
-                                    limit_price=(
-                                        protective_price
-                                        if order_type == "LMT"
-                                        else None
-                                    ),
-                                    time_in_force="GTC",
-                                    reduce_only=True,
-                                ),
-                                protective_trade,
-                            )
                         _record_daily_entry(
                             settings,
                             request,
