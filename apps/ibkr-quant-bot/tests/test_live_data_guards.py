@@ -16,6 +16,7 @@ from ibkr_quant_bot.cli import (
     ROTATION_HYSTERESIS_V2_VERSION,
     ROTATION_RANGE_GATED_V1_PARAMETERS,
     ROTATION_RANGE_GATED_V1_VERSION,
+    _backtest_core_parameters_report,
     _build_momentum_strategy,
     _build_parser,
     _available_cash_notional,
@@ -569,6 +570,34 @@ class LiveDataGuardsTest(unittest.TestCase):
         args = _build_parser().parse_args(["backtest-momentum"])
 
         self.assertEqual(1.0, args.commission_per_order)
+
+    def test_backtest_core_parameters_report_surfaces_live_aligned_fields(self) -> None:
+        args = _build_parser().parse_args(
+            ["backtest-momentum", "--profile", "rotation-hysteresis-v2"]
+        )
+        settings = Settings(
+            max_order_notional=4000,
+            max_risk_per_trade=120,
+            entry_cash_reserve_usd=10,
+            live_tradable_capital_cache_max_age_seconds=90,
+            max_daily_entries=1,
+        )
+        strategy = _build_momentum_strategy(args, settings)
+
+        report = _backtest_core_parameters_report(
+            args, settings, strategy, "open-pullback"
+        )
+
+        self.assertEqual("rotation-hysteresis-v2", report["profile"])
+        self.assertEqual("open-pullback", report["resolved_entry_fill_model"])
+        self.assertEqual("profile-default", report["requested_entry_fill_model"])
+        self.assertEqual(4000, report["resolved_max_notional"])
+        self.assertEqual(120, report["resolved_max_risk_per_trade"])
+        self.assertEqual(10, report["entry_cash_reserve_usd"])
+        self.assertEqual(90, report["live_tradable_capital_cache_max_age_seconds"])
+        self.assertEqual(1, report["max_daily_entries"])
+        self.assertEqual(4000, strategy.max_notional)
+        self.assertEqual(120, strategy.max_risk_per_trade)
 
     def test_hysteresis_profile_is_default(self) -> None:
         args = _build_parser().parse_args(["intraday-momentum"])

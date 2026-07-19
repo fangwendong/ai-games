@@ -67,6 +67,8 @@ Raise a decision-level alert when any of these is true:
 - the quote/context cache process or expected file activity stops.
 - during regular trading hours, the deterministic reporter is missing,
   duplicated, older than 120 seconds, or reports a nonzero runner exit.
+  Outside regular trading hours, a missing reporter is expected when the
+  supervisor has already exited cleanly at the close or on a weekend.
 - the legacy Codex polling schedule is unexpectedly resumed.
 - collection or permitted cleanup fails.
 
@@ -90,6 +92,8 @@ stop task is delivered but not acted on.
   no more than 120 seconds old and `latest-run.log` must contain
   `runner_exit=0`.
 - Outside the regular session, summary freshness is not required.
+- Outside the regular session, summary freshness is not required and an absent
+  reporter tmux/process is not an alert if the final close flush completed.
 - Old one-time start/stop tasks may exist, expire, or be removed without an
   alert because they no longer control the deterministic reporter.
 

@@ -21,6 +21,9 @@ Start here after reading the repository `AGENTS.md` and the application
   and completed 5-minute bars, validation, fallback, and maintenance.
 - [Live strategy review log](live-strategy-review-log.md): sanitized session
   execution history, reconciliation, net PnL, and review notes.
+  execution history, reconciliation, net PnL, and review notes. When a late
+  broker fill arrives, update the session row and the dated block together in
+  the same commit; broker executions are the source of truth.
 - [Live strategy audit - 2026-07-17](live-strategy-audit-2026-07-17.md):
   prioritized safety findings, fault-injection evidence, repair order, and
   acceptance criteria.
@@ -31,6 +34,9 @@ Start here after reading the repository `AGENTS.md` and the application
   paths, download, reading, completeness audit, and recent-data refresh.
 - [Backtest parameter tuning](backtest-parameter-tuning.md): frozen parameters,
   transaction costs, chronology, walk-forward checks, and overfitting controls.
+- [Live backtest alignment — 2026-07-18](live-backtest-alignment-2026-07-18.md):
+  live-aligned backtest contract, parameter parity, and recent calibration
+  conclusions.
 - [Strategy baseline v2](strategy-baseline-v2.md): current live strategy
   contract, parameters, entry/exit behavior, and operational invariants.
 - [Strategy baseline v1](strategy-baseline-v1.md): frozen rollback baseline and

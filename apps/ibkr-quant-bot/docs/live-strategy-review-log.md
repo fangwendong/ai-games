@@ -38,6 +38,13 @@ session block to this document if the date is not already present. If the day
 has no filled entry yet, the command records a no-trade snapshot instead of
 inventing a result.
 
+When a late broker fill or commission lands after the first append, update the
+`Session Summary` row and the dated session section together in the same
+commit. Do not leave the summary row ahead of the dated block, and do not patch
+only a partial session note. If the local journal snapshot lags the broker
+record, treat the broker record as the source of truth and rewrite the dated
+section from the reconciled fill data.
+
 Run it after the regular US close, once the exit and commission records have
 settled. The scheduled task should stay separate from the live 10-second
 strategy runner, quote cache, and context cache.
@@ -51,13 +58,14 @@ strategy runner, quote cache, and context cache.
 | 2026-07-14 | `rotation-hysteresis-v2` | SMART / none | No entry | No signal before cutoff | $0.00 | N/A |
 | 2026-07-15 | `rotation-hysteresis-v2` | ARCA / SMART | SOXS round trip | Protective take | +$146.30 | +3.70% |
 | 2026-07-16 | `rotation-hysteresis-v2` | SMART / SMART | SOXS round trip | Protective take | +$145.93 | +3.69% |
+| 2026-07-17 | `rotation-hysteresis-v2` | SMART / SMART | SOXL round trip | Protective take | +$107.41 | +3.68% |
 
-Across these five sessions, the strategy closed four attributable round
-trips for approximately $317.27 net realized PnL, or +2.59% of the four
-filled entry notionals pooled together. This pooled rate is descriptive and
-is not an account return or a compounded portfolio return. All four trades
-were profitable, but four trades are far too few to estimate a reliable win
-rate or expected return.
+Across these six sessions, the strategy closed five attributable round trips
+for approximately $424.68 net realized PnL, or +2.99% of the five filled entry
+notionals pooled together. This pooled rate is descriptive and is not an
+account return or a compounded portfolio return. All five trades were
+profitable, but five trades are far too few to estimate a reliable win rate or
+expected return.
 
 The July 10 and July 13 entry journals predate persistence of an explicit
 `strategy_version` field. The repository deployment timeline identifies them
@@ -263,18 +271,24 @@ two live entry fills from a favorable bar extreme.
 - Entry time, symbol, quantity, average fill, and reason: 12:00:04 ET, SOXL,
   21, $138.88, entry signal satisfied
 - Protective stop/take created: stop $133.35 / take $144.09
-- Exit time, quantity, average fill, and reason: N/A; no exit fill found in
-  the current journal snapshot
+- Exit time, quantity, average fill, and reason: 13:08:15 ET, SOXL, 21,
+  $144.09; broker-side protective take filled in two executions (12 + 9) and
+  the stop leg was canceled
 - Gross PnL, commissions, broker net realized PnL, and net return on entry
-  notional: N/A until an exit fill is recorded
-- End-of-session position and open-order state: entry recorded; protective OCA
-  orders remain active in the stored journal snapshot
+  notional: $109.41, approximately $2.00 round-trip commission from the live
+  cost calibration, approximately $107.41 net realized PnL, 3.68%
+- End-of-session position and open-order state: round trip closed on the
+  broker; the broker trade record is the source of truth, and the local journal
+  snapshot was lagging when it was first reviewed
 
 ### Review
 
-The stored evidence confirms the entry and the protective orders, but the
-closeout leg is not present in the current journal snapshot yet. Reconcile the
-exit before treating this day as a completed round trip.
+The broker-side execution record confirms the 7/17 protective take and closed
+the round trip. The broker trade record should be treated as the source of
+truth for reconciliation; the local journal snapshot only acts as a delayed
+cache and should not be used to override confirmed broker fills. If this day
+needs another revision, rewrite the full dated block together with the summary
+row above instead of appending a partial correction.
 
 ## Follow-Up Items
 

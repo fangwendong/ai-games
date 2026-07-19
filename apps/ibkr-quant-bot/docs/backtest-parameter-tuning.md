@@ -13,6 +13,29 @@ Tune against a fixed, chronological walk-forward split:
 - keep the final holdout untouched until the end
 - compare candidate parameter sets on the same folds
 
+## Current live-aligned backtest contract
+
+When the goal is to mirror `rotation-hysteresis-v2`, do not invent a separate
+research profile. Use the same live-facing sizing and exit contract that the
+live runner prints.
+
+The current contract is:
+
+- `profile=rotation-hysteresis-v2`
+- `capital=4500`
+- `max_order_notional=10000`
+- `max_risk_per_trade=120`
+- `min_bars=30`
+- `entry_fill_model=profile-default` (resolved to `open-pullback` for v2)
+- `commission_per_order=1`
+- `slippage_bps=1`
+- `spread_bps=1`
+- `bar_size=5 mins`
+- `market_data_exchange=SMART`
+
+If any of those drift, the run is not a strict live comparison. Label it as a
+research variant and do not compare it directly against live execution.
+
 The backtest command supports cached daily bars so the same input can be reused
 without reconnecting to IBKR:
 
@@ -171,7 +194,9 @@ Reject a change if it does any of the following:
 
 The recent rotation-hysteresis sweeps produced a few useful lessons:
 
-- `max_risk_per_trade` helped up to about `60`, then flattened out.
+- `max_risk_per_trade` helped up to about `60` in the older tuning sample.
+  The current live-aligned v2 contract uses `120` to remove an artificial
+  sizing cap while keeping the resolved risk budget visible in the report.
 - `min_bars=30` was better than lower values in the recent sample.
 - loosening entry filters did not improve `net_profit / capital`; it mostly
   added noise.
@@ -195,3 +220,7 @@ Treat those as observations from the current sample, not as permanent truths.
 If you are comparing two candidates and one only wins by adding a lot more
 trading activity, prefer the one with the cleaner OOS profile unless the
 improvement is large enough to justify the additional turnover.
+
+For the most recent live-aligned calibration run, including the `core_parameters`
+report shape and the 2026-07-18 conclusions, see
+[live-backtest-alignment-2026-07-18.md](live-backtest-alignment-2026-07-18.md).

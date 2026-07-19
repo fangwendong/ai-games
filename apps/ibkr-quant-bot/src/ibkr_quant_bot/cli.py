@@ -1818,7 +1818,39 @@ def _build_momentum_strategy(args: argparse.Namespace, settings: Settings):
         require_vwap_confirmation=not args.no_vwap_confirmation,
     )
 
-
+def _backtest_core_parameters_report(
+    args: argparse.Namespace,
+    settings: Settings,
+    strategy,
+    entry_fill_model: str,
+) -> dict[str, object]:
+    requested_entry_fill_model = getattr(args, "entry_fill_model", None)
+    resolved_max_notional = getattr(strategy, "max_notional", None)
+    resolved_max_risk_per_trade = getattr(strategy, "max_risk_per_trade", None)
+    symbols = getattr(strategy, "symbols", ())
+    return {
+        "profile": getattr(args, "profile", None),
+        "benchmark_symbol": getattr(strategy, "benchmark_symbol", None),
+        "symbols": list(symbols) if symbols is not None else None,
+        "capital": args.capital,
+        "duration": args.duration,
+        "bar_size": args.bar_size,
+        "resolved_entry_fill_model": entry_fill_model,
+        "requested_entry_fill_model": requested_entry_fill_model,
+        "requested_max_notional": args.max_notional,
+        "resolved_max_notional": resolved_max_notional,
+        "resolved_max_risk_per_trade": resolved_max_risk_per_trade,
+        "entry_cash_reserve_usd": settings.entry_cash_reserve_usd,
+        "max_daily_entries": settings.max_daily_entries,
+        "live_tradable_capital_cache_max_age_seconds": (
+            settings.live_tradable_capital_cache_max_age_seconds
+        ),
+        "commission_per_order": args.commission_per_order,
+        "slippage_bps": args.slippage_bps,
+        "spread_bps": args.spread_bps,
+        "market_data_exchange": args.market_data_exchange,
+        "data_dir": str(Path(args.data_dir).resolve()),
+    }
 def _run_live_quote_cache(settings: Settings, args: argparse.Namespace) -> int:
     if not settings.readonly or not settings.dry_run:
         raise BrokerError(
@@ -2833,6 +2865,9 @@ def main(argv: list[str] | None = None) -> int:
                     if args.profile == ROTATION_HYSTERESIS_V2_VERSION
                     else "next-bar-open"
                 )
+            core_parameters = _backtest_core_parameters_report(
+                args, settings, strategy, entry_fill_model
+            )
             if isinstance(strategy, SemiconductorRotationStrategy):
                 strategy_report: dict[str, object] = {
                     "benchmark_symbol": strategy.benchmark_symbol,
@@ -2894,6 +2929,7 @@ def main(argv: list[str] | None = None) -> int:
                     "max_notional": getattr(strategy, "max_notional", None),
                 }
             report: dict[str, object] = {
+                "core_parameters": core_parameters,
                 "strategy": strategy_report,
                 "cost_model": {
                     "commission_per_order": cost_model.commission_per_order,

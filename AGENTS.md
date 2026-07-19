@@ -122,6 +122,9 @@ Recent strategy facts worth knowing:
 - The legacy `rotation` profile remains available with `--profile rotation`
   as an explicit rollback path.
 - Live strategy uses fresh 5-minute bars and live quote checks.
+- The live-aligned v2 risk budget is `max_risk_per_trade=120`; backtest and
+  live reports should print the resolved value so the execution contract is
+  visible and cannot drift silently.
 - Backtest exits are intentionally aligned with live behavior: stop/take exits
   are close-based via `exit_decide()`, not optimistic intrabar high/low fills.
 - Every backtest must refresh recent `SOXL`/`SOXS`/`QQQ` history first, then
