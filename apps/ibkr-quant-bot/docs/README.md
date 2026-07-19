@@ -42,6 +42,8 @@ Start here after reading the repository `AGENTS.md` and the application
   conclusions.
 - [Monthly backtest summary — 2026-07-19](backtest/monthly-backtest-summary-2026-07-19.md):
   one-year and two-year chronological backtests with monthly net-return tables.
+- [Live backtest non-reconciliation notes — 2026-07-19](backtest/live-backtest-nonreconciliation-2026-07-19.md):
+  why live and backtest still diverge, and which comparisons remain meaningful.
 - [Strategy baseline v2](strategy/strategy-baseline-v2.md): current live strategy
   contract, parameters, entry/exit behavior, and operational invariants.
 - [Strategy baseline v1](strategy/strategy-baseline-v1.md): frozen rollback baseline and
