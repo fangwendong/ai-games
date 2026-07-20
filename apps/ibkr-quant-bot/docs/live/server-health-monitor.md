@@ -3,8 +3,9 @@
 This runbook documents the five-minute health monitor for this host. It is an
 operations check, not a trading strategy and not a market-data validator.
 
-Do not include account IDs, balances, positions, orders, credentials, quote
-prices, bar contents, or raw cache payloads in health reports.
+Do not include account IDs, orders, credentials, quote prices, bar contents,
+or raw cache payloads in health reports. A sanitized IBKR account snapshot is
+allowed and should cover balance and tracked positions only.
 
 ## Scope
 
@@ -14,13 +15,14 @@ The monitor reports on four areas:
    highest CPU/memory processes.
 2. botmux: active/recoverable sessions, safe zombie cleanup, scheduled-task
    counts, and current-session protection state.
-3. IBKR infrastructure: Gateway/IBC processes, API port `4001`, and a forced
-   read-only server-time heartbeat.
+3. IBKR infrastructure: Gateway/IBC processes, API port `4001`, a forced
+   read-only server-time heartbeat, and a sanitized account snapshot
+   containing balance and tracked positions.
 4. Runtime infrastructure: process/tmux presence and file activity for the
    quote cache, live context cache, and deterministic live strategy reporter.
 
-The monitor must not inspect SMART/ARCA values, symbols, prices, bars, cache
-latency, or price scale. Cache checks use process state and `stat` only.
+The monitor must not inspect SMART/ARCA values, prices, bars, cache latency,
+or price scale. Cache checks use process state and `stat` only.
 
 ## Current Schedule
 
@@ -124,7 +126,8 @@ If unhealthy, put the abnormal information before every normal metric:
 建议：<next action>
 ```
 
-Then include `核心概览` with resource, botmux, IB, and cache/reporter status. End with
+Then include `核心概览` with resource, botmux, IB account snapshot, and
+cache/reporter status. End with
 `指标明细`, expanding:
 
 - CPU/idle and load 1/5/15;
@@ -133,6 +136,7 @@ Then include `核心概览` with resource, botmux, IB, and cache/reporter status
 - highest CPU and memory processes;
 - active sessions, cleanup count, enabled/paused task counts, and trading stage;
 - Gateway/IBC/port/heartbeat state; and
+- IBKR balance and tracked positions, with account IDs/order IDs omitted; and
 - quote/context process counts plus file update time or age; and
 - reporter tmux/process counts plus in-session summary age and runner exit.
 
