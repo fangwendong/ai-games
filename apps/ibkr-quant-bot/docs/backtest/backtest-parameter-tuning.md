@@ -22,7 +22,7 @@ live runner prints.
 The current contract is:
 
 - `profile=rotation-hysteresis-v2`
-- `capital=4500`
+- `capital=10000`
 - `max_order_notional=10000`
 - `max_risk_per_trade=120`
 - `min_bars=30`
@@ -155,7 +155,7 @@ Do not judge a candidate only by raw net return percentage on the walk-forward
 report. For this strategy, the more useful comparison is:
 
 - absolute net profit
-- profit normalized by deployable capital, for example `net_profit / 4500`
+- profit normalized by deployable capital, for example `net_profit / 10000`
 - OOS fold consistency
 - trade count and win/loss balance
 - how much of the result is consumed by commission, spread, and slippage

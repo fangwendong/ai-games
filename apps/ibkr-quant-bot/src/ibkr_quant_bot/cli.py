@@ -328,7 +328,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--max-notional", type=float, default=None, help="cap per order notional"
     )
     backtest.add_argument(
-        "--capital", type=float, default=4_500.0, help="starting capital"
+        "--capital", type=float, default=10_000.0, help="starting capital"
     )
     backtest.add_argument(
         "--profile",

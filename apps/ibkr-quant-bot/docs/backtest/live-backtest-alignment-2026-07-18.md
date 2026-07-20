@@ -66,7 +66,7 @@ IBKR_LIVE_TRADABLE_CAPITAL_CACHE_MAX_AGE_SECONDS=90 \
 IBKR_MAX_DAILY_ENTRIES=1 \
 PYTHONPATH=src python -m ibkr_quant_bot.cli backtest-momentum \
   --profile rotation-hysteresis-v2 \
-  --capital 4500 \
+  --capital 10000 \
   --duration "6 M" \
   --bar-size "5 mins" \
   --train-days 30 \
@@ -93,9 +93,9 @@ comparisons.
 | Case | Final holdout net return | Trade count | Win / loss | Notes |
 |---|---:|---:|---:|---|
 | `capital=1494.41`, `max_notional=10000` | `18.11%` | `9` | `7 / 2` | Live-cash snapshot, same strategy cadence |
-| `capital=4500`, `max_notional=10000` | `18.33%` | `9` | `7 / 2` | Stress-tested with higher deployable capital |
+| `capital=10000`, `max_notional=10000` | `18.33%` | `9` | `7 / 2` | Stress-tested with higher deployable capital |
 
-Fold stability for the `capital=4500`, `max_notional=10000` run:
+Fold stability for the `capital=10000`, `max_notional=10000` run:
 
 - base profile: 4 / 4 positive OOS folds
 - mean OOS return: `2.9747%`

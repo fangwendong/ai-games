@@ -200,9 +200,9 @@ class LiveDataGuardsTest(unittest.TestCase):
             settings = Settings(state_dir=temporary, entry_cash_reserve_usd=10)
             available, summary = _tradable_capital_snapshot(settings, now)
 
-        self.assertEqual(4500.0, available)
+        self.assertEqual(10000.0, available)
         self.assertEqual("configured", summary["status"])
-        self.assertEqual(4500.0, summary["usable_cash"])
+        self.assertEqual(10000.0, summary["usable_cash"])
         self.assertEqual(10, summary["cash_reserve_usd"])
         self.assertFalse(summary["uses_margin_buying_power"])
         self.assertEqual("configured_cap", summary["source"])
@@ -213,7 +213,7 @@ class LiveDataGuardsTest(unittest.TestCase):
         with TemporaryDirectory() as temporary:
             settings = Settings(
                 state_dir=temporary,
-                live_tradable_capital_usd=4500,
+                live_tradable_capital_usd=10000,
                 entry_cash_reserve_usd=10,
             )
             write_market_context_cache(
@@ -228,9 +228,9 @@ class LiveDataGuardsTest(unittest.TestCase):
             )
             available, summary = _tradable_capital_snapshot(settings, now)
 
-        self.assertEqual(4500, available)
+        self.assertEqual(10000, available)
         self.assertEqual("configured", summary["status"])
-        self.assertEqual(4500, summary["usable_cash"])
+        self.assertEqual(10000, summary["usable_cash"])
         self.assertEqual("configured_cap", summary["source"])
 
     def test_tradable_capital_snapshot_rejects_invalid_cash_reserve(self) -> None:
@@ -1220,7 +1220,7 @@ class LiveDataGuardsTest(unittest.TestCase):
     def test_backtest_capital_defaults_to_live_budget(self) -> None:
         args = _build_parser().parse_args(["backtest-momentum"])
 
-        self.assertEqual(4500.0, args.capital)
+        self.assertEqual(10000.0, args.capital)
 
     def test_live_strategy_rejects_stale_bars(self) -> None:
         settings = Settings(trading_mode="live", live_bar_max_age_seconds=420)

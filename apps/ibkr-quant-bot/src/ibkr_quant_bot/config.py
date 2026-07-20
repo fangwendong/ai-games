@@ -70,7 +70,7 @@ class Settings:
     live_context_cache_path: str | None = None
     live_context_cache_max_age_seconds: float = 420.0
     live_tradable_capital_cache_max_age_seconds: float = 90.0
-    live_tradable_capital_usd: float = 4500.0
+    live_tradable_capital_usd: float = 10_000.0
     entry_cash_reserve_usd: float = 10.0
     max_daily_entries: int = 1
     state_dir: str = ".ibkr_bot_state/semiconductor_rotation_intraday"
@@ -132,7 +132,7 @@ def load_settings() -> Settings:
             os.getenv("IBKR_LIVE_TRADABLE_CAPITAL_CACHE_MAX_AGE_SECONDS", "90")
         ),
         live_tradable_capital_usd=float(
-            os.getenv("IBKR_LIVE_TRADABLE_CAPITAL_USD", "4500")
+            os.getenv("IBKR_LIVE_TRADABLE_CAPITAL_USD", "10000")
         ),
         entry_cash_reserve_usd=float(
             os.getenv("IBKR_ENTRY_CASH_RESERVE_USD", "10")

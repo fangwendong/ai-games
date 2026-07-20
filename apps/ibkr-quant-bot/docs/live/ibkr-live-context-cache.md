@@ -26,7 +26,7 @@ health reports.
 The file is flushed, `fsync`ed, and atomically replaced and contains one current-session bar array per
 symbol plus one USD amount; it contains no account identifier and does not grow
 across days. The capital amount is fixed at `IBKR_LIVE_TRADABLE_CAPITAL_USD`
-(default 4500 USD) and is not derived from `TotalCashValue`, `AvailableFunds`,
+(default 10000 USD) and is not derived from `TotalCashValue`, `AvailableFunds`,
 or `BuyingPower`. Before sizing an order, the strategy subtracts
 `IBKR_ENTRY_CASH_RESERVE_USD` (default 10 USD) for commission and cash
 headroom. The strategy accepts the cache only when
@@ -38,7 +38,7 @@ IBKR request. It does not sleep waiting for the cache. If both cache
 and direct IBKR data fail validation, the strategy fails closed and submits no
 new order. If only tradable capital is missing, stale, or invalid, the strategy
 reports the fallback and uses configured `IBKR_LIVE_TRADABLE_CAPITAL_USD`
-(default 4500 USD) minus the same reserve, producing a 4490 USD fallback entry
+(default 10000 USD) minus the same reserve, producing a 9990 USD fallback entry
 ceiling.
 Mandatory pre-close flatten still runs before bar loading.
 
