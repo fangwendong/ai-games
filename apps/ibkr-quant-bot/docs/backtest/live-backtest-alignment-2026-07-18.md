@@ -60,7 +60,7 @@ The command form was:
 
 ```bash
 IBKR_MAX_ORDER_NOTIONAL=10000 \
-IBKR_MAX_RISK_PER_TRADE=120 \
+IBKR_MAX_RISK_PER_TRADE=300 \
 IBKR_ENTRY_CASH_RESERVE_USD=10 \
 IBKR_LIVE_TRADABLE_CAPITAL_CACHE_MAX_AGE_SECONDS=90 \
 IBKR_MAX_DAILY_ENTRIES=1 \
@@ -119,6 +119,24 @@ The parameter-sensitivity check remained positive across the three variants:
 - For the current strategy, 30-second fill bars are the recommended default
   when comparing backtest behavior against live execution. Use 1-minute fill
   only when you want a coarse sensitivity check.
+
+## Current Live Contract Snapshot
+
+Keep the live checkout aligned with this exact configuration unless the same
+commit updates the documentation and code together:
+
+- Strategy profile: `rotation-hysteresis-v2`
+- Symbols allowed by live risk checks: `SOXL,SOXS,QQQ`
+- Strategy instruments: `SOXL` long, `SOXS` short, `QQQ` benchmark
+- `IBKR_MAX_ORDER_NOTIONAL=10000`
+- `IBKR_MAX_RISK_PER_TRADE=300`
+- `IBKR_LIVE_TRADABLE_CAPITAL_USD=10000`
+- `IBKR_ENTRY_CASH_RESERVE_USD=10`
+- `IBKR_MAX_DAILY_ENTRIES=1`
+- Signal bars: `5 mins`
+- Fill bars: `30 secs`
+- Quote cache: `100` samples per symbol, refreshed every `1` second
+- Quote cache freshness: `3` seconds
 
 ## Related docs
 

@@ -203,7 +203,7 @@ only the local cache and does not request the balance from IBKR. Every run
 prints the usable USD amount near the start of its report and reuses that same
 value if it reaches a new-entry decision. A missing, stale, or invalid cached
 value is explicitly marked as a fallback and uses the fixed live tradable
-capital minus the same cash reserve (4490 USD with the default 4500 USD cap).
+capital minus the same cash reserve (9990 USD with the default 10000 USD cap).
 
 Run the scanner and exit manager with the current default
 `rotation-hysteresis-v2` profile:
@@ -443,16 +443,13 @@ Keep a backtest aligned with the live strategy before interpreting its return:
   evaluates stop/take conditions from bar closes, permits at most one completed
   trade per session, and liquidates any remaining position at the session end.
 
-Example calibrated run using the live rotation profile and a `$4,500` order
+Example calibrated run using the live rotation profile and a `$10,000` order
 budget:
 
 ```bash
-set -a
-source .env
-set +a
 ibkr-bot backtest-momentum \
   --profile rotation-hysteresis-v2 \
-  --capital 4500 \
+  --capital 10000 \
   --max-notional 10000 \
   --commission-per-order 1.00 \
   --slippage-bps 1.0 \
@@ -474,8 +471,9 @@ open, and benchmark/asset bars are aligned by timestamp rather than array index.
 
 Live entry size is capped by both notional and ATR risk:
 `quantity <= IBKR_MAX_RISK_PER_TRADE / max(percent_stop, ATR * multiple)`.
-The current live checkout sets `IBKR_MAX_RISK_PER_TRADE=120`; the committed
-`.env.example` intentionally remains at the conservative `$10` setup default.
+The current live checkout sets `IBKR_MAX_RISK_PER_TRADE=300`; the committed
+`.env.example` follows the same live-aligned value so backtest and live stay
+in sync.
 Filled entries receive broker-hosted GTC stop/take OCA orders. On restart, the
 scanner queries active and completed IBKR orders by deterministic order ref,
 rebuilds missing protection for an open position, and refuses duplicate entry

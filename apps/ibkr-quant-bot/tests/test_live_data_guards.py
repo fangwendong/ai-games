@@ -578,7 +578,7 @@ class LiveDataGuardsTest(unittest.TestCase):
         )
         settings = Settings(
             max_order_notional=4000,
-            max_risk_per_trade=120,
+            max_risk_per_trade=300,
             entry_cash_reserve_usd=10,
             live_tradable_capital_cache_max_age_seconds=90,
             max_daily_entries=1,
@@ -593,12 +593,12 @@ class LiveDataGuardsTest(unittest.TestCase):
         self.assertEqual("open-pullback", report["resolved_entry_fill_model"])
         self.assertEqual("profile-default", report["requested_entry_fill_model"])
         self.assertEqual(4000, report["resolved_max_notional"])
-        self.assertEqual(120, report["resolved_max_risk_per_trade"])
+        self.assertEqual(300, report["resolved_max_risk_per_trade"])
         self.assertEqual(10, report["entry_cash_reserve_usd"])
         self.assertEqual(90, report["live_tradable_capital_cache_max_age_seconds"])
         self.assertEqual(1, report["max_daily_entries"])
         self.assertEqual(4000, strategy.max_notional)
-        self.assertEqual(120, strategy.max_risk_per_trade)
+        self.assertEqual(300, strategy.max_risk_per_trade)
 
     def test_hysteresis_profile_is_default(self) -> None:
         args = _build_parser().parse_args(["intraday-momentum"])
@@ -618,14 +618,14 @@ class LiveDataGuardsTest(unittest.TestCase):
             ["intraday-momentum", "--profile", "rotation-hysteresis-v1"]
         )
         strategy = _build_momentum_strategy(
-            args, Settings(max_order_notional=4000, max_risk_per_trade=120)
+            args, Settings(max_order_notional=4000, max_risk_per_trade=300)
         )
 
         self.assertEqual("rotation-hysteresis-v1", FROZEN_ROTATION_HYSTERESIS_VERSION)
         for name, expected in FROZEN_ROTATION_HYSTERESIS_PARAMETERS.items():
             self.assertEqual(expected, getattr(strategy, name), name)
         self.assertEqual(4000, strategy.max_notional)
-        self.assertEqual(120, strategy.max_risk_per_trade)
+        self.assertEqual(300, strategy.max_risk_per_trade)
         self.assertIsNone(strategy.profit_lock_activation_pct)
 
     def test_v2_profile_adds_frozen_profit_lock_and_entry_cutoff(self) -> None:

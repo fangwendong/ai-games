@@ -24,7 +24,7 @@ The current contract is:
 - `profile=rotation-hysteresis-v2`
 - `capital=10000`
 - `max_order_notional=10000`
-- `max_risk_per_trade=120`
+- `max_risk_per_trade=300`
 - `min_bars=30`
 - `entry_fill_model=profile-default` (resolved to `open-pullback` for v2)
 - `fill_bar_size=30 secs`
@@ -201,7 +201,7 @@ Reject a change if it does any of the following:
 The recent rotation-hysteresis sweeps produced a few useful lessons:
 
 - `max_risk_per_trade` helped up to about `60` in the older tuning sample.
-  The current live-aligned v2 contract uses `120` to remove an artificial
+  The current live-aligned v2 contract uses `300` to remove an artificial
   sizing cap while keeping the resolved risk budget visible in the report.
 - `min_bars=30` was better than lower values in the recent sample.
 - loosening entry filters did not improve `net_profit / capital`; it mostly
