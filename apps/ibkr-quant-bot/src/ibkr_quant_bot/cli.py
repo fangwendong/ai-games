@@ -32,7 +32,6 @@ from .market_context_cache import (
     MarketContextCacheError,
     load_cached_market_session,
     load_fresh_cached_bars,
-    load_fresh_cached_tradable_capital,
     write_market_context_cache,
 )
 from .quote_cache import QuoteCacheError, QuoteCacheWriter, load_fresh_quotes
@@ -1504,36 +1503,20 @@ def _tradable_capital_snapshot(
     reserve = settings.entry_cash_reserve_usd
     if not math.isfinite(reserve) or reserve < 0:
         raise BrokerError("IBKR_ENTRY_CASH_RESERVE_USD must be finite and non-negative")
+    capital_limit = settings.live_tradable_capital_usd
+    if not math.isfinite(capital_limit) or capital_limit <= 0:
+        raise BrokerError("IBKR_LIVE_TRADABLE_CAPITAL_USD must be finite and positive")
     summary: dict[str, object] = {
         "currency": "USD",
-        "sizing_basis": "min(TotalCashValue, AvailableFunds) - cash reserve",
+        "sizing_basis": "configured live_tradable_capital_usd",
         "cash_reserve_usd": round(reserve, 2),
         "uses_margin_buying_power": False,
-    }
-    try:
-        available = load_fresh_cached_tradable_capital(
-            _live_context_cache_path(settings),
-            session_date=now.date(),
-            max_age_seconds=settings.live_tradable_capital_cache_max_age_seconds,
-            now=now,
-        )
-    except (MarketContextCacheError, OSError, ValueError) as exc:
-        fallback = max(0.0, settings.live_tradable_capital_usd - reserve)
-        return fallback, {
-            **summary,
-            "status": "fallback",
-            "usable_cash": round(fallback, 2),
-            "reason": type(exc).__name__,
-            "source": "configured_cap",
-        }
-    usable = max(0.0, available - reserve)
-    return usable, {
-        **summary,
-        "status": "available",
-        "usable_cash": round(usable, 2),
+        "status": "configured",
+        "usable_cash": round(capital_limit, 2),
         "reason": None,
-        "source": "live_context_cache",
+        "source": "configured_cap",
     }
+    return capital_limit, summary
 
 
 def _ensure_protective_oca(
@@ -2308,7 +2291,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "intraday-momentum":
             strategy = _build_momentum_strategy(args, settings)
             now = datetime.now(NEW_YORK)
-            entry_notional_cap, tradable_capital_summary = (
+            capital_limit_usd, tradable_capital_summary = (
                 _tradable_capital_snapshot(settings, now)
             )
             print(
@@ -2714,7 +2697,7 @@ def main(argv: list[str] | None = None) -> int:
             decision = max(
                 buy_candidates, key=lambda item: float(item.meta.get("score", 0.0))
             )
-            strategy = replace(strategy, max_notional=entry_notional_cap)
+            strategy = replace(strategy, max_notional=capital_limit_usd)
             decision = strategy.decide(
                 decision.symbol,
                 strategy_quotes[decision.symbol],
@@ -2727,7 +2710,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             print(
                 "dynamic entry sizing: "
-                f"current usable USD cash={entry_notional_cap:.2f}, "
+                f"configured principal limit USD={capital_limit_usd:.2f}, "
                 f"risk budget={strategy.max_risk_per_trade:.2f}"
             )
             limit_price = _marketable_buy_limit_price(

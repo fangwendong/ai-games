@@ -194,10 +194,28 @@ class LiveDataGuardsTest(unittest.TestCase):
                 ]
             )
 
-    def test_tradable_capital_snapshot_reports_balance_without_account_details(self) -> None:
+    def test_tradable_capital_snapshot_uses_configured_capital_without_account_details(self) -> None:
         now = datetime(2026, 7, 17, 12, 1, tzinfo=NEW_YORK)
         with TemporaryDirectory() as temporary:
             settings = Settings(state_dir=temporary, entry_cash_reserve_usd=10)
+            available, summary = _tradable_capital_snapshot(settings, now)
+
+        self.assertEqual(4500.0, available)
+        self.assertEqual("configured", summary["status"])
+        self.assertEqual(4500.0, summary["usable_cash"])
+        self.assertEqual(10, summary["cash_reserve_usd"])
+        self.assertFalse(summary["uses_margin_buying_power"])
+        self.assertEqual("configured_cap", summary["source"])
+        self.assertNotIn("account", summary)
+
+    def test_tradable_capital_snapshot_ignores_cache_values(self) -> None:
+        now = datetime(2026, 7, 17, 12, 1, tzinfo=NEW_YORK)
+        with TemporaryDirectory() as temporary:
+            settings = Settings(
+                state_dir=temporary,
+                live_tradable_capital_usd=4500,
+                entry_cash_reserve_usd=10,
+            )
             write_market_context_cache(
                 _live_context_cache_path(settings),
                 session_date=now.date(),
@@ -210,26 +228,9 @@ class LiveDataGuardsTest(unittest.TestCase):
             )
             available, summary = _tradable_capital_snapshot(settings, now)
 
-        self.assertEqual(4378.50, available)
-        self.assertEqual("available", summary["status"])
-        self.assertEqual(4378.50, summary["usable_cash"])
-        self.assertEqual(10, summary["cash_reserve_usd"])
-        self.assertFalse(summary["uses_margin_buying_power"])
-        self.assertNotIn("account", summary)
-
-    def test_tradable_capital_snapshot_uses_configured_fallback(self) -> None:
-        now = datetime(2026, 7, 17, 12, 1, tzinfo=NEW_YORK)
-        with TemporaryDirectory() as temporary:
-            settings = Settings(
-                state_dir=temporary,
-                live_tradable_capital_usd=4500,
-                entry_cash_reserve_usd=10,
-            )
-            available, summary = _tradable_capital_snapshot(settings, now)
-
-        self.assertEqual(4490, available)
-        self.assertEqual("fallback", summary["status"])
-        self.assertEqual(4490, summary["usable_cash"])
+        self.assertEqual(4500, available)
+        self.assertEqual("configured", summary["status"])
+        self.assertEqual(4500, summary["usable_cash"])
         self.assertEqual("configured_cap", summary["source"])
 
     def test_tradable_capital_snapshot_rejects_invalid_cash_reserve(self) -> None:

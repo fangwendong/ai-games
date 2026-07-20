@@ -247,11 +247,11 @@ def format_live_report(
             "",
             "【资金与运行】",
             (
-                f"可用现金：{_value(capital.get('usable_cash'))} USD｜"
+                f"本金上限：{_value(capital.get('usable_cash'))} USD｜"
                 f"预留：{_value(capital.get('cash_reserve_usd'))} USD"
             ),
             (
-                f"现金状态：{capital.get('status', '不可用')}｜"
+                f"本金状态：{capital.get('status', '不可用')}｜"
                 f"来源：{capital.get('source', '不可用')}"
             ),
             (
@@ -264,9 +264,9 @@ def format_live_report(
             ),
             f"QQQ：{_value(benchmark.get('latest_trade_price'))}（趋势基准）",
             "",
-            "【账户快照】",
+            "【资金快照】",
             (
-                f"余额可用：{_value(capital.get('usable_cash'))} USD｜"
+                f"可交易本金：{_value(capital.get('usable_cash'))} USD｜"
                 f"预留：{_value(capital.get('cash_reserve_usd'))} USD｜"
                 f"来源：{capital.get('source', '不可用')}"
             ),
