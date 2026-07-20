@@ -57,19 +57,33 @@ scripts/run-live-strategy-report.zsh
 
 ## Start and stop
 
-```bash
-tmux new-session -d -s ibkr-live-strategy-reporter \
-  "cd /home/fwd/work/ai-games-wt-codex-live/apps/ibkr-quant-bot && \
-   export BOTMUX_REPORT_SESSION_ID=<session UUID> && \
-   export BOTMUX_REPORT_ROOT_MESSAGE_ID=<topic root message ID> && \
-   exec scripts/run-live-strategy-report-loop.zsh"
+Use the dedicated wrappers for a daily open/close schedule. The start wrapper
+is idempotent and only launches the supervisor when the tmux session is not
+already running. The stop wrapper is also idempotent and is safe to run after
+the loop has already exited itself at the close.
 
-tmux kill-session -t ibkr-live-strategy-reporter
+```bash
+BOTMUX_REPORT_SESSION_ID=<session UUID> \
+BOTMUX_REPORT_ROOT_MESSAGE_ID=<topic root message ID> \
+scripts/start-live-strategy-reporter.zsh
+
+scripts/stop-live-strategy-reporter.zsh
 ```
 
 Never run this supervisor together with the old one-minute Codex schedule. The
 CLI runtime lock prevents simultaneous execution, but duplicate schedulers
 would still create skipped runs and duplicate status messages.
+
+Recommended botmux schedule pair:
+
+- start the reporter on weekdays shortly after the market opens, using
+  `scripts/start-live-strategy-reporter.zsh`;
+- stop the reporter on weekdays after the close, using
+  `scripts/stop-live-strategy-reporter.zsh`.
+
+The loop still self-exits at or after the close. The explicit stop task is the
+fallback that keeps the tmux session from lingering when a prior command fails
+to act.
 
 ## Summary contract
 
