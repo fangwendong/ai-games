@@ -28,13 +28,6 @@ BOTMUX_REPORT_SESSION_ID=<target botmux session UUID>
 BOTMUX_REPORT_ROOT_MESSAGE_ID=<target Feishu topic root message ID>
 ```
 
-Important: `BOTMUX_REPORT_ROOT_MESSAGE_ID` must be the topic/thread root
-message's `messageId`, not a reply message id and not the nested `rootId`
-field from a child reply. When a report is routed to the wrong place, check
-`botmux history --scope chat` and use the root message's own `messageId` as the
-router target. Using a normal reply message id will create a dead-end thread
-target or fail to land where the operator expects.
-
 The runner always forces live market data and disables ARCA fallback. It does
 not override the live/readonly/dry-run/allow-live-trading switches from `.env`.
 It runs only from 09:30 through 15:59 America/New_York on weekdays. The broker
@@ -91,19 +84,6 @@ Recommended botmux schedule pair:
 The loop still self-exits at or after the close. The explicit stop task is the
 fallback that keeps the tmux session from lingering when a prior command fails
 to act.
-
-## Topic Routing Gotcha
-
-When starting the reporter for a new conversation, create the target topic
-first, then copy the topic root message's `messageId` shown by botmux as the
-router target. Do not reuse a visible reply message id from inside the thread,
-and do not use the child reply's `rootId` field as the destination. The
-correct flow is:
-
-1. create or identify the topic root message;
-2. copy its `messageId` for `BOTMUX_REPORT_ROOT_MESSAGE_ID`;
-3. restart the reporter loop; and
-4. verify the next summary arrives under that same thread.
 
 ## Summary contract
 
