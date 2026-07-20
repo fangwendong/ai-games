@@ -192,18 +192,18 @@ intraday setup in this branch is the momentum rotation rule:
 - one open position at a time across `SOXL`, `TQQQ`, and `TECL`
 
 For a new intraday-momentum entry, live sizing uses the fixed
-`IBKR_LIVE_TRADABLE_CAPITAL_USD` cash budget from the live-context cache,
-then subtracts `IBKR_ENTRY_CASH_RESERVE_USD` (default 10 USD) as a commission
-and cash safety buffer. It does not use margin `BuyingPower`, and it does not
-grow just because the account balance rises. The ATR-based
-`IBKR_MAX_RISK_PER_TRADE` limit still applies, so the order quantity is the
-lower of the cash-sized and risk-sized quantities. The read-only live-context
-process refreshes this value in advance; strategy execution reads only the
-local cache and does not request the balance from IBKR. Every run prints the
-usable USD amount near the start of its report and reuses that same value if
-it reaches a new-entry decision. A missing, stale, or invalid cached value is
-explicitly marked as a fallback and uses the fixed live tradable capital minus
-the same cash reserve (4490 USD with the default 4500 USD cap).
+`IBKR_LIVE_TRADABLE_CAPITAL_USD` cash budget from the live context cache,
+then subtracts `IBKR_ENTRY_CASH_RESERVE_USD` (default 10 USD) as a
+commission and cash safety buffer. It does not use margin `BuyingPower`, and
+it does not grow just because the account balance rises. The
+ATR-based `IBKR_MAX_RISK_PER_TRADE` limit still applies, so the order quantity
+is the lower of the cash-sized and risk-sized quantities. The read-only
+live-context process refreshes this value in advance; strategy execution reads
+only the local cache and does not request the balance from IBKR. Every run
+prints the usable USD amount near the start of its report and reuses that same
+value if it reaches a new-entry decision. A missing, stale, or invalid cached
+value is explicitly marked as a fallback and uses the fixed live tradable
+capital minus the same cash reserve (4490 USD with the default 4500 USD cap).
 
 Run the scanner and exit manager with the current default
 `rotation-hysteresis-v2` profile:
@@ -242,9 +242,6 @@ In live trading mode, the intraday scanners refuse delayed market data:
 - The scanner stops entering and liquidates positions during the final
   `IBKR_FLATTEN_BEFORE_CLOSE_MINUTES=10` minutes. Run the command on a schedule
   that includes this window; no software can flatten a position if it is not running.
-- A separate `eod-flatten-protect` command exists for the end-of-day flatten
-  safeguard. It uses its own runtime lock, rechecks the strategy scope, and
-  refuses to report success while any strategy position remains open.
 - The mandatory flatten path runs before signal-bar and quote loading. A stale
   or incomplete three-symbol signal group therefore cannot prevent a known
   strategy position from reaching the reduce-only end-of-day exit path.
@@ -446,7 +443,7 @@ Keep a backtest aligned with the live strategy before interpreting its return:
   evaluates stop/take conditions from bar closes, permits at most one completed
   trade per session, and liquidates any remaining position at the session end.
 
-Example calibrated run using the live rotation profile and a `$4,000` order
+Example calibrated run using the live rotation profile and a `$4,500` order
 budget:
 
 ```bash
@@ -455,8 +452,8 @@ source .env
 set +a
 ibkr-bot backtest-momentum \
   --profile rotation-hysteresis-v2 \
-  --capital 4000 \
-  --max-notional 4000 \
+  --capital 4500 \
+  --max-notional 10000 \
   --commission-per-order 1.00 \
   --slippage-bps 1.0 \
   --spread-bps 1.0
@@ -482,10 +479,7 @@ The current live checkout sets `IBKR_MAX_RISK_PER_TRADE=120`; the committed
 Filled entries receive broker-hosted GTC stop/take OCA orders. On restart, the
 scanner queries active and completed IBKR orders by deterministic order ref,
 rebuilds missing protection for an open position, and refuses duplicate entry
-tasks. The backtest command also supports `--compare-min-bars 34` so the
-warm-up candidate can be compared against the frozen live baseline without
-changing the live profile.
-Order snapshots distinguish active, partial, filled, cancelled, and
+tasks. Order snapshots distinguish active, partial, filled, cancelled, and
 rejected/inactive states.
 
 The daily-entry state file is published with an atomic replacement. The live

@@ -15,11 +15,9 @@ from zoneinfo import ZoneInfo
 from .broker import BrokerError, IbkrBroker, format_table
 from .backtest import (
     BacktestCostModel,
-    compare_backtest_results,
     evaluate_fixed_strategy_walk_forward,
     evaluate_parameter_stability,
     validate_historical_bar_coverage,
-    summarize_backtest_result,
 )
 from .config import Settings, load_settings
 from .historical_cache import (
@@ -55,7 +53,6 @@ from .strategy import (
 NEW_YORK = ZoneInfo("America/New_York")
 LIVE_BAR_PUBLICATION_GRACE_SECONDS = 2.0
 DEFAULT_MOMENTUM_PROFILE = "rotation-hysteresis-v2"
-FIXED_LIVE_TRADABLE_CAPITAL_USD = 4500.0
 INTRADAY_MOMENTUM_RUNTIME_TIMEOUT_SECONDS = 60.0
 INTRADAY_MOMENTUM_REMOTE_REQUEST_TIMEOUT_SECONDS = 3.0
 FROZEN_ROTATION_HYSTERESIS_VERSION = "rotation-hysteresis-v1"
@@ -286,23 +283,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="allow entries without the close being above VWAP",
     )
 
-    flatten = subparsers.add_parser(
-        "eod-flatten-protect",
-        help="run the end-of-day reduce-only flatten safeguard independently of the main poll",
-    )
-    flatten.add_argument(
-        "--profile",
-        choices=MOMENTUM_PROFILE_CHOICES,
-        default=DEFAULT_MOMENTUM_PROFILE,
-        help="strategy preset used to resolve the traded symbols",
-    )
-    flatten.add_argument(
-        "--benchmark-symbol",
-        type=str,
-        default="QQQ",
-        help="market regime benchmark symbol used to resolve the market session",
-    )
-
     backtest = subparsers.add_parser(
         "backtest-momentum",
         help="backtest the intraday momentum rotation rule with transaction costs",
@@ -349,7 +329,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--max-notional", type=float, default=None, help="cap per order notional"
     )
     backtest.add_argument(
-        "--capital", type=float, default=1_000.0, help="starting capital"
+        "--capital", type=float, default=4_500.0, help="starting capital"
     )
     backtest.add_argument(
         "--profile",
@@ -373,12 +353,6 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     backtest.add_argument(
         "--min-bars", type=int, default=30, help="minimum bars required before trading"
-    )
-    backtest.add_argument(
-        "--compare-min-bars",
-        type=int,
-        default=None,
-        help="optionally rerun the same backtest with a second min_bars value for comparison",
     )
     backtest.add_argument(
         "--stop-loss-pct", type=float, default=0.008, help="stop loss percentage"
@@ -748,40 +722,6 @@ def _require_latest_completed_bar_group(
             )
 
 
-def _require_identical_bar_timelines(
-    bars_by_symbol: dict[str, list[Bar]],
-    symbols: tuple[str, ...],
-) -> None:
-    """Fail closed when the strategy symbols do not share the same bar timeline."""
-
-    timelines: dict[str, list[datetime]] = {}
-    for symbol in symbols:
-        bars = bars_by_symbol.get(symbol, [])
-        if not bars:
-            raise BrokerError(f"missing bars for {symbol}")
-        timeline = [_normalize_bar_time(bar.time) for bar in bars]
-        for previous, current in zip(timeline, timeline[1:]):
-            if current <= previous:
-                raise BrokerError(
-                    f"non-monotonic bar timeline for {symbol}: "
-                    f"{previous.isoformat()} -> {current.isoformat()}"
-                )
-        if len(timeline) != len(set(timeline)):
-            raise BrokerError(f"duplicate bar timestamps for {symbol}")
-        timelines[symbol] = timeline
-
-    baseline_symbol = symbols[0]
-    baseline = timelines[baseline_symbol]
-    for symbol in symbols[1:]:
-        if timelines[symbol] != baseline:
-            raise BrokerError(
-                "bar timelines are not aligned across strategy symbols: "
-                f"{baseline_symbol}={baseline[-1].isoformat() if baseline else '[]'} "
-                f"vs {symbol}="
-                f"{timelines[symbol][-1].isoformat() if timelines[symbol] else '[]'}"
-            )
-
-
 def _strategy_quote(
     broker: IbkrBroker,
     settings: Settings,
@@ -820,10 +760,6 @@ def _orders_state_path(settings: Settings, now: datetime | None = None) -> Path:
 def _strategy_runtime_lock_path(settings: Settings, profile: str) -> Path:
     del profile  # All intraday profiles share symbols, positions, and order state.
     return Path(settings.state_dir).expanduser() / "intraday-momentum.run.lock"
-
-
-def _flatten_runtime_lock_path(settings: Settings) -> Path:
-    return Path(settings.state_dir).expanduser() / "eod-flatten-protect.run.lock"
 
 
 def _live_quote_cache_path(settings: Settings) -> Path:
@@ -1018,18 +954,12 @@ def _load_entry_state(
         return {"entry_count": 0, "entries": []}
     try:
         data = json.loads(path.read_text())
-    except OSError as exc:
-        raise BrokerError(f"unable to read entry state {path}: {exc}") from exc
-    except json.JSONDecodeError as exc:
-        raise BrokerError(f"entry state is not valid JSON: {path}") from exc
+    except (OSError, json.JSONDecodeError):
+        return {"entry_count": 0, "entries": []}
     if not isinstance(data, dict):
-        raise BrokerError(f"entry state is not a JSON object: {path}")
-    entry_count = data.get("entry_count")
-    entries = data.get("entries")
-    if not isinstance(entry_count, int) or entry_count < 0:
-        raise BrokerError(f"entry state has invalid entry_count: {path}")
-    if not isinstance(entries, list):
-        raise BrokerError(f"entry state has invalid entries list: {path}")
+        return {"entry_count": 0, "entries": []}
+    data.setdefault("entry_count", 0)
+    data.setdefault("entries", [])
     return data
 
 
@@ -1194,7 +1124,6 @@ def _load_intraday_market_data(
                         )
                         for symbol in symbols
                     }
-                    _require_identical_bar_timelines(cached_bars, symbols)
                     _require_latest_completed_bar_group(
                         cached_bars,
                         symbols,
@@ -1226,7 +1155,6 @@ def _load_intraday_market_data(
                     )
                     for symbol in symbols
                 }
-                _require_identical_bar_timelines(bars_by_symbol, symbols)
                 _require_latest_completed_bar_group(
                     bars_by_symbol,
                     symbols,
@@ -1578,10 +1506,9 @@ def _tradable_capital_snapshot(
         raise BrokerError("IBKR_ENTRY_CASH_RESERVE_USD must be finite and non-negative")
     summary: dict[str, object] = {
         "currency": "USD",
-        "sizing_basis": "fixed strategy capital - cash reserve",
+        "sizing_basis": "min(TotalCashValue, AvailableFunds) - cash reserve",
         "cash_reserve_usd": round(reserve, 2),
         "uses_margin_buying_power": False,
-        "strategy_capital_usd": settings.live_tradable_capital_usd,
     }
     try:
         available = load_fresh_cached_tradable_capital(
@@ -1597,7 +1524,7 @@ def _tradable_capital_snapshot(
             "status": "fallback",
             "usable_cash": round(fallback, 2),
             "reason": type(exc).__name__,
-            "source": "fixed_4500_cap",
+            "source": "configured_cap",
         }
     usable = max(0.0, available - reserve)
     return usable, {
@@ -1606,7 +1533,6 @@ def _tradable_capital_snapshot(
         "usable_cash": round(usable, 2),
         "reason": None,
         "source": "live_context_cache",
-        "strategy_capital_usd": available,
     }
 
 
@@ -1623,10 +1549,6 @@ def _ensure_protective_oca(
     quantity = int(float(position_row["position"]))
     average_cost = float(position_row["avgCost"])
     order_ref_prefix = f"momentum-{now.date()}-{symbol}-protect"
-    expected_refs = {
-        f"{order_ref_prefix}-stop",
-        f"{order_ref_prefix}-take",
-    }
     if broker.protective_oca_is_complete(
         symbol, quantity, order_ref_prefix=order_ref_prefix
     ):
@@ -1635,7 +1557,6 @@ def _ensure_protective_oca(
     active_sells = broker.active_trades_for(symbol, "SELL")
     incomplete_strategy_orders = []
     conflicting_orders = []
-    active_expected_orders = []
     for trade in active_sells:
         order = getattr(trade, "order", None)
         order_ref = str(getattr(order, "orderRef", "") or "")
@@ -1643,29 +1564,12 @@ def _ensure_protective_oca(
             order_ref.startswith("momentum-") and "-protect-" in order_ref
         ):
             incomplete_strategy_orders.append(trade)
-            if order_ref in expected_refs:
-                active_expected_orders.append(trade)
         else:
             conflicting_orders.append(trade)
     if conflicting_orders:
         raise BrokerError(
             f"active non-protective SELL order exists for {symbol}; "
             "refusing to replace protection"
-        )
-
-    if len(active_expected_orders) == 1:
-        missing_ref = (
-            expected_refs - {
-                str(
-                    getattr(getattr(active_expected_orders[0], "order", None), "orderRef", "")
-                    or ""
-                )
-            }
-        ).pop()
-        raise BrokerError(
-            f"protective OCA incomplete for {symbol}; "
-            f"preserving active leg {getattr(getattr(active_expected_orders[0], 'order', None), 'orderRef', '')} "
-            f"and waiting for {missing_ref}"
         )
 
     for trade in incomplete_strategy_orders:
@@ -1723,94 +1627,6 @@ def _ensure_protective_oca(
             now,
         )
     return "recreated" if incomplete_strategy_orders else "created"
-
-
-def _submit_and_confirm_entry_protection(
-    broker: IbkrBroker,
-    settings: Settings,
-    strategy: IntradayMomentumStrategy | SemiconductorRotationStrategy,
-    symbol: str,
-    filled_quantity: int,
-    average_fill_price: float,
-    bars: list[Bar],
-    now: datetime,
-) -> tuple[float, float]:
-    stop_price, take_price = strategy.protective_prices(
-        symbol, average_fill_price, bars
-    )
-    order_ref_prefix = f"momentum-{now.date()}-{symbol}-protect"
-    protective_trades = broker.place_protective_oca(
-        symbol,
-        filled_quantity,
-        stop_price,
-        take_price,
-        order_ref=order_ref_prefix,
-    )
-    for order_type, protective_trade, protective_price in (
-        ("STP", protective_trades[0], stop_price),
-        ("LMT", protective_trades[1], take_price),
-    ):
-        _record_order_state(
-            settings,
-            TradeRequest(
-                symbol=symbol,
-                action="SELL",
-                quantity=filled_quantity,
-                order_type=order_type,
-                limit_price=(
-                    protective_price if order_type == "LMT" else None
-                ),
-                time_in_force="GTC",
-                reduce_only=True,
-            ),
-            protective_trade,
-        )
-    if not broker.protective_oca_is_complete(
-        symbol, filled_quantity, order_ref_prefix=order_ref_prefix
-    ):
-        raise BrokerError(
-            f"protective OCA incomplete for {symbol}; "
-            "refusing to record daily entry without confirmed broker-hosted stop/take"
-        )
-    return stop_price, take_price
-
-
-def _submit_and_confirm_reduce_only_exit(
-    broker: IbkrBroker,
-    settings: Settings,
-    request: TradeRequest,
-    reason: str,
-    *,
-    fill_wait_seconds: float,
-) -> object | None:
-    exit_trade = _submit_or_print(broker, settings, request, reason)
-    if (
-        exit_trade is None
-        or settings.readonly
-        or settings.dry_run
-    ):
-        return exit_trade
-    broker.wait_for_trade_update(exit_trade, fill_wait_seconds)
-    _record_order_state(settings, request, exit_trade)
-    filled = _trade_filled_quantity(exit_trade)
-    remaining = _trade_remaining_quantity(exit_trade)
-    if filled <= 0:
-        if remaining > 0:
-            broker.cancel_order(exit_trade)
-            _record_order_state(settings, request, exit_trade)
-        raise BrokerError(
-            f"reduce-only exit for {request.symbol} was not filled"
-        )
-    if remaining > 0:
-        broker.cancel_order(exit_trade)
-        _record_order_state(settings, request, exit_trade)
-        filled = _trade_filled_quantity(exit_trade)
-        remaining = _trade_remaining_quantity(exit_trade)
-    if remaining > 0:
-        raise BrokerError(
-            f"reduce-only exit cancellation unresolved for {request.symbol}"
-        )
-    return exit_trade
 
 
 def _ensure_positions_protected_before_market_data(
@@ -1894,13 +1710,6 @@ def _flatten_strategy_positions_if_due(
             order_ref=f"momentum-{now.date()}-{symbol}-eod-exit",
             reduce_only=True,
         )
-        pending_sell_quantity = broker.active_order_quantity(symbol, "SELL")
-        if pending_sell_quantity >= quantity:
-            print(
-                f"mandatory end-of-day flatten already active for {symbol}; "
-                "no duplicate exit"
-            )
-            continue
         risk_settings = replace(
             settings,
             allowed_symbols=strategy.symbols,
@@ -1910,30 +1719,16 @@ def _flatten_strategy_positions_if_due(
             request,
             0.0,
             position_quantity=float(position_row["position"]),
-            pending_sell_quantity=pending_sell_quantity,
+            pending_sell_quantity=broker.active_order_quantity(symbol, "SELL"),
         )
         print(risk_decision.reason)
-        if not risk_decision.allowed:
-            raise BrokerError(
-                f"mandatory end-of-day flatten risk check rejected {symbol}: "
-                f"{risk_decision.reason}"
+        if risk_decision.allowed:
+            _submit_or_print(
+                broker,
+                settings,
+                request,
+                f"mandatory end-of-day flatten: {symbol} qty={quantity}",
             )
-        exit_trade = _submit_and_confirm_reduce_only_exit(
-            broker,
-            settings,
-            request,
-            f"mandatory end-of-day flatten: {symbol} qty={quantity}",
-            fill_wait_seconds=settings.entry_order_fill_wait_seconds,
-        )
-        if exit_trade is not None and not settings.readonly and not settings.dry_run:
-            remaining_positions = _parse_position_rows(
-                broker.positions(), strategy.symbols
-            )
-            if symbol in remaining_positions:
-                raise BrokerError(
-                    f"mandatory end-of-day flatten incomplete for {symbol}: "
-                    f"remaining position {remaining_positions[symbol]['position']}"
-                )
     return True
 
 
@@ -2214,6 +2009,9 @@ def _run_live_context_cache(settings: Settings, args: argparse.Namespace) -> int
                                 "session_date": now.date().isoformat(),
                                 "source": "SMART",
                                 "tradable_capital_status": "available",
+                                "tradable_capital_usd": round(
+                                    tradable_capital_usd, 2
+                                ),
                             },
                             sort_keys=True,
                         ),
@@ -2273,20 +2071,6 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 f"intraday momentum skipped: another {args.profile} run is active"
             )
-            return 0
-        strategy_run_deadline = arm_runtime_lock_deadline(
-            strategy_run_lock, INTRADAY_MOMENTUM_RUNTIME_TIMEOUT_SECONDS
-        )
-        settings = replace(
-            settings,
-            request_timeout=INTRADAY_MOMENTUM_REMOTE_REQUEST_TIMEOUT_SECONDS,
-        )
-    elif args.command == "eod-flatten-protect":
-        lock_path = _flatten_runtime_lock_path(settings)
-        try:
-            strategy_run_lock = acquire_runtime_lock(lock_path)
-        except RuntimeLockError:
-            print("eod flatten protection skipped: another run is active")
             return 0
         strategy_run_deadline = arm_runtime_lock_deadline(
             strategy_run_lock, INTRADAY_MOMENTUM_RUNTIME_TIMEOUT_SECONDS
@@ -3010,16 +2794,37 @@ def main(argv: list[str] | None = None) -> int:
                     average_fill_price = _trade_average_fill_price(trade) or limit_price
                     if filled_quantity > 0:
                         bars = strategy_bars[decision.symbol]
-                        stop_price, take_price = _submit_and_confirm_entry_protection(
-                            broker,
-                            settings,
-                            strategy,
+                        stop_price, take_price = strategy.protective_prices(
+                            decision.symbol, average_fill_price, bars
+                        )
+                        protective_trades = broker.place_protective_oca(
                             decision.symbol,
                             filled_quantity,
-                            average_fill_price,
-                            bars,
-                            now,
+                            stop_price,
+                            take_price,
+                            order_ref=f"momentum-{datetime.now(NEW_YORK).date()}-{decision.symbol}-protect",
                         )
+                        for order_type, protective_trade, protective_price in (
+                            ("STP", protective_trades[0], stop_price),
+                            ("LMT", protective_trades[1], take_price),
+                        ):
+                            _record_order_state(
+                                settings,
+                                TradeRequest(
+                                    symbol=decision.symbol,
+                                    action="SELL",
+                                    quantity=filled_quantity,
+                                    order_type=order_type,
+                                    limit_price=(
+                                        protective_price
+                                        if order_type == "LMT"
+                                        else None
+                                    ),
+                                    time_in_force="GTC",
+                                    reduce_only=True,
+                                ),
+                                protective_trade,
+                            )
                         _record_daily_entry(
                             settings,
                             request,
@@ -3043,40 +2848,6 @@ def main(argv: list[str] | None = None) -> int:
                             else "partially_filled"
                         )
                         print(f"entry_order_result={fill_result}")
-            return 0
-
-        if args.command == "eod-flatten-protect":
-            strategy = _build_momentum_strategy(args, settings)
-            now = datetime.now(NEW_YORK)
-            session = _cached_or_broker_market_session(
-                broker, settings, strategy.benchmark_symbol, now
-            )
-            if session is None:
-                print("exchange holiday: skipping eod-flatten-protect")
-                return 0
-            if not _should_flatten(settings, now, session):
-                print("outside flatten window: no action")
-                return 0
-            handled = _flatten_strategy_positions_if_due(
-                broker, settings, strategy, now, session
-            )
-            current_positions = _parse_position_rows(
-                broker.positions(), strategy.symbols
-            )
-            _validate_strategy_positions(current_positions)
-            if current_positions:
-                raise BrokerError(
-                    "end-of-day flatten protection incomplete; remaining positions: "
-                    + ", ".join(
-                        f"{symbol}={row['position']}"
-                        for symbol, row in sorted(current_positions.items())
-                    )
-                )
-            print(
-                "end-of-day flatten protection complete"
-                if handled
-                else "end-of-day flatten protection skipped"
-            )
             return 0
 
         if args.command == "backtest-momentum":
@@ -3374,20 +3145,32 @@ def main(argv: list[str] | None = None) -> int:
                 fill_bars_by_symbol=fill_bars_by_symbol,
             )
 
+            def result_report(result):
+                return {
+                    "gross_return_pct": round(result.gross_return_pct, 2),
+                    "net_return_pct": round(result.net_return_pct, 2),
+                    "trade_count": result.trade_count,
+                    "win_count": result.win_count,
+                    "loss_count": result.loss_count,
+                    "commission_paid": round(result.total_commission, 2),
+                    "spread_cost": round(result.total_spread_cost, 2),
+                    "slippage_cost": round(result.total_slippage_cost, 2),
+                }
+
             report["walk_forward_folds"] = [
                 {
                     "train_start": fold.train_start.isoformat(),
                     "train_end": fold.train_end.isoformat(),
                     "test_start": fold.test_start.isoformat(),
                     "test_end": fold.test_end.isoformat(),
-                    **summarize_backtest_result(fold.result),
+                    **result_report(fold.result),
                 }
                 for fold in evaluation.folds
             ]
             report["final_holdout"] = {
                 "start": evaluation.holdout_start.isoformat(),
                 "end": evaluation.holdout_end.isoformat(),
-                **summarize_backtest_result(evaluation.holdout),
+                **result_report(evaluation.holdout),
             }
             report["parameter_stability"] = {
                 "holdout_accessed": False,
@@ -3407,46 +3190,6 @@ def main(argv: list[str] | None = None) -> int:
                     for item in stability
                 ],
             }
-            if args.compare_min_bars is not None:
-                compare_strategy = replace(
-                    strategy, min_bars=args.compare_min_bars
-                )
-                compare_evaluation = evaluate_fixed_strategy_walk_forward(
-                    bars_by_symbol,
-                    compare_strategy,
-                    cost_model,
-                    args.capital,
-                    train_days=args.train_days,
-                    test_days=args.test_days,
-                    step_days=args.step_days,
-                    holdout_days=args.holdout_days,
-                    entry_fill_model=entry_fill_model,
-                    fill_bars_by_symbol=fill_bars_by_symbol,
-                )
-                report["warmup_comparison"] = {
-                    "baseline_min_bars": getattr(strategy, "min_bars", None),
-                    "candidate_min_bars": args.compare_min_bars,
-                    "baseline_holdout": summarize_backtest_result(
-                        evaluation.holdout
-                    ),
-                    "candidate_holdout": summarize_backtest_result(
-                        compare_evaluation.holdout
-                    ),
-                    "baseline_folds": [
-                        summarize_backtest_result(fold.result)
-                        for fold in evaluation.folds
-                    ],
-                    "candidate_folds": [
-                        summarize_backtest_result(fold.result)
-                        for fold in compare_evaluation.folds
-                    ],
-                    "delta_holdout": compare_backtest_results(
-                        evaluation.holdout,
-                        compare_evaluation.holdout,
-                        baseline_min_bars=getattr(strategy, "min_bars", None),
-                        candidate_min_bars=args.compare_min_bars,
-                    )["delta"],
-                }
             print(json.dumps(report, indent=2, sort_keys=True))
             return 0
     except (BrokerError, ConnectionError, TimeoutError, OSError) as exc:

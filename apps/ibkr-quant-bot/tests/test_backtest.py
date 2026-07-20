@@ -5,8 +5,6 @@ from datetime import datetime, timedelta, timezone
 
 from ibkr_quant_bot.backtest import (
     BacktestCostModel,
-    BacktestResult,
-    compare_backtest_results,
     ProfitLockRule,
     evaluate_fixed_strategy_walk_forward,
     evaluate_parameter_stability,
@@ -65,47 +63,6 @@ def make_benchmark_bars(start_price: float = 300.0) -> list[Bar]:
 
 
 class BacktestCostTest(unittest.TestCase):
-    def test_compare_backtest_results_reports_delta(self) -> None:
-        baseline = BacktestResult(
-            initial_capital=1_000.0,
-            gross_ending_capital=1_120.0,
-            net_ending_capital=1_090.0,
-            gross_return_pct=12.0,
-            net_return_pct=9.0,
-            trade_count=2,
-            win_count=1,
-            loss_count=1,
-            total_commission=3.0,
-            total_slippage_cost=1.5,
-            total_spread_cost=2.5,
-        )
-        candidate = BacktestResult(
-            initial_capital=1_000.0,
-            gross_ending_capital=1_150.0,
-            net_ending_capital=1_115.0,
-            gross_return_pct=15.0,
-            net_return_pct=11.5,
-            trade_count=3,
-            win_count=2,
-            loss_count=1,
-            total_commission=4.0,
-            total_slippage_cost=1.0,
-            total_spread_cost=2.0,
-        )
-
-        report = compare_backtest_results(
-            baseline,
-            candidate,
-            baseline_min_bars=30,
-            candidate_min_bars=34,
-        )
-
-        self.assertEqual(30, report["baseline_min_bars"])
-        self.assertEqual(34, report["candidate_min_bars"])
-        self.assertEqual(2.5, report["delta"]["net_return_pct"])
-        self.assertEqual(1, report["delta"]["trade_count"])
-        self.assertEqual(1.0, report["delta"]["commission_paid"])
-
     def test_historical_preflight_accepts_two_complete_aligned_sessions(self) -> None:
         start = datetime(2026, 7, 10, 13, 30, tzinfo=timezone.utc)
         bars_by_symbol = {}

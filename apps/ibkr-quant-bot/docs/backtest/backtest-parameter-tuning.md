@@ -155,7 +155,7 @@ Do not judge a candidate only by raw net return percentage on the walk-forward
 report. For this strategy, the more useful comparison is:
 
 - absolute net profit
-- profit normalized by deployable capital, for example `net_profit / 4000`
+- profit normalized by deployable capital, for example `net_profit / 4500`
 - OOS fold consistency
 - trade count and win/loss balance
 - how much of the result is consumed by commission, spread, and slippage

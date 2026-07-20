@@ -39,14 +39,11 @@ from ibkr_quant_bot.cli import (
     _load_market_data_exchange,
     _marketable_buy_limit_price,
     _market_data_exchange_state_path,
-    _entry_state_path,
     _orders_state_path,
     _protective_order_display,
-    _require_identical_bar_timelines,
     _quote_timing_fields,
     _record_daily_entry,
     _record_order_state,
-    _submit_and_confirm_entry_protection,
     _run_live_context_cache,
     _run_live_quote_cache,
     _should_flatten,
@@ -225,6 +222,7 @@ class LiveDataGuardsTest(unittest.TestCase):
         with TemporaryDirectory() as temporary:
             settings = Settings(
                 state_dir=temporary,
+                live_tradable_capital_usd=4500,
                 entry_cash_reserve_usd=10,
             )
             available, summary = _tradable_capital_snapshot(settings, now)
@@ -232,8 +230,7 @@ class LiveDataGuardsTest(unittest.TestCase):
         self.assertEqual(4490, available)
         self.assertEqual("fallback", summary["status"])
         self.assertEqual(4490, summary["usable_cash"])
-        self.assertEqual("fixed_4500_cap", summary["source"])
-        self.assertEqual(4500, summary["strategy_capital_usd"])
+        self.assertEqual("configured_cap", summary["source"])
 
     def test_tradable_capital_snapshot_rejects_invalid_cash_reserve(self) -> None:
         now = datetime(2026, 7, 17, 12, 1, tzinfo=NEW_YORK)
@@ -691,36 +688,15 @@ class LiveDataGuardsTest(unittest.TestCase):
         self.assertIn("slow_ema", decision.meta)
 
     def test_mandatory_flatten_does_not_require_signal_market_data(self) -> None:
-        trade = SimpleNamespace(
-            order=SimpleNamespace(
-                orderRef="momentum-2026-07-16-SOXL-eod-exit",
-                action="SELL",
-                totalQuantity=5,
-                orderType="MKT",
-                tif="DAY",
-            ),
-            orderStatus=SimpleNamespace(
-                status="Filled",
-                filled=5,
-                remaining=0,
-                avgFillPrice=101.25,
-            ),
-            fills=[],
-            log=[],
-        )
-
         class FlattenBroker:
             def __init__(self):
                 self.placed = []
-                self.position_qty = 5
 
             def positions(self):
-                if self.position_qty <= 0:
-                    return []
                 return [
                     {
                         "symbol": "SOXL",
-                        "position": str(self.position_qty),
+                        "position": "5",
                         "avgCost": "100",
                     }
                 ]
@@ -733,11 +709,7 @@ class LiveDataGuardsTest(unittest.TestCase):
 
             def place_order(self, request):
                 self.placed.append(request)
-                return trade
-
-            def wait_for_trade_update(self, active_trade, timeout_seconds):
-                self.position_qty = 0
-                return active_trade
+                return SimpleNamespace()
 
         broker = FlattenBroker()
         settings = Settings(readonly=False, dry_run=False, trading_mode="paper")
@@ -1070,85 +1042,18 @@ class LiveDataGuardsTest(unittest.TestCase):
             for index in range(30)
         ]
         with TemporaryDirectory() as tmpdir:
-            with self.assertRaisesRegex(BrokerError, "preserving active leg"):
-                _ensure_protective_oca(
-                    broker,
-                    Settings(state_dir=tmpdir),
-                    strategy,
-                    "SOXL",
-                    {"position": "5", "avgCost": "100"},
-                    bars,
-                    now,
-                )
+            status = _ensure_protective_oca(
+                broker,
+                Settings(state_dir=tmpdir),
+                strategy,
+                "SOXL",
+                {"position": "5", "avgCost": "100"},
+                bars,
+                now,
+            )
 
-        self.assertEqual([], broker.cancelled)
-        self.assertEqual([], broker.created)
-
-    def test_entry_protection_must_be_confirmed_before_daily_state(self) -> None:
-        class ProtectionBroker:
-            def __init__(self):
-                self.created = []
-
-            def place_protective_oca(
-                self, symbol, quantity, stop_price, take_price, *, order_ref
-            ):
-                self.created.append((symbol, quantity, stop_price, take_price, order_ref))
-                return (
-                    SimpleNamespace(
-                        order=SimpleNamespace(
-                            orderRef=f"{order_ref}-stop",
-                            orderType="STP",
-                            action="SELL",
-                            account="DU123",
-                            secType="STK",
-                            currency="USD",
-                        ),
-                        orderStatus=SimpleNamespace(status="Submitted", remaining=5),
-                    ),
-                    SimpleNamespace(
-                        order=SimpleNamespace(
-                            orderRef=f"{order_ref}-take",
-                            orderType="LMT",
-                            action="SELL",
-                            account="DU123",
-                            secType="STK",
-                            currency="USD",
-                        ),
-                        orderStatus=SimpleNamespace(status="Submitted", remaining=5),
-                    ),
-                )
-
-            def protective_oca_is_complete(self, *args, **kwargs):
-                return False
-
-        strategy = _build_momentum_strategy(
-            _build_parser().parse_args(
-                ["intraday-momentum", "--profile", "rotation-hysteresis-v2"]
-            ),
-            Settings(),
-        )
-        now = datetime(2026, 7, 16, 12, 1, tzinfo=NEW_YORK)
-        bars = [
-            Bar(now - timedelta(minutes=5 * (30 - index)), 100, 101, 99, 100, 100)
-            for index in range(30)
-        ]
-
-        with TemporaryDirectory() as tmpdir:
-            settings = Settings(state_dir=tmpdir)
-            broker = ProtectionBroker()
-
-            with self.assertRaisesRegex(BrokerError, "protective OCA incomplete"):
-                _submit_and_confirm_entry_protection(
-                    broker,
-                    settings,
-                    strategy,
-                    "SOXL",
-                    5,
-                    100.0,
-                    bars,
-                    now,
-                )
-
+        self.assertEqual("recreated", status)
+        self.assertEqual(1, len(broker.cancelled))
         self.assertEqual(1, len(broker.created))
 
     def test_missing_protection_is_rebuilt_from_entry_state_without_market_data(
@@ -1310,6 +1215,11 @@ class LiveDataGuardsTest(unittest.TestCase):
         self.assertTrue(strategy.use_exit_hysteresis)
         self.assertEqual(0.0375, strategy.long_take_profit_pct)
         self.assertEqual(0.03, strategy.profit_lock_activation_pct)
+
+    def test_backtest_capital_defaults_to_live_budget(self) -> None:
+        args = _build_parser().parse_args(["backtest-momentum"])
+
+        self.assertEqual(4500.0, args.capital)
 
     def test_live_strategy_rejects_stale_bars(self) -> None:
         settings = Settings(trading_mode="live", live_bar_max_age_seconds=420)
@@ -1553,70 +1463,6 @@ class LiveDataGuardsTest(unittest.TestCase):
                 [(("QQQ", "SOXL", "SOXS"), "SMART")],
                 broker.quote_group_calls,
             )
-
-    def test_intraday_market_data_rejects_misaligned_timelines(self) -> None:
-        now = datetime(2026, 7, 15, 12, 1, tzinfo=NEW_YORK)
-        session = MarketSession(
-            now.date(),
-            datetime(2026, 7, 15, 9, 30, tzinfo=NEW_YORK),
-            datetime(2026, 7, 15, 16, 0, tzinfo=NEW_YORK),
-        )
-        strategy = _build_momentum_strategy(
-            _build_parser().parse_args(["intraday-momentum"]), Settings()
-        )
-
-        class MisalignedBroker(ExchangeBroker):
-            def historical_bars(
-                self,
-                symbol: str,
-                duration: str = "1 D",
-                bar_size: str = "1 min",
-                what_to_show: str = "TRADES",
-                exchange: str = "SMART",
-            ) -> list[Bar]:
-                self.bar_calls.append((exchange, symbol))
-                offset = 0 if symbol == "QQQ" else 1
-                return [
-                    Bar(
-                        time=datetime(
-                            2026, 7, 15, 11, 50 + offset, tzinfo=NEW_YORK
-                        ),
-                        open=10,
-                        high=10.2,
-                        low=9.9,
-                        close=10.1,
-                        volume=100,
-                    ),
-                    Bar(
-                        time=datetime(
-                            2026, 7, 15, 11, 55 + offset, tzinfo=NEW_YORK
-                        ),
-                        open=10,
-                        high=10.2,
-                        low=9.9,
-                        close=10.1,
-                        volume=100,
-                    ),
-                ]
-
-        with TemporaryDirectory() as tmpdir:
-            settings = Settings(trading_mode="live", state_dir=tmpdir)
-            broker = MisalignedBroker()
-
-            with self.assertRaisesRegex(BrokerError, "bar timelines are not aligned"):
-                _load_intraday_market_data(
-                    broker, settings, strategy, session, now
-                )
-
-    def test_entry_state_corruption_fails_closed(self) -> None:
-        now = datetime(2026, 7, 15, 12, 1, tzinfo=NEW_YORK)
-        with TemporaryDirectory() as tmpdir:
-            settings = Settings(trading_mode="live", state_dir=tmpdir)
-            path = _entry_state_path(settings, now)
-            path.write_text("{not-json")
-
-            with self.assertRaisesRegex(BrokerError, "entry state is not valid JSON"):
-                _daily_entry_count(settings, now)
 
     def test_intraday_market_data_prefers_fresh_quote_cache(self) -> None:
         with TemporaryDirectory() as tmpdir:

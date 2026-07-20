@@ -89,56 +89,6 @@ class BacktestResult:
     trades: tuple[BacktestTrade, ...] = ()
 
 
-def summarize_backtest_result(result: BacktestResult) -> dict[str, float | int]:
-    return {
-        "gross_return_pct": round(result.gross_return_pct, 2),
-        "net_return_pct": round(result.net_return_pct, 2),
-        "trade_count": result.trade_count,
-        "win_count": result.win_count,
-        "loss_count": result.loss_count,
-        "commission_paid": round(result.total_commission, 2),
-        "spread_cost": round(result.total_spread_cost, 2),
-        "slippage_cost": round(result.total_slippage_cost, 2),
-    }
-
-
-def compare_backtest_results(
-    baseline: BacktestResult,
-    candidate: BacktestResult,
-    *,
-    baseline_min_bars: int,
-    candidate_min_bars: int,
-) -> dict[str, object]:
-    baseline_summary = summarize_backtest_result(baseline)
-    candidate_summary = summarize_backtest_result(candidate)
-    return {
-        "baseline_min_bars": baseline_min_bars,
-        "candidate_min_bars": candidate_min_bars,
-        "baseline": baseline_summary,
-        "candidate": candidate_summary,
-        "delta": {
-            "gross_return_pct": round(
-                candidate.gross_return_pct - baseline.gross_return_pct, 2
-            ),
-            "net_return_pct": round(
-                candidate.net_return_pct - baseline.net_return_pct, 2
-            ),
-            "trade_count": candidate.trade_count - baseline.trade_count,
-            "win_count": candidate.win_count - baseline.win_count,
-            "loss_count": candidate.loss_count - baseline.loss_count,
-            "commission_paid": round(
-                candidate.total_commission - baseline.total_commission, 2
-            ),
-            "spread_cost": round(
-                candidate.total_spread_cost - baseline.total_spread_cost, 2
-            ),
-            "slippage_cost": round(
-                candidate.total_slippage_cost - baseline.total_slippage_cost, 2
-            ),
-        },
-    }
-
-
 @dataclass(frozen=True)
 class WalkForwardFold:
     train_start: date

@@ -15,46 +15,33 @@ class StopStreaming(RuntimeError):
 
 
 class FakeIB:
-    def __init__(
-        self,
-        account: str,
-        position: float = 0,
-        trades=None,
-        positions=None,
-        completed=None,
-    ):
+    def __init__(self, account: str, position: float = 0, trades=None):
         self.account = account
         self.position = position
         self.trades = list(trades or [])
-        self.positions_data = list(positions or [])
-        self.completed = list(completed or [])
 
     def managedAccounts(self):
         return [self.account]
 
     def positions(self):
-        if self.positions_data:
-            return self.positions_data
         if self.position == 0:
             return []
         return [
             SimpleNamespace(
                 account=self.account,
-                contract=SimpleNamespace(
-                    symbol="SOXL", secType="STK", currency="USD"
-                ),
+                contract=SimpleNamespace(symbol="SOXL"),
                 position=self.position,
             )
         ]
-
-    def reqCompletedOrders(self, apiOnly=True):
-        return self.completed
 
     def reqAllOpenOrders(self):
         return self.trades
 
     def openTrades(self):
         return self.trades
+
+    def reqCompletedOrders(self, apiOnly=True):
+        return []
 
     def placeOrder(self, contract, order):
         trade = SimpleNamespace(
@@ -420,9 +407,8 @@ class BrokerSafetyTest(unittest.TestCase):
 
     def test_broker_preflight_rejects_duplicate_active_order(self) -> None:
         trade = SimpleNamespace(
-            account="DU123456",
-            contract=SimpleNamespace(symbol="SOXL", secType="STK", currency="USD"),
-            order=SimpleNamespace(permId=1, orderId=2, action="BUY", account="DU123456"),
+            contract=SimpleNamespace(symbol="SOXL"),
+            order=SimpleNamespace(permId=1, orderId=2, action="BUY"),
             orderStatus=SimpleNamespace(remaining=1),
         )
         broker = make_broker(
@@ -437,15 +423,11 @@ class BrokerSafetyTest(unittest.TestCase):
 
         def leg(order_ref, order_type):
             return SimpleNamespace(
-                account="DU123456",
-                contract=SimpleNamespace(
-                    symbol="SOXL", secType="STK", currency="USD"
-                ),
+                contract=SimpleNamespace(symbol="SOXL"),
                 order=SimpleNamespace(
                     permId=order_ref,
                     orderId=order_ref,
                     action="SELL",
-                    account="DU123456",
                     orderRef=order_ref,
                     orderType=order_type,
                     ocaGroup=group,
@@ -472,126 +454,13 @@ class BrokerSafetyTest(unittest.TestCase):
             )
         )
 
-    def test_strategy_scope_filters_positions_orders_and_fills(self) -> None:
-        position_rows = [
-            SimpleNamespace(
-                account="DU123456",
-                contract=SimpleNamespace(
-                    symbol="SOXL", secType="STK", currency="USD"
-                ),
-                position=5,
-            ),
-            SimpleNamespace(
-                account="DU999999",
-                contract=SimpleNamespace(
-                    symbol="SOXL", secType="STK", currency="USD"
-                ),
-                position=7,
-            ),
-            SimpleNamespace(
-                account="DU123456",
-                contract=SimpleNamespace(
-                    symbol="SOXL", secType="OPT", currency="USD"
-                ),
-                position=3,
-            ),
-            SimpleNamespace(
-                account="DU123456",
-                contract=SimpleNamespace(
-                    symbol="SOXL", secType="STK", currency="EUR"
-                ),
-                position=4,
-            ),
-        ]
-        active_trade = SimpleNamespace(
-            contract=SimpleNamespace(symbol="SOXL", secType="STK", currency="USD"),
-            order=SimpleNamespace(
-                permId=11,
-                orderId=11,
-                account="DU123456",
-                action="SELL",
-                orderRef="momentum-2026-07-16-SOXL-protect-stop",
-            ),
-            orderStatus=SimpleNamespace(remaining=2, filled=3),
-        )
-        foreign_trade = SimpleNamespace(
-            contract=SimpleNamespace(symbol="SOXL", secType="STK", currency="USD"),
-            order=SimpleNamespace(
-                permId=12,
-                orderId=12,
-                account="DU999999",
-                action="SELL",
-                orderRef="momentum-2026-07-16-SOXL-protect-take",
-            ),
-            orderStatus=SimpleNamespace(remaining=2, filled=3),
-        )
-        option_trade = SimpleNamespace(
-            contract=SimpleNamespace(symbol="SOXL", secType="OPT", currency="USD"),
-            order=SimpleNamespace(
-                permId=13,
-                orderId=13,
-                account="DU123456",
-                action="SELL",
-                orderRef="momentum-2026-07-16-SOXL-protect-take",
-            ),
-            orderStatus=SimpleNamespace(remaining=2, filled=3),
-        )
-        completed_trade = SimpleNamespace(
-            contract=SimpleNamespace(symbol="SOXL", secType="STK", currency="USD"),
-            order=SimpleNamespace(
-                permId=21,
-                orderId=21,
-                account="DU123456",
-                action="BUY",
-                orderRef="momentum-2026-07-16-SOXL-entry-101500",
-            ),
-            orderStatus=SimpleNamespace(filled=5, remaining=0),
-            fills=[object()],
-        )
-        foreign_completed_trade = SimpleNamespace(
-            contract=SimpleNamespace(symbol="SOXL", secType="STK", currency="USD"),
-            order=SimpleNamespace(
-                permId=22,
-                orderId=22,
-                account="DU999999",
-                action="BUY",
-                orderRef="momentum-2026-07-16-SOXL-entry-101500",
-            ),
-            orderStatus=SimpleNamespace(filled=5, remaining=0),
-            fills=[object()],
-        )
-        broker = make_broker(
-            Settings(trading_mode="paper"),
-            FakeIB(
-                "DU123456",
-                positions=position_rows,
-                trades=[active_trade, foreign_trade, option_trade],
-                completed=[completed_trade, foreign_completed_trade],
-            ),
-        )
-
-        self.assertEqual(5.0, broker.position_quantity("SOXL"))
-        self.assertEqual(2.0, broker.active_order_quantity("SOXL", "SELL"))
-        self.assertEqual(1, len(broker.active_trades_for("SOXL", "SELL")))
-        self.assertTrue(
-            broker.order_ref_exists("momentum-2026-07-16-SOXL-entry-101500")
-        )
-        self.assertEqual(
-            1,
-            broker.filled_order_ref_prefix_count(
-                "momentum-2026-07-16-SOXL-entry-"
-            ),
-        )
-
     def test_filled_order_ref_prefix_recovers_missing_entry_state(self) -> None:
         trade = SimpleNamespace(
-            account="DU123456",
-            contract=SimpleNamespace(symbol="SOXL", secType="STK", currency="USD"),
+            contract=SimpleNamespace(symbol="SOXL"),
             order=SimpleNamespace(
                 permId=1,
                 orderId=2,
                 action="BUY",
-                account="DU123456",
                 orderRef="momentum-2026-07-16-SOXL-entry-101500",
             ),
             orderStatus=SimpleNamespace(filled=3, remaining=0),

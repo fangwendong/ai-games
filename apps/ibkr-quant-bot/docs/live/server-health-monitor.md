@@ -11,13 +11,13 @@ allowed and should cover balance and tracked positions only.
 
 The monitor reports on four areas:
 
-1. Physical resources: CPU, load, memory, swap, root/data-disk usage, and the
-   highest CPU/memory processes.
-2. botmux: active/recoverable sessions, safe zombie cleanup, scheduled-task
-   counts, and current-session protection state.
-3. IBKR infrastructure: Gateway/IBC processes, API port `4001`, a forced
+1. IBKR infrastructure: Gateway/IBC processes, API port `4001`, a forced
    read-only server-time heartbeat, and a sanitized account snapshot
    containing balance and tracked positions.
+2. botmux: active/recoverable sessions, safe zombie cleanup, scheduled-task
+   counts, and current-session protection state.
+3. Physical resources: CPU, load, memory in MB, swap, root/data-disk usage,
+   and the highest CPU/memory processes.
 4. Runtime infrastructure: process/tmux presence and file activity for the
    quote cache, live context cache, and deterministic live strategy reporter.
 
@@ -126,12 +126,13 @@ If unhealthy, put the abnormal information before every normal metric:
 建议：<next action>
 ```
 
-Then include `核心概览` with resource, botmux, IB account snapshot, and
+Then include `核心概览` with IB account snapshot, botmux, resource, and
 cache/reporter status. End with
 `指标明细`, expanding:
 
+- balance snapshot and tracked positions;
 - CPU/idle and load 1/5/15;
-- used/available memory and swap;
+- used/available memory and swap, reported in MB;
 - root and `/home` disk usage;
 - highest CPU and memory processes;
 - active sessions, cleanup count, enabled/paused task counts, and trading stage;
