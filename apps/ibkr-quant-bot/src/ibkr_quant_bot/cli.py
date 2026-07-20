@@ -1581,7 +1581,7 @@ def _tradable_capital_snapshot(
         "sizing_basis": "fixed strategy capital - cash reserve",
         "cash_reserve_usd": round(reserve, 2),
         "uses_margin_buying_power": False,
-        "strategy_capital_usd": FIXED_LIVE_TRADABLE_CAPITAL_USD,
+        "strategy_capital_usd": settings.live_tradable_capital_usd,
     }
     try:
         available = load_fresh_cached_tradable_capital(
@@ -1591,7 +1591,7 @@ def _tradable_capital_snapshot(
             now=now,
         )
     except (MarketContextCacheError, OSError, ValueError) as exc:
-        fallback = max(0.0, FIXED_LIVE_TRADABLE_CAPITAL_USD - reserve)
+        fallback = max(0.0, settings.live_tradable_capital_usd - reserve)
         return fallback, {
             **summary,
             "status": "fallback",
@@ -2192,7 +2192,7 @@ def _run_live_context_cache(settings: Settings, args: argparse.Namespace) -> int
                                 for symbol in symbols
                             }
                         last_bar_refresh_bucket = bar_refresh_bucket
-                    tradable_capital_usd = FIXED_LIVE_TRADABLE_CAPITAL_USD
+                    tradable_capital_usd = settings.live_tradable_capital_usd
                     write_market_context_cache(
                         cache_path,
                         session_date=now.date(),

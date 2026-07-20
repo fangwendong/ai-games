@@ -54,6 +54,12 @@ create an entry. This restriction applies only to new entries. Existing
 positions continue through the normal protective, software-exit, and mandatory
 end-of-session flatten paths.
 
+The live runtime also keeps `max_daily_entries=1`, so after the first filled
+entry on a New York trading date, later runs can only manage exits or
+protective orders. The strategy does not scale entry size up when the account
+cash balance increases; live sizing is anchored to the fixed tradable-capital
+cache instead.
+
 ## Live Semantics
 
 The profit lock is evaluated only when the ordinary stop, take-profit, and
