@@ -15,12 +15,15 @@ fi
 session_name=ibkr-live-strategy-reporter
 runner="$script_dir/run-live-strategy-report-loop.zsh"
 
+: ${BOTMUX_REPORT_SESSION_ID:=${BOTMUX_SESSION_ID:-}}
+: ${BOTMUX_REPORT_ROOT_MESSAGE_ID:=${BOTMUX_ROOT_MESSAGE_ID:-}}
+
 if tmux has-session -t "$session_name" 2>/dev/null; then
   exit 0
 fi
 
-: ${BOTMUX_REPORT_SESSION_ID:?BOTMUX_REPORT_SESSION_ID is required}
-: ${BOTMUX_REPORT_ROOT_MESSAGE_ID:?BOTMUX_REPORT_ROOT_MESSAGE_ID is required}
+: ${BOTMUX_REPORT_SESSION_ID:?BOTMUX_REPORT_SESSION_ID or BOTMUX_SESSION_ID is required}
+: ${BOTMUX_REPORT_ROOT_MESSAGE_ID:?BOTMUX_REPORT_ROOT_MESSAGE_ID or BOTMUX_ROOT_MESSAGE_ID is required}
 
 tmux new-session -d -s "$session_name" \
   "cd '$app_dir' && \
