@@ -21,6 +21,9 @@ Start here after reading the repository `AGENTS.md` and the application
   atomic cache, latency fields, singleton process, and recovery.
 - [Live context cache](live/ibkr-live-context-cache.md): precomputed trading calendar
   and completed 5-minute bars, validation, fallback, and maintenance.
+- [Deterministic live strategy reporter](live-strategy-reporter.md): the
+  one-minute reporter supervisor plus its start/stop wrappers, topic-routing
+  requirements, and chat-summary contract.
 - [Live strategy review log](live/live-strategy-review-log.md): sanitized session
   execution history, reconciliation, net PnL, and review notes.
   When a late broker fill arrives, update the session row and the dated block

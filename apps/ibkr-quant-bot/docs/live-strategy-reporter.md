@@ -10,6 +10,8 @@ reports remain once per minute.
 
 - One-shot runner: `scripts/run-live-strategy-report.zsh`
 - Persistent supervisor: `scripts/run-live-strategy-report-loop.zsh`
+- Daily start wrapper: `scripts/start-live-strategy-reporter.zsh`
+- Daily stop wrapper: `scripts/stop-live-strategy-reporter.zsh`
 - Formatter: `src/ibkr_quant_bot/live_report.py`
 - Latest sanitized summary: `.ibkr_bot_state/live-strategy-reporter/latest-summary.txt`
 - Latest runner status: `.ibkr_bot_state/live-strategy-reporter/latest-run.log`
@@ -27,6 +29,13 @@ non-secret variable:
 BOTMUX_REPORT_SESSION_ID=<target botmux session UUID>
 BOTMUX_REPORT_ROOT_MESSAGE_ID=<target Feishu topic root message ID>
 ```
+
+Important: `BOTMUX_REPORT_ROOT_MESSAGE_ID` must be the topic/thread root
+message's `messageId`, not a reply message id and not the nested `rootId`
+field from a child reply. When a report is routed to the wrong place, check
+`botmux history --scope chat` and use the root message's own `messageId` as the
+router target. Using a normal reply message id will create a dead-end thread
+target or fail to land where the operator expects.
 
 The runner always forces live market data and disables ARCA fallback. It does
 not override the live/readonly/dry-run/allow-live-trading switches from `.env`.
@@ -81,9 +90,31 @@ Recommended botmux schedule pair:
 - stop the reporter on weekdays after the close, using
   `scripts/stop-live-strategy-reporter.zsh`.
 
+If you need the topic destination to be explicit, set both of these before
+starting the wrapper:
+
+- `BOTMUX_REPORT_SESSION_ID`
+- `BOTMUX_REPORT_ROOT_MESSAGE_ID`
+
+The root message id must be the topic root message's `messageId`. Do not use
+the `rootId` field from a reply, and do not point at a child message.
+
 The loop still self-exits at or after the close. The explicit stop task is the
 fallback that keeps the tmux session from lingering when a prior command fails
 to act.
+
+## Topic Routing Gotcha
+
+When starting the reporter for a new conversation, create the target topic
+first, then copy the topic root message's `messageId` shown by botmux as the
+router target. Do not reuse a visible reply message id from inside the thread,
+and do not use the child reply's `rootId` field as the destination. The
+correct flow is:
+
+1. create or identify the topic root message;
+2. copy its `messageId` for `BOTMUX_REPORT_ROOT_MESSAGE_ID`;
+3. restart the reporter loop; and
+4. verify the next summary arrives under that same thread.
 
 ## Summary contract
 
