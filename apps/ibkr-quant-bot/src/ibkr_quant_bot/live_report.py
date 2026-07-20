@@ -182,6 +182,11 @@ def format_live_report(
         str(row.get("symbol", "")).upper(): int(float(row.get("quantity", 0) or 0))
         for row in position_rows
     }
+    position_summary = (
+        "、".join(f"{symbol} {quantity}股" for symbol, quantity in positions.items())
+        if positions
+        else "无"
+    )
     entry_limit_reached = max_entries > 0 and entry_count >= max_entries
     execution_action, execution_reason = _execution_blocker(output, exit_code)
     if positions:
@@ -237,12 +242,11 @@ def format_live_report(
         lines.append(f"信号：{signal_text}｜后续：{future_order}")
         lines.append(f"原因：{reason}")
 
-        lines.extend(
+    lines.extend(
         [
             "",
             "【资金与运行】",
             (
-                f"策略本金：{_value(capital.get('strategy_capital_usd'))} USD｜"
                 f"可用现金：{_value(capital.get('usable_cash'))} USD｜"
                 f"预留：{_value(capital.get('cash_reserve_usd'))} USD"
             ),
@@ -259,6 +263,14 @@ def format_live_report(
                 f"{ended.astimezone(NEW_YORK).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]} ET"
             ),
             f"QQQ：{_value(benchmark.get('latest_trade_price'))}（趋势基准）",
+            "",
+            "【账户快照】",
+            (
+                f"余额可用：{_value(capital.get('usable_cash'))} USD｜"
+                f"预留：{_value(capital.get('cash_reserve_usd'))} USD｜"
+                f"来源：{capital.get('source', '不可用')}"
+            ),
+            f"当前持仓：{position_summary}",
         ]
     )
 
