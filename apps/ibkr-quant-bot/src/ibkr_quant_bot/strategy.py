@@ -229,7 +229,7 @@ class IntradayMomentumStrategy:
     min_vwap_gap: float = 0.0005
     min_score: float = 0.008
     require_benchmark_confirmation: bool = True
-    max_risk_per_trade: float = 150.0
+    max_risk_per_trade: float = 300.0
     atr_window: int = 14
     atr_stop_multiple: float = 2.0
     use_exit_hysteresis: bool = False
@@ -564,7 +564,7 @@ class SemiconductorRotationStrategy:
     short_min_score: float = 0.006
     require_vwap_confirmation: bool = True
     require_benchmark_confirmation: bool = True
-    max_risk_per_trade: float = 150.0
+    max_risk_per_trade: float = 300.0
     atr_window: int = 14
     atr_stop_multiple: float = 2.0
     use_exit_hysteresis: bool = False
