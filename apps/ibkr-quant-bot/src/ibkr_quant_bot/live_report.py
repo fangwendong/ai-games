@@ -293,6 +293,13 @@ def format_live_report(
                 f"{ended.astimezone(NEW_YORK).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]} ET"
             ),
             f"QQQ：{_value(benchmark.get('latest_trade_price'))}（趋势基准）",
+        ]
+    )
+    benchmark_indicators = _indicator_summary(benchmark)
+    if benchmark_indicators:
+        lines.append(f"QQQ指标：{benchmark_indicators}")
+    lines.extend(
+        [
             "",
             "【资金快照】",
             (

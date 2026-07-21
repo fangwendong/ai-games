@@ -858,17 +858,92 @@ def _latest_trade_price_fields(quote: Quote) -> dict[str, object]:
     }
 
 
+def _ema_series(values: list[float], window: int) -> list[float]:
+    if not values:
+        return []
+    if window <= 1:
+        return list(values)
+    alpha = 2 / (window + 1)
+    ema = values[0]
+    series = [ema]
+    for value in values[1:]:
+        ema = alpha * value + (1 - alpha) * ema
+        series.append(ema)
+    return series
+
+
+def _vwap_series(bars: list[Bar]) -> list[float]:
+    series: list[float] = []
+    cumulative_pv = 0.0
+    cumulative_volume = 0.0
+    for bar in bars:
+        volume = max(0.0, float(bar.volume))
+        typical_price = (float(bar.high) + float(bar.low) + float(bar.close)) / 3.0
+        cumulative_pv += typical_price * volume
+        cumulative_volume += volume
+        series.append(
+            cumulative_pv / cumulative_volume
+            if cumulative_volume > 0
+            else float(bar.close)
+        )
+    return series
+
+
 def _benchmark_quote_summary(
     symbol: str,
     quote: Quote,
+    bars: list[Bar],
+    strategy: IntradayMomentumStrategy | SemiconductorRotationStrategy,
     market_data_exchange: str,
     now: datetime,
 ) -> dict[str, object]:
+    closes = [float(bar.close) for bar in bars]
+    fast_series = _ema_series(closes, strategy.benchmark_fast_window)
+    slow_series = _ema_series(closes, strategy.benchmark_slow_window)
+    trend_series = _ema_series(closes, strategy.trend_window)
+    vwap_series = _vwap_series(bars)
+    fast = fast_series[-1] if fast_series else None
+    slow = slow_series[-1] if slow_series else None
+    trend = trend_series[-1] if trend_series else None
+    vwap = vwap_series[-1] if vwap_series else None
+    last = closes[-1] if closes else None
+    trend_index = max(0, len(slow_series) - strategy.benchmark_trend_lookback)
+    trend_slope = None
+    if slow_series and closes:
+        trend_slope = (slow_series[-1] - slow_series[trend_index]) / last
+    above_vwap_bars = 0
+    if closes and vwap_series:
+        for close, bar_vwap in zip(reversed(closes), reversed(vwap_series)):
+            if close > bar_vwap:
+                above_vwap_bars += 1
+            else:
+                break
+    trend_gap = None
+    vwap_gap = None
+    score = None
+    if fast is not None and slow is not None and last is not None:
+        trend_gap = (fast - slow) / last
+    if last is not None and vwap is not None:
+        vwap_gap = (last - vwap) / last
+    if trend_gap is not None:
+        score = trend_gap + (vwap_gap or 0.0) + max(0.0, trend_slope or 0.0)
     return {
         "role": "benchmark",
         "symbol": symbol,
         "reference_price": round(quote.reference_price, 2),
         **_latest_trade_price_fields(quote),
+        "bar_count": len(bars),
+        "fast_ema": fast,
+        "slow_ema": slow,
+        "trend_ema": trend,
+        "vwap": vwap,
+        "score": score,
+        "trend_gap": trend_gap,
+        "vwap_gap": vwap_gap,
+        "trend_slope": trend_slope,
+        "above_vwap_bars": float(above_vwap_bars) if closes else None,
+        "bullish": strategy._benchmark_bullish(bars),
+        "benchmark_bullish": strategy._benchmark_bullish(bars),
         "market_data_exchange": market_data_exchange,
         "bar_data_exchange": market_data_exchange,
         "quote_data_exchange": "SMART",
@@ -2340,6 +2415,8 @@ def main(argv: list[str] | None = None) -> int:
             benchmark_summary = _benchmark_quote_summary(
                 strategy.benchmark_symbol,
                 benchmark_quote,
+                benchmark_bars,
+                strategy,
                 market_data_exchange,
                 now,
             )
