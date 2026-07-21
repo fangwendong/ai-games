@@ -101,6 +101,33 @@ def _trade_marker(*, traded: bool, holding: bool, failed: bool) -> str:
     return "⚪ 今日未成交"
 
 
+def _indicator_summary(row: dict[str, Any]) -> str | None:
+    fields: list[str] = []
+    for label, key, digits in (
+        ("fast", "fast_ema", 2),
+        ("slow", "slow_ema", 2),
+        ("trend", "trend_ema", 2),
+        ("vwap", "vwap", 2),
+        ("score", "score", 4),
+        ("trend_gap", "trend_gap", 4),
+        ("vwap_gap", "vwap_gap", 4),
+        ("trend_slope", "trend_slope", 4),
+    ):
+        value = row.get(key)
+        if isinstance(value, (int, float)):
+            fields.append(f"{label}={_value(value, digits=digits)}")
+    above_vwap_bars = row.get("above_vwap_bars")
+    if isinstance(above_vwap_bars, (int, float)):
+        fields.append(f"above_vwap_bars={_value(above_vwap_bars, digits=0)}")
+    bullish = row.get("bullish")
+    if bullish is not None:
+        fields.append(f"bullish={'是' if bullish else '否'}")
+    benchmark_bullish = row.get("benchmark_bullish")
+    if benchmark_bullish is not None:
+        fields.append(f"benchmark={'是' if benchmark_bullish else '否'}")
+    return "｜".join(fields) if fields else None
+
+
 def _short_reason(reason: object) -> str:
     text = str(reason or "不可用")
     if text.startswith("entry window closed before"):
@@ -241,6 +268,9 @@ def format_live_report(
         )
         lines.append(f"信号：{signal_text}｜后续：{future_order}")
         lines.append(f"原因：{reason}")
+        indicators = _indicator_summary(row)
+        if indicators:
+            lines.append(f"指标：{indicators}")
 
     lines.extend(
         [
