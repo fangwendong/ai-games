@@ -22,11 +22,10 @@ without bound and account/order representations are not persisted.
 
 ## Required environment
 
-The supervisor inherits the live checkout's `.env` and requires this additional
-non-secret variable:
+The supervisor inherits the live checkout's `.env` and requires this
+additional non-secret variable:
 
 ```text
-BOTMUX_REPORT_SESSION_ID=<target botmux session UUID>
 BOTMUX_REPORT_ROOT_MESSAGE_ID=<target Feishu topic root message ID>
 ```
 
@@ -35,7 +34,11 @@ message's `messageId`, not a reply message id and not the nested `rootId`
 field from a child reply. When a report is routed to the wrong place, check
 `botmux history --scope chat` and use the root message's own `messageId` as the
 router target. Using a normal reply message id will create a dead-end thread
-target or fail to land where the operator expects.
+target or fail to land where the operator expects. The default sender no
+longer requires a separate botmux session id. The start wrapper also keeps the
+current root id in
+`.ibkr_bot_state/live-strategy-reporter/root-message-id.txt` so a later auto
+start can recover the same thread without manual re-entry.
 
 The runner always forces live market data and disables ARCA fallback. It does
 not override the live/readonly/dry-run/allow-live-trading switches from `.env`.
@@ -72,7 +75,6 @@ already running. The stop wrapper is also idempotent and is safe to run after
 the loop has already exited itself at the close.
 
 ```bash
-BOTMUX_REPORT_SESSION_ID=<session UUID> \
 BOTMUX_REPORT_ROOT_MESSAGE_ID=<topic root message ID> \
 scripts/start-live-strategy-reporter.zsh
 
@@ -90,11 +92,10 @@ Recommended botmux schedule pair:
 - stop the reporter on weekdays after the close, using
   `scripts/stop-live-strategy-reporter.zsh`.
 
-If you need the topic destination to be explicit, set both of these before
-starting the wrapper:
-
-- `BOTMUX_REPORT_SESSION_ID`
-- `BOTMUX_REPORT_ROOT_MESSAGE_ID`
+If you need the topic destination to be explicit, set
+`BOTMUX_REPORT_ROOT_MESSAGE_ID` before starting the wrapper. The default
+sender path no longer requires a separate botmux session id; it sends
+directly to the root topic id.
 
 The root message id must be the topic root message's `messageId`. Do not use
 the `rootId` field from a reply, and do not point at a child message.

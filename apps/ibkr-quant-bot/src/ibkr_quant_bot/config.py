@@ -77,7 +77,7 @@ class Settings:
     entry_order_price_offset_bps: float = 5.0
     entry_order_fill_wait_seconds: float = 20.0
     flatten_before_close_minutes: int = 10
-    max_risk_per_trade: float = 300.0
+    max_risk_per_trade: float = 150.0
     atr_window: int = 14
     atr_stop_multiple: float = 2.0
     historical_request_pause_seconds: float = 0.25
@@ -150,7 +150,7 @@ def load_settings() -> Settings:
         flatten_before_close_minutes=int(
             os.getenv("IBKR_FLATTEN_BEFORE_CLOSE_MINUTES", "10")
         ),
-        max_risk_per_trade=float(os.getenv("IBKR_MAX_RISK_PER_TRADE", "300")),
+        max_risk_per_trade=float(os.getenv("IBKR_MAX_RISK_PER_TRADE", "150")),
         atr_window=int(os.getenv("IBKR_ATR_WINDOW", "14")),
         atr_stop_multiple=float(os.getenv("IBKR_ATR_STOP_MULTIPLE", "2")),
         historical_request_pause_seconds=float(

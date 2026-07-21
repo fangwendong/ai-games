@@ -59,13 +59,14 @@ strategy runner, quote cache, and context cache.
 | 2026-07-15 | `rotation-hysteresis-v2` | ARCA / SMART | SOXS round trip | Protective take | +$146.30 | +3.70% |
 | 2026-07-16 | `rotation-hysteresis-v2` | SMART / SMART | SOXS round trip | Protective take | +$145.93 | +3.69% |
 | 2026-07-17 | `rotation-hysteresis-v2` | SMART / SMART | SOXL round trip | Protective take | +$107.41 | +3.68% |
+| 2026-07-20 | `rotation-hysteresis-v2` | SMART / SMART | SOXL round trip | Protective stop | -$249.22 | -2.51% |
 
-Across these six sessions, the strategy closed five attributable round trips
-for approximately $424.68 net realized PnL, or +2.99% of the five filled entry
-notionals pooled together. This pooled rate is descriptive and is not an
-account return or a compounded portfolio return. All five trades were
-profitable, but five trades are far too few to estimate a reliable win rate or
-expected return.
+Across these seven sessions, the strategy closed six attributable round trips
+for approximately $175.46 net realized PnL, or about +0.70% of the six filled
+entry notionals pooled together. This pooled rate is descriptive and is not an
+account return or a compounded portfolio return. Five trades were profitable
+and one was a loss, but six trades are still far too few to estimate a reliable
+win rate or expected return.
 
 The July 10 and July 13 entry journals predate persistence of an explicit
 `strategy_version` field. The repository deployment timeline identifies them
@@ -289,6 +290,30 @@ truth for reconciliation; the local journal snapshot only acts as a delayed
 cache and should not be used to override confirmed broker fills. If this day
 needs another revision, rewrite the full dated block together with the summary
 row above instead of appending a partial correction.
+
+## 2026-07-20
+
+### Market-Data Context
+
+- Bar / quote / order route: SMART / SMART / SMART
+- Source decision: all strategy symbols passed SMART validation
+
+### Execution
+
+- Session date and profile: 2026-07-20 / rotation-hysteresis-v2
+- Bar source / quote source / order route: SMART / SMART / SMART
+- Data completeness and corporate actions: entry journal recorded; no corporate-action event is reflected in the session snapshot
+- Signals considered and rejected: SOXL entry signal was accepted; SOXS stayed out of the bullish regime
+- Entry time, symbol, quantity, average fill, and reason: 12:10:06 ET, SOXL, 68, $145.78, entry signal satisfied
+- Protective stop/take created: stop $142.11 / take $151.25
+- Exit time, quantity, average fill, and reason: 12:41:26 ET, SOXL, 68, $142.15; broker-side protective stop filled in two executions (60 + 8) and the take leg was canceled
+- Gross PnL, commissions, broker net realized PnL, and net return on entry notional: -$247.22, approximately $2.00 round-trip commission, approximately -$249.22 net realized PnL, -2.51%
+- End-of-session position and open-order state: round trip closed on the broker; no remaining strategy order is recorded in the session snapshot
+
+### Review
+
+The stored evidence confirms the completed round trip and the exit fill. The broker executions show a protective-stop exit, not a take-profit exit. The earlier local review row had mixed in an unrelated stale order record; this section now uses the broker-side fills as the source of truth.
+
 
 ## Follow-Up Items
 
