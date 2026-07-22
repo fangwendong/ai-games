@@ -315,6 +315,30 @@ row above instead of appending a partial correction.
 The stored evidence confirms the completed round trip and the exit fill. The broker executions show a protective-stop exit, not a take-profit exit. The earlier local review row had mixed in an unrelated stale order record; this section now uses the broker-side fills as the source of truth.
 
 
+## 2026-07-21
+
+### Market-Data Context
+
+- Bar / quote / order route: SMART / SMART / SMART
+- Source decision: all strategy symbols passed SMART validation
+
+### Execution
+
+- Session date and profile: 2026-07-21 / rotation-hysteresis-v2
+- Bar source / quote source / order route: SMART / SMART / SMART
+- Data completeness and corporate actions: entry journal recorded; no corporate-action event is reflected in the session snapshot
+- Signals considered and rejected: SOXL entry signal was accepted; SOXS stayed out of the bullish regime
+- Entry time, symbol, quantity, average fill, and reason: 12:05:06 ET, SOXL, 63, $157.58, entry signal satisfied
+- Protective stop/take created: stop $154.93 / take $163.49
+- Exit time, quantity, average fill, and reason: 14:40:06 ET, SOXL, 63, $159.25
+- Gross PnL, commissions, broker net realized PnL, and net return on entry notional: $105.27, $1.22, $103.05, 1.04%
+- End-of-session position and open-order state: round trip closed; no remaining strategy order is recorded in the session snapshot
+
+### Review
+
+The stored evidence confirms the completed round trip and the exit fill. The session can be reconciled against the live fills and commissions.
+
+
 ## Follow-Up Items
 
 - Persist the exact strategy version on every entry. This is already present
