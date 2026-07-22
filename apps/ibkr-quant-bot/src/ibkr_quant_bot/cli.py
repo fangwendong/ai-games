@@ -32,7 +32,6 @@ from .market_context_cache import (
     MarketContextCacheError,
     load_cached_market_session,
     load_fresh_cached_bars,
-    load_fresh_cached_tradable_capital,
     write_market_context_cache,
 )
 from .quote_cache import QuoteCacheError, QuoteCacheWriter, load_fresh_quotes
@@ -173,7 +172,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     review_log.add_argument(
         "--doc-path",
-        default="docs/live-strategy-review-log.md",
+        default="docs/live/live-strategy-review-log.md",
         help="target markdown review log",
     )
     review_log.add_argument(
@@ -329,7 +328,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--max-notional", type=float, default=None, help="cap per order notional"
     )
     backtest.add_argument(
-        "--capital", type=float, default=1_000.0, help="starting capital"
+        "--capital", type=float, default=10_000.0, help="starting capital"
     )
     backtest.add_argument(
         "--profile",
@@ -859,17 +858,92 @@ def _latest_trade_price_fields(quote: Quote) -> dict[str, object]:
     }
 
 
+def _ema_series(values: list[float], window: int) -> list[float]:
+    if not values:
+        return []
+    if window <= 1:
+        return list(values)
+    alpha = 2 / (window + 1)
+    ema = values[0]
+    series = [ema]
+    for value in values[1:]:
+        ema = alpha * value + (1 - alpha) * ema
+        series.append(ema)
+    return series
+
+
+def _vwap_series(bars: list[Bar]) -> list[float]:
+    series: list[float] = []
+    cumulative_pv = 0.0
+    cumulative_volume = 0.0
+    for bar in bars:
+        volume = max(0.0, float(bar.volume))
+        typical_price = (float(bar.high) + float(bar.low) + float(bar.close)) / 3.0
+        cumulative_pv += typical_price * volume
+        cumulative_volume += volume
+        series.append(
+            cumulative_pv / cumulative_volume
+            if cumulative_volume > 0
+            else float(bar.close)
+        )
+    return series
+
+
 def _benchmark_quote_summary(
     symbol: str,
     quote: Quote,
+    bars: list[Bar],
+    strategy: IntradayMomentumStrategy | SemiconductorRotationStrategy,
     market_data_exchange: str,
     now: datetime,
 ) -> dict[str, object]:
+    closes = [float(bar.close) for bar in bars]
+    fast_series = _ema_series(closes, strategy.benchmark_fast_window)
+    slow_series = _ema_series(closes, strategy.benchmark_slow_window)
+    trend_series = _ema_series(closes, strategy.trend_window)
+    vwap_series = _vwap_series(bars)
+    fast = fast_series[-1] if fast_series else None
+    slow = slow_series[-1] if slow_series else None
+    trend = trend_series[-1] if trend_series else None
+    vwap = vwap_series[-1] if vwap_series else None
+    last = closes[-1] if closes else None
+    trend_index = max(0, len(slow_series) - strategy.benchmark_trend_lookback)
+    trend_slope = None
+    if slow_series and closes:
+        trend_slope = (slow_series[-1] - slow_series[trend_index]) / last
+    above_vwap_bars = 0
+    if closes and vwap_series:
+        for close, bar_vwap in zip(reversed(closes), reversed(vwap_series)):
+            if close > bar_vwap:
+                above_vwap_bars += 1
+            else:
+                break
+    trend_gap = None
+    vwap_gap = None
+    score = None
+    if fast is not None and slow is not None and last is not None:
+        trend_gap = (fast - slow) / last
+    if last is not None and vwap is not None:
+        vwap_gap = (last - vwap) / last
+    if trend_gap is not None:
+        score = trend_gap + (vwap_gap or 0.0) + max(0.0, trend_slope or 0.0)
     return {
         "role": "benchmark",
         "symbol": symbol,
         "reference_price": round(quote.reference_price, 2),
         **_latest_trade_price_fields(quote),
+        "bar_count": len(bars),
+        "fast_ema": fast,
+        "slow_ema": slow,
+        "trend_ema": trend,
+        "vwap": vwap,
+        "score": score,
+        "trend_gap": trend_gap,
+        "vwap_gap": vwap_gap,
+        "trend_slope": trend_slope,
+        "above_vwap_bars": float(above_vwap_bars) if closes else None,
+        "bullish": strategy._benchmark_bullish(bars),
+        "benchmark_bullish": strategy._benchmark_bullish(bars),
         "market_data_exchange": market_data_exchange,
         "bar_data_exchange": market_data_exchange,
         "quote_data_exchange": "SMART",
@@ -1504,36 +1578,20 @@ def _tradable_capital_snapshot(
     reserve = settings.entry_cash_reserve_usd
     if not math.isfinite(reserve) or reserve < 0:
         raise BrokerError("IBKR_ENTRY_CASH_RESERVE_USD must be finite and non-negative")
+    capital_limit = settings.live_tradable_capital_usd
+    if not math.isfinite(capital_limit) or capital_limit <= 0:
+        raise BrokerError("IBKR_LIVE_TRADABLE_CAPITAL_USD must be finite and positive")
     summary: dict[str, object] = {
         "currency": "USD",
-        "sizing_basis": "min(TotalCashValue, AvailableFunds) - cash reserve",
+        "sizing_basis": "configured live_tradable_capital_usd",
         "cash_reserve_usd": round(reserve, 2),
         "uses_margin_buying_power": False,
-    }
-    try:
-        available = load_fresh_cached_tradable_capital(
-            _live_context_cache_path(settings),
-            session_date=now.date(),
-            max_age_seconds=settings.live_tradable_capital_cache_max_age_seconds,
-            now=now,
-        )
-    except (MarketContextCacheError, OSError, ValueError) as exc:
-        fallback = max(0.0, settings.max_order_notional - reserve)
-        return fallback, {
-            **summary,
-            "status": "fallback",
-            "usable_cash": round(fallback, 2),
-            "reason": type(exc).__name__,
-            "source": "configured_cap",
-        }
-    usable = max(0.0, available - reserve)
-    return usable, {
-        **summary,
-        "status": "available",
-        "usable_cash": round(usable, 2),
+        "status": "configured",
+        "usable_cash": round(capital_limit, 2),
         "reason": None,
-        "source": "live_context_cache",
+        "source": "configured_cap",
     }
+    return capital_limit, summary
 
 
 def _ensure_protective_oca(
@@ -1818,7 +1876,6 @@ def _build_momentum_strategy(args: argparse.Namespace, settings: Settings):
         require_vwap_confirmation=not args.no_vwap_confirmation,
     )
 
-
 def _backtest_core_parameters_report(
     args: argparse.Namespace,
     settings: Settings,
@@ -1852,8 +1909,6 @@ def _backtest_core_parameters_report(
         "market_data_exchange": args.market_data_exchange,
         "data_dir": str(Path(args.data_dir).resolve()),
     }
-
-
 def _run_live_quote_cache(settings: Settings, args: argparse.Namespace) -> int:
     if not settings.readonly or not settings.dry_run:
         raise BrokerError(
@@ -1990,9 +2045,7 @@ def _run_live_context_cache(settings: Settings, args: argparse.Namespace) -> int
                                 for symbol in symbols
                             }
                         last_bar_refresh_bucket = bar_refresh_bucket
-                    tradable_capital_usd = _available_cash_notional(
-                        broker.balance()
-                    )
+                    tradable_capital_usd = settings.live_tradable_capital_usd
                     write_market_context_cache(
                         cache_path,
                         session_date=now.date(),
@@ -2014,6 +2067,9 @@ def _run_live_context_cache(settings: Settings, args: argparse.Namespace) -> int
                                 "session_date": now.date().isoformat(),
                                 "source": "SMART",
                                 "tradable_capital_status": "available",
+                                "tradable_capital_usd": round(
+                                    tradable_capital_usd, 2
+                                ),
                             },
                             sort_keys=True,
                         ),
@@ -2310,7 +2366,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "intraday-momentum":
             strategy = _build_momentum_strategy(args, settings)
             now = datetime.now(NEW_YORK)
-            entry_notional_cap, tradable_capital_summary = (
+            capital_limit_usd, tradable_capital_summary = (
                 _tradable_capital_snapshot(settings, now)
             )
             print(
@@ -2359,6 +2415,8 @@ def main(argv: list[str] | None = None) -> int:
             benchmark_summary = _benchmark_quote_summary(
                 strategy.benchmark_symbol,
                 benchmark_quote,
+                benchmark_bars,
+                strategy,
                 market_data_exchange,
                 now,
             )
@@ -2716,7 +2774,7 @@ def main(argv: list[str] | None = None) -> int:
             decision = max(
                 buy_candidates, key=lambda item: float(item.meta.get("score", 0.0))
             )
-            strategy = replace(strategy, max_notional=entry_notional_cap)
+            strategy = replace(strategy, max_notional=capital_limit_usd)
             decision = strategy.decide(
                 decision.symbol,
                 strategy_quotes[decision.symbol],
@@ -2729,7 +2787,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             print(
                 "dynamic entry sizing: "
-                f"current usable USD cash={entry_notional_cap:.2f}, "
+                f"configured principal limit USD={capital_limit_usd:.2f}, "
                 f"risk budget={strategy.max_risk_per_trade:.2f}"
             )
             limit_price = _marketable_buy_limit_price(

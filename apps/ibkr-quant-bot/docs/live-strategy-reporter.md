@@ -10,6 +10,9 @@ reports remain once per minute.
 
 - One-shot runner: `scripts/run-live-strategy-report.zsh`
 - Persistent supervisor: `scripts/run-live-strategy-report-loop.zsh`
+- Daily start wrapper: `scripts/start-live-strategy-reporter.zsh`
+- Daily close wrapper: `scripts/close-live-strategy-reporter.zsh`
+- Daily stop wrapper: `scripts/stop-live-strategy-reporter.zsh`
 - Formatter: `src/ibkr_quant_bot/live_report.py`
 - Latest sanitized summary: `.ibkr_bot_state/live-strategy-reporter/latest-summary.txt`
 - Latest runner status: `.ibkr_bot_state/live-strategy-reporter/latest-run.log`
@@ -20,13 +23,23 @@ without bound and account/order representations are not persisted.
 
 ## Required environment
 
-The supervisor inherits the live checkout's `.env` and requires this additional
-non-secret variable:
+The supervisor inherits the live checkout's `.env` and requires this
+additional non-secret variable:
 
 ```text
-BOTMUX_REPORT_SESSION_ID=<target botmux session UUID>
 BOTMUX_REPORT_ROOT_MESSAGE_ID=<target Feishu topic root message ID>
 ```
+
+Important: `BOTMUX_REPORT_ROOT_MESSAGE_ID` must be the topic/thread root
+message's `messageId`, not a reply message id and not the nested `rootId`
+field from a child reply. When a report is routed to the wrong place, check
+`botmux history --scope chat` and use the root message's own `messageId` as the
+router target. Using a normal reply message id will create a dead-end thread
+target or fail to land where the operator expects. The default sender no
+longer requires a separate botmux session id. The start wrapper also keeps the
+current root id in
+`.ibkr_bot_state/live-strategy-reporter/root-message-id.txt` so a later auto
+start can recover the same thread without manual re-entry.
 
 The runner always forces live market data and disables ARCA fallback. It does
 not override the live/readonly/dry-run/allow-live-trading switches from `.env`.
@@ -57,19 +70,57 @@ scripts/run-live-strategy-report.zsh
 
 ## Start and stop
 
-```bash
-tmux new-session -d -s ibkr-live-strategy-reporter \
-  "cd /home/fwd/work/ai-games-wt-codex-live/apps/ibkr-quant-bot && \
-   export BOTMUX_REPORT_SESSION_ID=<session UUID> && \
-   export BOTMUX_REPORT_ROOT_MESSAGE_ID=<topic root message ID> && \
-   exec scripts/run-live-strategy-report-loop.zsh"
+Use the dedicated wrappers for a daily open/close schedule. The start wrapper
+is idempotent and only launches the supervisor when the tmux session is not
+already running. The stop wrapper is also idempotent and is safe to run after
+the loop has already exited itself at the close.
 
-tmux kill-session -t ibkr-live-strategy-reporter
+```bash
+BOTMUX_REPORT_ROOT_MESSAGE_ID=<topic root message ID> \
+scripts/start-live-strategy-reporter.zsh
+
+scripts/close-live-strategy-reporter.zsh
+
+scripts/stop-live-strategy-reporter.zsh
 ```
 
 Never run this supervisor together with the old one-minute Codex schedule. The
 CLI runtime lock prevents simultaneous execution, but duplicate schedulers
 would still create skipped runs and duplicate status messages.
+
+Recommended botmux schedule pair:
+
+- start the reporter on weekdays shortly after the market opens, using
+  `scripts/start-live-strategy-reporter.zsh`;
+- stop the reporter on weekdays after the close, using
+  `scripts/close-live-strategy-reporter.zsh` so the daily review log is
+  appended before shutdown.
+
+If you need the topic destination to be explicit, set
+`BOTMUX_REPORT_ROOT_MESSAGE_ID` before starting the wrapper. The default
+sender path no longer requires a separate botmux session id; it sends
+directly to the root topic id.
+
+The root message id must be the topic root message's `messageId`. Do not use
+the `rootId` field from a reply, and do not point at a child message.
+
+The loop still self-exits at or after the close. The explicit stop task is the
+fallback that keeps the tmux session from lingering when a prior command fails
+to act. The close wrapper is the preferred daily close path because it appends
+the sanitized review log first and then shuts the reporter down.
+
+## Topic Routing Gotcha
+
+When starting the reporter for a new conversation, create the target topic
+first, then copy the topic root message's `messageId` shown by botmux as the
+router target. Do not reuse a visible reply message id from inside the thread,
+and do not use the child reply's `rootId` field as the destination. The
+correct flow is:
+
+1. create or identify the topic root message;
+2. copy its `messageId` for `BOTMUX_REPORT_ROOT_MESSAGE_ID`;
+3. restart the reporter loop; and
+4. verify the next summary arrives under that same thread.
 
 ## Summary contract
 

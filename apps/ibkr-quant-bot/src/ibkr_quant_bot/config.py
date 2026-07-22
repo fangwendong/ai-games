@@ -70,13 +70,14 @@ class Settings:
     live_context_cache_path: str | None = None
     live_context_cache_max_age_seconds: float = 420.0
     live_tradable_capital_cache_max_age_seconds: float = 90.0
+    live_tradable_capital_usd: float = 10_000.0
     entry_cash_reserve_usd: float = 10.0
     max_daily_entries: int = 1
     state_dir: str = ".ibkr_bot_state/semiconductor_rotation_intraday"
     entry_order_price_offset_bps: float = 5.0
     entry_order_fill_wait_seconds: float = 20.0
     flatten_before_close_minutes: int = 10
-    max_risk_per_trade: float = 10.0
+    max_risk_per_trade: float = 300.0
     atr_window: int = 14
     atr_stop_multiple: float = 2.0
     historical_request_pause_seconds: float = 0.25
@@ -130,6 +131,9 @@ def load_settings() -> Settings:
         live_tradable_capital_cache_max_age_seconds=float(
             os.getenv("IBKR_LIVE_TRADABLE_CAPITAL_CACHE_MAX_AGE_SECONDS", "90")
         ),
+        live_tradable_capital_usd=float(
+            os.getenv("IBKR_LIVE_TRADABLE_CAPITAL_USD", "10000")
+        ),
         entry_cash_reserve_usd=float(
             os.getenv("IBKR_ENTRY_CASH_RESERVE_USD", "10")
         ),
@@ -146,7 +150,7 @@ def load_settings() -> Settings:
         flatten_before_close_minutes=int(
             os.getenv("IBKR_FLATTEN_BEFORE_CLOSE_MINUTES", "10")
         ),
-        max_risk_per_trade=float(os.getenv("IBKR_MAX_RISK_PER_TRADE", "10")),
+        max_risk_per_trade=float(os.getenv("IBKR_MAX_RISK_PER_TRADE", "300")),
         atr_window=int(os.getenv("IBKR_ATR_WINDOW", "14")),
         atr_stop_multiple=float(os.getenv("IBKR_ATR_STOP_MULTIPLE", "2")),
         historical_request_pause_seconds=float(

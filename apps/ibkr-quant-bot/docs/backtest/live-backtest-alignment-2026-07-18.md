@@ -60,13 +60,13 @@ The command form was:
 
 ```bash
 IBKR_MAX_ORDER_NOTIONAL=10000 \
-IBKR_MAX_RISK_PER_TRADE=120 \
+IBKR_MAX_RISK_PER_TRADE=300 \
 IBKR_ENTRY_CASH_RESERVE_USD=10 \
 IBKR_LIVE_TRADABLE_CAPITAL_CACHE_MAX_AGE_SECONDS=90 \
 IBKR_MAX_DAILY_ENTRIES=1 \
 PYTHONPATH=src python -m ibkr_quant_bot.cli backtest-momentum \
   --profile rotation-hysteresis-v2 \
-  --capital 4500 \
+  --capital 10000 \
   --duration "6 M" \
   --bar-size "5 mins" \
   --train-days 30 \
@@ -83,14 +83,19 @@ The same setup was also checked with the lower live-tradable cash snapshot
 `1494.41 USD` to confirm that the strategy logic, not the current cash level,
 was the primary driver of the signal cadence.
 
+After the fill-resolution comparison settled, the default live-aligned fill
+proxy moved to 30-second bars. The 1-minute fill cache remains useful for
+diagnostics, but 30-second fill is the baseline for future live-vs-backtest
+comparisons.
+
 ## Results
 
 | Case | Final holdout net return | Trade count | Win / loss | Notes |
 |---|---:|---:|---:|---|
 | `capital=1494.41`, `max_notional=10000` | `18.11%` | `9` | `7 / 2` | Live-cash snapshot, same strategy cadence |
-| `capital=4500`, `max_notional=10000` | `18.33%` | `9` | `7 / 2` | Stress-tested with higher deployable capital |
+| `capital=10000`, `max_notional=10000` | `18.33%` | `9` | `7 / 2` | Stress-tested with higher deployable capital |
 
-Fold stability for the `capital=4500`, `max_notional=10000` run:
+Fold stability for the `capital=10000`, `max_notional=10000` run:
 
 - base profile: 4 / 4 positive OOS folds
 - mean OOS return: `2.9747%`
@@ -111,10 +116,30 @@ The parameter-sensitivity check remained positive across the three variants:
   live-aligned assumptions.
 - Higher starting capital changes dollar PnL more than it changes trade cadence;
   the entry/exit logic is still the dominant factor.
+- For the current strategy, 30-second fill bars are the recommended default
+  when comparing backtest behavior against live execution. Use 1-minute fill
+  only when you want a coarse sensitivity check.
+
+## Current Live Contract Snapshot
+
+Keep the live checkout aligned with this exact configuration unless the same
+commit updates the documentation and code together:
+
+- Strategy profile: `rotation-hysteresis-v2`
+- Symbols allowed by live risk checks: `SOXL,SOXS,QQQ`
+- Strategy instruments: `SOXL` long, `SOXS` short, `QQQ` benchmark
+- `IBKR_MAX_ORDER_NOTIONAL=10000`
+- `IBKR_MAX_RISK_PER_TRADE=300`
+- `IBKR_LIVE_TRADABLE_CAPITAL_USD=10000`
+- `IBKR_ENTRY_CASH_RESERVE_USD=10`
+- `IBKR_MAX_DAILY_ENTRIES=1`
+- Signal bars: `5 mins`
+- Fill bars: `30 secs`
+- Quote cache: `100` samples per symbol, refreshed every `1` second
+- Quote cache freshness: `3` seconds
 
 ## Related docs
 
 - [Backtest parameter tuning](backtest-parameter-tuning.md)
-- [Strategy baseline v2](strategy-baseline-v2.md)
-- [Live strategy review log](live-strategy-review-log.md)
-
+- [Strategy baseline v2](../strategy/strategy-baseline-v2.md)
+- [Live strategy review log](../live/live-strategy-review-log.md)

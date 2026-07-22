@@ -6,48 +6,63 @@ Start here after reading the repository `AGENTS.md` and the application
 
 ## Live Operations
 
-- [Server, botmux, and IBKR health monitor](server-health-monitor.md): scope,
+- [Live Operations index](live/README.md): directory map for operational
+  runbooks, caches, and live-session notes.
+- [Server, botmux, and IBKR health monitor](live/server-health-monitor.md): scope,
   thresholds, protected tasks, report format, false-positive handling, and the
   safe schedule replacement procedure.
-- [IBC Gateway startup](ibc-gateway-startup.md): Gateway startup, 2FA, restart,
+- [IBC Gateway startup](live/ibc-gateway-startup.md): Gateway startup, 2FA, restart,
   watchdog, and local paths.
-- [IBKR API heartbeat](ibkr-api-heartbeat.md): read-only API heartbeat,
+- [IBKR API heartbeat](live/ibkr-api-heartbeat.md): read-only API heartbeat,
   scheduling, log retention, and failure interpretation.
-- [Market-data troubleshooting](ibkr-market-data-troubleshooting.md): live
+- [Market-data troubleshooting](live/ibkr-market-data-troubleshooting.md): live
   entitlement, SMART/ARCA behavior, delayed-data guards, and recovery.
-- [Live quote cache](ibkr-live-quote-cache.md): bounded SMART quote subscription,
+- [Live quote cache](live/ibkr-live-quote-cache.md): bounded SMART quote subscription,
   atomic cache, latency fields, singleton process, and recovery.
-- [Live context cache](ibkr-live-context-cache.md): precomputed trading calendar
+- [Live context cache](live/ibkr-live-context-cache.md): precomputed trading calendar
   and completed 5-minute bars, validation, fallback, and maintenance.
-- [Live strategy review log](live-strategy-review-log.md): sanitized session
+- [Deterministic live strategy reporter](live-strategy-reporter.md): the
+  one-minute reporter supervisor plus its start/stop wrappers, topic-routing
+  requirements, and chat-summary contract.
+- [Live strategy review log](live/live-strategy-review-log.md): sanitized session
   execution history, reconciliation, net PnL, and review notes.
-- [Live strategy audit - 2026-07-17](live-strategy-audit-2026-07-17.md):
+  When a late broker fill arrives, update the session row and the dated block
+  together in the same commit; broker executions are the source of truth.
+- [Live strategy audit - 2026-07-17](live/live-strategy-audit-2026-07-17.md):
   prioritized safety findings, fault-injection evidence, repair order, and
   acceptance criteria.
 
 ## Historical Data And Backtesting
 
-- [Shared historical market data](historical-market-data.md): canonical data-disk
+- [Historical Data And Backtesting index](data/README.md): directory map for
+  shared cache and backtest calibration notes.
+- [Shared historical market data](data/historical-market-data.md): canonical data-disk
   paths, download, reading, completeness audit, and recent-data refresh.
-- [Backtest parameter tuning](backtest-parameter-tuning.md): frozen parameters,
+- [Backtest parameter tuning](backtest/backtest-parameter-tuning.md): frozen parameters,
   transaction costs, chronology, walk-forward checks, and overfitting controls.
-- [Live backtest alignment — 2026-07-18](live-backtest-alignment-2026-07-18.md):
+- [Live backtest alignment — 2026-07-18](backtest/live-backtest-alignment-2026-07-18.md):
   live-aligned backtest contract, parameter parity, and recent calibration
   conclusions.
-- [Strategy baseline v2](strategy-baseline-v2.md): current live strategy
+- [Monthly backtest summary — 2026-07-19](backtest/monthly-backtest-summary-2026-07-19.md):
+  one-year and two-year chronological backtests with monthly net-return tables.
+- [Strategy baseline v2](strategy/strategy-baseline-v2.md): current live strategy
   contract, parameters, entry/exit behavior, and operational invariants.
-- [Strategy baseline v1](strategy-baseline-v1.md): frozen rollback baseline and
+- [Strategy baseline v1](strategy/strategy-baseline-v1.md): frozen rollback baseline and
   comparison reference.
 
 ## Isolated Research
 
-- [Rotation range-gated V1](strategy-range-gated-v1.md): isolated V2-derived
+- [Strategy index](strategy/README.md): frozen strategy contracts and rollback
+  baselines.
+- [Research index](research/README.md): isolated experiments and non-default
+  candidate notes.
+- [Rotation range-gated V1](strategy/strategy-range-gated-v1.md): isolated V2-derived
   candidate that gates new entries on completed-bar QQQ intraday range.
-- [Gap reversion research](gap-reversion-research.md): isolated gap-down/VWAP
+- [Gap reversion research](research/gap-reversion-research.md): isolated gap-down/VWAP
   recovery experiment and live-v2 comparison.
-- [Hybrid state research](hybrid-state-research.md): GapGuard Fusion causal state
+- [Hybrid state research](research/hybrid-state-research.md): GapGuard Fusion causal state
   machine and validation limits.
-- [ORB stocks-in-play research](orb-stocks-in-play-research.md): isolated opening
+- [ORB stocks-in-play research](research/orb-stocks-in-play-research.md): isolated opening
   range breakout research and candidate-selection methodology.
 
 ## Index Maintenance

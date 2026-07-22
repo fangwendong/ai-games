@@ -194,10 +194,28 @@ class LiveDataGuardsTest(unittest.TestCase):
                 ]
             )
 
-    def test_tradable_capital_snapshot_reports_balance_without_account_details(self) -> None:
+    def test_tradable_capital_snapshot_uses_configured_capital_without_account_details(self) -> None:
         now = datetime(2026, 7, 17, 12, 1, tzinfo=NEW_YORK)
         with TemporaryDirectory() as temporary:
             settings = Settings(state_dir=temporary, entry_cash_reserve_usd=10)
+            available, summary = _tradable_capital_snapshot(settings, now)
+
+        self.assertEqual(10000.0, available)
+        self.assertEqual("configured", summary["status"])
+        self.assertEqual(10000.0, summary["usable_cash"])
+        self.assertEqual(10, summary["cash_reserve_usd"])
+        self.assertFalse(summary["uses_margin_buying_power"])
+        self.assertEqual("configured_cap", summary["source"])
+        self.assertNotIn("account", summary)
+
+    def test_tradable_capital_snapshot_ignores_cache_values(self) -> None:
+        now = datetime(2026, 7, 17, 12, 1, tzinfo=NEW_YORK)
+        with TemporaryDirectory() as temporary:
+            settings = Settings(
+                state_dir=temporary,
+                live_tradable_capital_usd=10000,
+                entry_cash_reserve_usd=10,
+            )
             write_market_context_cache(
                 _live_context_cache_path(settings),
                 session_date=now.date(),
@@ -210,26 +228,9 @@ class LiveDataGuardsTest(unittest.TestCase):
             )
             available, summary = _tradable_capital_snapshot(settings, now)
 
-        self.assertEqual(4378.50, available)
-        self.assertEqual("available", summary["status"])
-        self.assertEqual(4378.50, summary["usable_cash"])
-        self.assertEqual(10, summary["cash_reserve_usd"])
-        self.assertFalse(summary["uses_margin_buying_power"])
-        self.assertNotIn("account", summary)
-
-    def test_tradable_capital_snapshot_uses_configured_fallback(self) -> None:
-        now = datetime(2026, 7, 17, 12, 1, tzinfo=NEW_YORK)
-        with TemporaryDirectory() as temporary:
-            settings = Settings(
-                state_dir=temporary,
-                max_order_notional=4000,
-                entry_cash_reserve_usd=10,
-            )
-            available, summary = _tradable_capital_snapshot(settings, now)
-
-        self.assertEqual(3990, available)
-        self.assertEqual("fallback", summary["status"])
-        self.assertEqual(3990, summary["usable_cash"])
+        self.assertEqual(10000, available)
+        self.assertEqual("configured", summary["status"])
+        self.assertEqual(10000, summary["usable_cash"])
         self.assertEqual("configured_cap", summary["source"])
 
     def test_tradable_capital_snapshot_rejects_invalid_cash_reserve(self) -> None:
@@ -577,7 +578,7 @@ class LiveDataGuardsTest(unittest.TestCase):
         )
         settings = Settings(
             max_order_notional=4000,
-            max_risk_per_trade=120,
+            max_risk_per_trade=300,
             entry_cash_reserve_usd=10,
             live_tradable_capital_cache_max_age_seconds=90,
             max_daily_entries=1,
@@ -592,12 +593,12 @@ class LiveDataGuardsTest(unittest.TestCase):
         self.assertEqual("open-pullback", report["resolved_entry_fill_model"])
         self.assertEqual("profile-default", report["requested_entry_fill_model"])
         self.assertEqual(4000, report["resolved_max_notional"])
-        self.assertEqual(120, report["resolved_max_risk_per_trade"])
+        self.assertEqual(300, report["resolved_max_risk_per_trade"])
         self.assertEqual(10, report["entry_cash_reserve_usd"])
         self.assertEqual(90, report["live_tradable_capital_cache_max_age_seconds"])
         self.assertEqual(1, report["max_daily_entries"])
         self.assertEqual(4000, strategy.max_notional)
-        self.assertEqual(120, strategy.max_risk_per_trade)
+        self.assertEqual(300, strategy.max_risk_per_trade)
 
     def test_hysteresis_profile_is_default(self) -> None:
         args = _build_parser().parse_args(["intraday-momentum"])
@@ -617,14 +618,14 @@ class LiveDataGuardsTest(unittest.TestCase):
             ["intraday-momentum", "--profile", "rotation-hysteresis-v1"]
         )
         strategy = _build_momentum_strategy(
-            args, Settings(max_order_notional=4000, max_risk_per_trade=120)
+            args, Settings(max_order_notional=4000, max_risk_per_trade=300)
         )
 
         self.assertEqual("rotation-hysteresis-v1", FROZEN_ROTATION_HYSTERESIS_VERSION)
         for name, expected in FROZEN_ROTATION_HYSTERESIS_PARAMETERS.items():
             self.assertEqual(expected, getattr(strategy, name), name)
         self.assertEqual(4000, strategy.max_notional)
-        self.assertEqual(120, strategy.max_risk_per_trade)
+        self.assertEqual(300, strategy.max_risk_per_trade)
         self.assertIsNone(strategy.profit_lock_activation_pct)
 
     def test_v2_profile_adds_frozen_profit_lock_and_entry_cutoff(self) -> None:
@@ -1215,6 +1216,11 @@ class LiveDataGuardsTest(unittest.TestCase):
         self.assertTrue(strategy.use_exit_hysteresis)
         self.assertEqual(0.0375, strategy.long_take_profit_pct)
         self.assertEqual(0.03, strategy.profit_lock_activation_pct)
+
+    def test_backtest_capital_defaults_to_live_budget(self) -> None:
+        args = _build_parser().parse_args(["backtest-momentum"])
+
+        self.assertEqual(10000.0, args.capital)
 
     def test_live_strategy_rejects_stale_bars(self) -> None:
         settings = Settings(trading_mode="live", live_bar_max_age_seconds=420)

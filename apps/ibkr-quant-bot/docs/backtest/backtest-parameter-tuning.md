@@ -13,6 +13,35 @@ Tune against a fixed, chronological walk-forward split:
 - keep the final holdout untouched until the end
 - compare candidate parameter sets on the same folds
 
+## Current live-aligned backtest contract
+
+When the goal is to mirror `rotation-hysteresis-v2`, do not invent a separate
+research profile. Use the same live-facing sizing and exit contract that the
+live runner prints.
+
+The current contract is:
+
+- `profile=rotation-hysteresis-v2`
+- `capital=10000`
+- `max_order_notional=10000`
+- `max_risk_per_trade=150`
+- `min_bars=30`
+- `entry_fill_model=profile-default` (resolved to `open-pullback` for v2)
+- `fill_bar_size=30 secs`
+- `fill_data_dir=/home/fwd/data/ibkr-quant-bot/historical/30-sec-rth`
+- `commission_per_order=1`
+- `slippage_bps=1`
+- `spread_bps=1`
+- `bar_size=5 mins`
+- `market_data_exchange=SMART`
+
+If any of those drift, the run is not a strict live comparison. Label it as a
+research variant and do not compare it directly against live execution.
+
+For the current v2 tuning path, use 30-second fill bars as the default
+execution proxy. Keep the 1-minute fill cache only for diagnostics and
+comparison runs. Use 5-minute bars for signal logic only.
+
 The backtest command supports cached daily bars so the same input can be reused
 without reconnecting to IBKR:
 
@@ -126,7 +155,7 @@ Do not judge a candidate only by raw net return percentage on the walk-forward
 report. For this strategy, the more useful comparison is:
 
 - absolute net profit
-- profit normalized by deployable capital, for example `net_profit / 4000`
+- profit normalized by deployable capital, for example `net_profit / 10000`
 - OOS fold consistency
 - trade count and win/loss balance
 - how much of the result is consumed by commission, spread, and slippage
@@ -171,7 +200,9 @@ Reject a change if it does any of the following:
 
 The recent rotation-hysteresis sweeps produced a few useful lessons:
 
-- `max_risk_per_trade` helped up to about `60`, then flattened out.
+- `max_risk_per_trade` helped up to about `60` in the older tuning sample.
+  The current live-aligned v2 contract uses `300` to remove an artificial
+  sizing cap while keeping the resolved risk budget visible in the report.
 - `min_bars=30` was better than lower values in the recent sample.
 - loosening entry filters did not improve `net_profit / capital`; it mostly
   added noise.

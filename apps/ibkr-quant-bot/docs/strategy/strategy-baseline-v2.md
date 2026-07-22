@@ -54,6 +54,12 @@ create an entry. This restriction applies only to new entries. Existing
 positions continue through the normal protective, software-exit, and mandatory
 end-of-session flatten paths.
 
+The live runtime also keeps `max_daily_entries=1`, so after the first filled
+entry on a New York trading date, later runs can only manage exits or
+protective orders. The strategy does not scale entry size up when the account
+cash balance increases; live sizing is anchored to the fixed tradable-capital
+cache instead.
+
 ## Live Semantics
 
 The profit lock is evaluated only when the ordinary stop, take-profit, and
@@ -106,3 +112,24 @@ Run v2 explicitly:
 PYTHONPATH=src python -m ibkr_quant_bot.cli intraday-momentum \
   --profile rotation-hysteresis-v2
 ```
+
+## Current Live Configuration Snapshot
+
+This is the live checkout configuration that should stay in sync with the
+strategy baseline and the backtest docs:
+
+- `IBKR_ALLOWED_SYMBOLS=SOXL,SOXS,QQQ`
+- `IBKR_VWAP_SYMBOLS=SOXL,SOXS`
+- `IBKR_MAX_ORDER_NOTIONAL=10000`
+- `IBKR_MAX_RISK_PER_TRADE=300`
+- `IBKR_LIVE_TRADABLE_CAPITAL_USD=10000`
+- `IBKR_ENTRY_CASH_RESERVE_USD=10`
+- `IBKR_MAX_DAILY_ENTRIES=1`
+- `IBKR_LIVE_QUOTE_MAX_SAMPLES_PER_SYMBOL=100`
+- `IBKR_LIVE_QUOTE_CACHE_REFRESH_SECONDS=1`
+- `IBKR_LIVE_QUOTE_CACHE_MAX_AGE_SECONDS=3`
+
+The strategy still uses `QQQ` as the regime benchmark, `SOXL` as the long
+instrument, and `SOXS` as the short instrument. Backtest and live execution
+should keep the same symbol set and sizing caps unless this document is
+updated in the same change.

@@ -101,6 +101,33 @@ def _trade_marker(*, traded: bool, holding: bool, failed: bool) -> str:
     return "⚪ 今日未成交"
 
 
+def _indicator_summary(row: dict[str, Any]) -> str | None:
+    fields: list[str] = []
+    for label, key, digits in (
+        ("fast", "fast_ema", 2),
+        ("slow", "slow_ema", 2),
+        ("trend", "trend_ema", 2),
+        ("vwap", "vwap", 2),
+        ("score", "score", 4),
+        ("trend_gap", "trend_gap", 4),
+        ("vwap_gap", "vwap_gap", 4),
+        ("trend_slope", "trend_slope", 4),
+    ):
+        value = row.get(key)
+        if isinstance(value, (int, float)):
+            fields.append(f"{label}={_value(value, digits=digits)}")
+    above_vwap_bars = row.get("above_vwap_bars")
+    if isinstance(above_vwap_bars, (int, float)):
+        fields.append(f"above_vwap_bars={_value(above_vwap_bars, digits=0)}")
+    bullish = row.get("bullish")
+    if bullish is not None:
+        fields.append(f"bullish={'是' if bullish else '否'}")
+    benchmark_bullish = row.get("benchmark_bullish")
+    if benchmark_bullish is not None:
+        fields.append(f"benchmark={'是' if benchmark_bullish else '否'}")
+    return "｜".join(fields) if fields else None
+
+
 def _short_reason(reason: object) -> str:
     text = str(reason or "不可用")
     if text.startswith("entry window closed before"):
@@ -182,6 +209,11 @@ def format_live_report(
         str(row.get("symbol", "")).upper(): int(float(row.get("quantity", 0) or 0))
         for row in position_rows
     }
+    position_summary = (
+        "、".join(f"{symbol} {quantity}股" for symbol, quantity in positions.items())
+        if positions
+        else "无"
+    )
     entry_limit_reached = max_entries > 0 and entry_count >= max_entries
     execution_action, execution_reason = _execution_blocker(output, exit_code)
     if positions:
@@ -236,17 +268,20 @@ def format_live_report(
         )
         lines.append(f"信号：{signal_text}｜后续：{future_order}")
         lines.append(f"原因：{reason}")
+        indicators = _indicator_summary(row)
+        if indicators:
+            lines.append(f"指标：{indicators}")
 
     lines.extend(
         [
             "",
             "【资金与运行】",
             (
-                f"可用现金：{_value(capital.get('usable_cash'))} USD｜"
+                f"本金上限：{_value(capital.get('usable_cash'))} USD｜"
                 f"预留：{_value(capital.get('cash_reserve_usd'))} USD"
             ),
             (
-                f"现金状态：{capital.get('status', '不可用')}｜"
+                f"本金状态：{capital.get('status', '不可用')}｜"
                 f"来源：{capital.get('source', '不可用')}"
             ),
             (
@@ -258,6 +293,21 @@ def format_live_report(
                 f"{ended.astimezone(NEW_YORK).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]} ET"
             ),
             f"QQQ：{_value(benchmark.get('latest_trade_price'))}（趋势基准）",
+        ]
+    )
+    benchmark_indicators = _indicator_summary(benchmark)
+    if benchmark_indicators:
+        lines.append(f"QQQ指标：{benchmark_indicators}")
+    lines.extend(
+        [
+            "",
+            "【资金快照】",
+            (
+                f"可交易本金：{_value(capital.get('usable_cash'))} USD｜"
+                f"预留：{_value(capital.get('cash_reserve_usd'))} USD｜"
+                f"来源：{capital.get('source', '不可用')}"
+            ),
+            f"当前持仓：{position_summary}",
         ]
     )
 

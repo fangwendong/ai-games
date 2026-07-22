@@ -3,24 +3,26 @@
 This runbook documents the five-minute health monitor for this host. It is an
 operations check, not a trading strategy and not a market-data validator.
 
-Do not include account IDs, balances, positions, orders, credentials, quote
-prices, bar contents, or raw cache payloads in health reports.
+Do not include account IDs, orders, credentials, quote prices, bar contents,
+or raw cache payloads in health reports. A sanitized IBKR account snapshot is
+allowed and should cover balance and tracked positions only.
 
 ## Scope
 
 The monitor reports on four areas:
 
-1. Physical resources: CPU, load, memory, swap, root/data-disk usage, and the
-   highest CPU/memory processes.
+1. IBKR infrastructure: Gateway/IBC processes, API port `4001`, a forced
+   read-only server-time heartbeat, and a sanitized account snapshot
+   containing balance and tracked positions.
 2. botmux: active/recoverable sessions, safe zombie cleanup, scheduled-task
    counts, and current-session protection state.
-3. IBKR infrastructure: Gateway/IBC processes, API port `4001`, and a forced
-   read-only server-time heartbeat.
+3. Physical resources: CPU, load, memory in MB, swap, root/data-disk usage,
+   and the highest CPU/memory processes.
 4. Runtime infrastructure: process/tmux presence and file activity for the
    quote cache, live context cache, and deterministic live strategy reporter.
 
-The monitor must not inspect SMART/ARCA values, symbols, prices, bars, cache
-latency, or price scale. Cache checks use process state and `stat` only.
+The monitor must not inspect SMART/ARCA values, prices, bars, cache latency,
+or price scale. Cache checks use process state and `stat` only.
 
 ## Current Schedule
 
@@ -67,6 +69,8 @@ Raise a decision-level alert when any of these is true:
 - the quote/context cache process or expected file activity stops.
 - during regular trading hours, the deterministic reporter is missing,
   duplicated, older than 120 seconds, or reports a nonzero runner exit.
+  Outside regular trading hours, a missing reporter is expected when the
+  supervisor has already exited cleanly at the close or on a weekend.
 - the legacy Codex polling schedule is unexpectedly resumed.
 - collection or permitted cleanup fails.
 
@@ -81,7 +85,9 @@ It executes at seconds `03/13/23/33/43/53`, sends chat only at `:03`, and gates
 execution to 09:30-16:00 America/New_York on weekdays. The broker calendar
 remains authoritative for holidays and early closes.
 The reporter loop exits itself at normal close as a fallback if an external
-stop task is delivered but not acted on.
+stop task is delivered but not acted on. A separate weekday start task should
+launch the tmux supervisor after the open, and a separate weekday stop task
+should kill it after the close.
 
 - The legacy `af15c80b` Codex polling task must remain paused.
 - Exactly one `ibkr-live-strategy-reporter` tmux session and one
@@ -90,6 +96,8 @@ stop task is delivered but not acted on.
   no more than 120 seconds old and `latest-run.log` must contain
   `runner_exit=0`.
 - Outside the regular session, summary freshness is not required.
+- Outside the regular session, summary freshness is not required and an absent
+  reporter tmux/process is not an alert if the final close flush completed.
 - Old one-time start/stop tasks may exist, expire, or be removed without an
   alert because they no longer control the deterministic reporter.
 
@@ -120,15 +128,18 @@ If unhealthy, put the abnormal information before every normal metric:
 建议：<next action>
 ```
 
-Then include `核心概览` with resource, botmux, IB, and cache/reporter status. End with
+Then include `核心概览` with IB account snapshot, botmux, resource, and
+cache/reporter status. End with
 `指标明细`, expanding:
 
+- balance snapshot and tracked positions;
 - CPU/idle and load 1/5/15;
-- used/available memory and swap;
+- used/available memory and swap, reported in MB;
 - root and `/home` disk usage;
 - highest CPU and memory processes;
 - active sessions, cleanup count, enabled/paused task counts, and trading stage;
 - Gateway/IBC/port/heartbeat state; and
+- IBKR balance and tracked positions, with account IDs/order IDs omitted; and
 - quote/context process counts plus file update time or age; and
 - reporter tmux/process counts plus in-session summary age and runner exit.
 

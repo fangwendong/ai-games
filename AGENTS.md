@@ -43,6 +43,10 @@ run commands and validation path.
   git.
 - Route repository-wide documents through `docs/README.md`; keep subproject
   document indexes linked from the corresponding section in this file.
+- For `apps/ibkr-quant-bot/docs/`, start at `docs/README.md`, then use the
+  subdirectory indexes in `docs/live/`, `docs/data/`, `docs/backtest/`,
+  `docs/strategy/`, and `docs/research/` before drilling into individual
+  files.
 - Default to ASCII in repo files unless an existing file intentionally uses
   another character set.
 
@@ -122,6 +126,9 @@ Recent strategy facts worth knowing:
 - The legacy `rotation` profile remains available with `--profile rotation`
   as an explicit rollback path.
 - Live strategy uses fresh 5-minute bars and live quote checks.
+- The live-aligned v2 risk budget is `max_risk_per_trade=120`; backtest and
+  live reports should print the resolved value so the execution contract is
+  visible and cannot drift silently.
 - Backtest exits are intentionally aligned with live behavior: stop/take exits
   are close-based via `exit_decide()`, not optimistic intrabar high/low fills.
 - Every backtest must refresh recent `SOXL`/`SOXS`/`QQQ` history first, then
@@ -215,10 +222,12 @@ just because the project launches.
 
 Path: `skills/`
 
-The current reusable skill is:
+The current reusable skills are:
 
 - `skills/godot-game-prototyper/`: guidance for building polished Godot 4 game
   prototypes.
+- `skills/ibkr-quant-bot-backtest-parity/`: live-aligned IBKR backtest fill
+  parity, canonical cache routing, and report-contract guidance.
 
 When a project creates a reusable workflow, checklist, Godot pattern, tuning
 method, or playtest rubric, extract it into `skills/` instead of leaving it

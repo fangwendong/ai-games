@@ -375,7 +375,7 @@ the complete SMART quote group or both candidate bar groups fail validation,
 the strategy fails closed and does not submit an order.
 
 Backtests used to approve this behavior must generate signals from a cache
-carrying the same bar-source metadata. See `docs/historical-market-data.md`;
+carrying the same bar-source metadata. See `../data/historical-market-data.md`;
 do not compare an ARCA-bar live decision with a SMART-bar historical result.
 
 ## Code Paths To Inspect
