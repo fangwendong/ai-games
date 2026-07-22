@@ -60,13 +60,13 @@ strategy runner, quote cache, and context cache.
 | 2026-07-16 | `rotation-hysteresis-v2` | SMART / SMART | SOXS round trip | Protective take | +$145.93 | +3.69% |
 | 2026-07-17 | `rotation-hysteresis-v2` | SMART / SMART | SOXL round trip | Protective take | +$107.41 | +3.68% |
 | 2026-07-20 | `rotation-hysteresis-v2` | SMART / SMART | SOXL round trip | Protective stop | -$249.22 | -2.51% |
+| 2026-07-21 | `rotation-hysteresis-v2` | SMART / SMART | SOXL round trip | Software exit | +$103.05 | +1.04% |
 
-Across these seven sessions, the strategy closed six attributable round trips
-for approximately $175.46 net realized PnL, or about +0.70% of the six filled
-entry notionals pooled together. This pooled rate is descriptive and is not an
-account return or a compounded portfolio return. Five trades were profitable
-and one was a loss, but six trades are still far too few to estimate a reliable
-win rate or expected return.
+Across these eight sessions, the strategy closed seven attributable round trips
+for approximately $278.51 net realized PnL. This pooled rate is descriptive
+and is not an account return or a compounded portfolio return. Six trades were
+profitable and one was a loss, but seven trades are still far too few to
+estimate a reliable win rate or expected return.
 
 The July 10 and July 13 entry journals predate persistence of an explicit
 `strategy_version` field. The repository deployment timeline identifies them

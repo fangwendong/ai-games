@@ -11,6 +11,7 @@ reports remain once per minute.
 - One-shot runner: `scripts/run-live-strategy-report.zsh`
 - Persistent supervisor: `scripts/run-live-strategy-report-loop.zsh`
 - Daily start wrapper: `scripts/start-live-strategy-reporter.zsh`
+- Daily close wrapper: `scripts/close-live-strategy-reporter.zsh`
 - Daily stop wrapper: `scripts/stop-live-strategy-reporter.zsh`
 - Formatter: `src/ibkr_quant_bot/live_report.py`
 - Latest sanitized summary: `.ibkr_bot_state/live-strategy-reporter/latest-summary.txt`
@@ -78,6 +79,8 @@ the loop has already exited itself at the close.
 BOTMUX_REPORT_ROOT_MESSAGE_ID=<topic root message ID> \
 scripts/start-live-strategy-reporter.zsh
 
+scripts/close-live-strategy-reporter.zsh
+
 scripts/stop-live-strategy-reporter.zsh
 ```
 
@@ -90,7 +93,8 @@ Recommended botmux schedule pair:
 - start the reporter on weekdays shortly after the market opens, using
   `scripts/start-live-strategy-reporter.zsh`;
 - stop the reporter on weekdays after the close, using
-  `scripts/stop-live-strategy-reporter.zsh`.
+  `scripts/close-live-strategy-reporter.zsh` so the daily review log is
+  appended before shutdown.
 
 If you need the topic destination to be explicit, set
 `BOTMUX_REPORT_ROOT_MESSAGE_ID` before starting the wrapper. The default
@@ -102,7 +106,8 @@ the `rootId` field from a reply, and do not point at a child message.
 
 The loop still self-exits at or after the close. The explicit stop task is the
 fallback that keeps the tmux session from lingering when a prior command fails
-to act.
+to act. The close wrapper is the preferred daily close path because it appends
+the sanitized review log first and then shuts the reporter down.
 
 ## Topic Routing Gotcha
 
