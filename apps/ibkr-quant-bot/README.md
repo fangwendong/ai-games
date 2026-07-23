@@ -373,8 +373,12 @@ rollback baseline in [docs/strategy/strategy-baseline-v1.md](docs/strategy/strat
 
 ### Historical Data Cache
 
-Long intraday backtests persist every completed IBKR history page as daily
-JSON files under `.ibkr_bot_data/historical/` by default:
+Long intraday backtests should use the shared canonical historical cache by
+default. For the current live-aligned v2 path, the signal cache lives under
+`/home/fwd/data/ibkr-quant-bot/historical/5-min-rth` and the fill cache lives
+under `/home/fwd/data/ibkr-quant-bot/historical/30-sec-rth`. Do not treat the
+worktree-local `.ibkr_bot_data/historical/` path as the standard input for a
+shared comparison run.
 
 Before any momentum backtest starts, a fail-closed historical-data preflight
 checks that all strategy symbols and the benchmark share the same latest
@@ -385,7 +389,7 @@ inconsistent or partial recent sessions. The scheduled daily refresh handles
 whole-session cache staleness before this structural preflight runs.
 
 ```text
-.ibkr_bot_data/historical/
+/home/fwd/data/ibkr-quant-bot/historical/5-min-rth/
 ├── 2026-07-08/
 │   ├── QQQ__5_mins.json
 │   ├── SOXL__5_mins.json
@@ -397,7 +401,8 @@ whole-session cache staleness before this structural preflight runs.
 ```
 
 Overlapping pages are merged by timestamp, so retrying a download is safe.
-The cache directory is ignored by git. To choose another location:
+The cache directory is ignored by git. To choose another location for a
+research-only run, pass `--data-dir` explicitly:
 
 ```bash
 ibkr-bot backtest-momentum --data-dir /path/to/ibkr-history

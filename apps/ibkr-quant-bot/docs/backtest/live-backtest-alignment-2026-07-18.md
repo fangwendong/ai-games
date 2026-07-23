@@ -75,7 +75,8 @@ PYTHONPATH=src python -m ibkr_quant_bot.cli backtest-momentum \
   --holdout-days 10 \
   --entry-fill-model profile-default \
   --reuse-data \
-  --data-dir /home/fwd/work/ai-games-wt-codex-live/apps/ibkr-quant-bot/.ibkr_bot_data/historical \
+  --data-dir /home/fwd/data/ibkr-quant-bot/historical/5-min-rth \
+  --fill-data-dir /home/fwd/data/ibkr-quant-bot/historical/30-sec-rth \
   --market-data-exchange SMART
 ```
 

@@ -46,9 +46,15 @@ The backtest command supports cached daily bars so the same input can be reused
 without reconnecting to IBKR:
 
 ```bash
-ibkr-bot backtest-momentum --duration "120 D" --data-dir .ibkr_bot_data/historical
-ibkr-bot backtest-momentum --duration "120 D" --reuse-data --data-dir .ibkr_bot_data/historical
+ibkr-bot backtest-momentum --duration "120 D" \
+  --data-dir /home/fwd/data/ibkr-quant-bot/historical/5-min-rth
+ibkr-bot backtest-momentum --duration "120 D" --reuse-data \
+  --data-dir /home/fwd/data/ibkr-quant-bot/historical/5-min-rth
 ```
+
+Do not use `.ibkr_bot_data/historical` for a live-aligned backtest or any
+shared comparison. That path is worktree-local scratch space and is the usual
+source of "wrong directory" mistakes when multiple worktrees exist.
 
 ## Mandatory historical-data preflight
 
