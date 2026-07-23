@@ -288,6 +288,72 @@ class BacktestCostTest(unittest.TestCase):
         self.assertEqual(1, result.trade_count)
         self.assertEqual(98.0, result.trades[0].gross_entry_price)
 
+    def test_worst_case_fill_uses_high_for_buy_and_low_for_sell(self) -> None:
+        class WorstCaseStrategy:
+            symbols = ("SOXL",)
+            benchmark_symbol = "QQQ"
+            min_bars = 1
+
+            def decide(self, symbol, quote, bars, benchmark_bars=None):
+                signal = len(bars) == 1
+                return StrategyDecision(
+                    symbol=symbol,
+                    action="BUY" if signal else "HOLD",
+                    quantity=1 if signal else 0,
+                    reference_price=quote.reference_price,
+                    limit_price=None,
+                    reason="entry",
+                    signal=signal,
+                    meta={"score": 1.0},
+                )
+
+            def exit_decide(
+                self, symbol, quote, bars, quantity, average_cost, benchmark_bars=None
+            ):
+                signal = len(bars) == 2
+                return StrategyDecision(
+                    symbol=symbol,
+                    action="SELL" if signal else "HOLD",
+                    quantity=quantity if signal else 0,
+                    reference_price=quote.reference_price,
+                    limit_price=None,
+                    reason="exit",
+                    signal=signal,
+                    meta={},
+                )
+
+        start = datetime(2026, 7, 8, 9, 30, tzinfo=timezone.utc)
+        bars = [
+            Bar(time=start, open=100, high=101, low=99, close=100, volume=1),
+            Bar(
+                time=start + timedelta(minutes=5),
+                open=110,
+                high=115,
+                low=105,
+                close=111,
+                volume=1,
+            ),
+            Bar(
+                time=start + timedelta(minutes=10),
+                open=85,
+                high=88,
+                low=80,
+                close=81,
+                volume=1,
+            ),
+        ]
+
+        result = run_intraday_momentum_backtest(
+            {"SOXL": bars, "QQQ": bars},
+            strategy=WorstCaseStrategy(),
+            cost_model=BacktestCostModel(0, 0, 0),
+            entry_fill_model="worst-case",
+        )
+
+        self.assertEqual(1, result.trade_count)
+        self.assertEqual(115.0, result.trades[0].gross_entry_price)
+        self.assertEqual(80.0, result.trades[0].gross_exit_price)
+
     def test_mixed_signal_and_fill_bars_keep_signal_logic_on_five_minute_bars(
         self,
     ) -> None:

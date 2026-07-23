@@ -41,6 +41,9 @@ research variant and do not compare it directly against live execution.
 For the current v2 tuning path, use 30-second fill bars as the default
 execution proxy. Keep the 1-minute fill cache only for diagnostics and
 comparison runs. Use 5-minute bars for signal logic only.
+If you want a stress test, `--entry-fill-model worst-case` prices buys at the
+bar high and sells at the bar low. Do not compare that mode directly against
+the live execution path; it is intentionally pessimistic.
 
 The backtest command supports cached daily bars so the same input can be reused
 without reconnecting to IBKR:

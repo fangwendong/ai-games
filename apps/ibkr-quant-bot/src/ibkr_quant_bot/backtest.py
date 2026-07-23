@@ -301,13 +301,27 @@ def _next_bar_time(bars: list[Bar], current_time: datetime) -> datetime | None:
     )
 
 
-def _entry_fill_price(fill_bar: Bar, *, mode: str) -> float:
-    if mode in {"next_bar_open", "next-bar-open"}:
+def _fill_price(fill_bar: Bar, *, mode: str, side: str) -> float:
+    normalized_mode = mode.replace("-", "_")
+    normalized_side = side.upper()
+    if normalized_side not in {"BUY", "SELL"}:
+        raise ValueError(f"unsupported fill side: {side}")
+    if normalized_mode == "next_bar_open":
         return fill_bar.open
-    if mode in {"open_pullback", "open-pullback"}:
-        pullback = max(0.0, fill_bar.open - fill_bar.low)
-        return max(fill_bar.low, fill_bar.open - 0.2 * pullback)
+    if normalized_mode == "open_pullback":
+        if normalized_side == "BUY":
+            pullback = max(0.0, fill_bar.open - fill_bar.low)
+            return max(fill_bar.low, fill_bar.open - 0.2 * pullback)
+        return fill_bar.open
+    if normalized_mode == "worst_case":
+        return fill_bar.high if normalized_side == "BUY" else fill_bar.low
     raise ValueError(f"unsupported entry fill mode: {mode}")
+
+
+def _eod_exit_price(fill_bar: Bar, *, mode: str) -> float:
+    if mode.replace("-", "_") == "worst_case":
+        return fill_bar.low
+    return fill_bar.close
 
 
 def _select_signal(
@@ -397,7 +411,7 @@ def _protective_prices(
 
 
 def _protective_fill(
-    position: _OpenPosition, bar: Bar
+    position: _OpenPosition, bar: Bar, *, mode: str
 ) -> tuple[float, str] | None:
     """Model the broker-side sell OCA after the entry bar has completed.
 
@@ -410,6 +424,12 @@ def _protective_fill(
     take_price = position.protective_take_price
     stop_hit = stop_price is not None and bar.low <= stop_price
     take_hit = take_price is not None and bar.high >= take_price
+    if mode.replace("-", "_") == "worst_case":
+        if stop_hit:
+            return bar.low, "protective_stop"
+        if take_hit:
+            return bar.low, "protective_take"
+        return None
     if stop_hit:
         return min(bar.open, stop_price), "protective_stop"
     if take_hit:
@@ -544,9 +564,12 @@ def run_intraday_momentum_backtest(
                     current_time
                 )
                 if fill_bar is not None:
+                    raw_exit_price = _fill_price(
+                        fill_bar, mode=entry_fill_model, side="SELL"
+                    )
                     close_position(
                         open_position,
-                        fill_bar.open,
+                        raw_exit_price,
                         _session_date(fill_bar.time),
                         pending_exit.reason,
                     )
@@ -560,8 +583,8 @@ def run_intraday_momentum_backtest(
                     current_time
                 )
                 if fill_bar is not None:
-                    raw_entry_price = _entry_fill_price(
-                        fill_bar, mode=entry_fill_model
+                    raw_entry_price = _fill_price(
+                        fill_bar, mode=entry_fill_model, side="BUY"
                     )
                     shares = min(
                         pending_order.quantity,
@@ -622,7 +645,9 @@ def run_intraday_momentum_backtest(
             ):
                 bar = fill_bars_by_time.get(open_position.symbol, {}).get(current_time)
                 protective_fill = (
-                    _protective_fill(open_position, bar) if bar is not None else None
+                    _protective_fill(open_position, bar, mode=entry_fill_model)
+                    if bar is not None
+                    else None
                 )
                 if protective_fill is not None:
                     fill_price, reason = protective_fill
@@ -723,7 +748,7 @@ def run_intraday_momentum_backtest(
             if bars:
                 last_bar = bars[-1]
                 close_position(
-                    open_position, last_bar.close, _session_date(last_bar.time), "eod"
+                    open_position, _eod_exit_price(last_bar, mode=entry_fill_model), _session_date(last_bar.time), "eod"
                 )
 
     return BacktestResult(

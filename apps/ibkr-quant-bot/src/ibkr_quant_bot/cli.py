@@ -108,7 +108,12 @@ MOMENTUM_PROFILE_CHOICES = [
     "rotation-hysteresis-v2",
     "rotation-range-gated-v1",
 ]
-ENTRY_FILL_MODEL_CHOICES = ["next-bar-open", "open-pullback", "profile-default"]
+ENTRY_FILL_MODEL_CHOICES = [
+    "next-bar-open",
+    "open-pullback",
+    "worst-case",
+    "profile-default",
+]
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -380,7 +385,8 @@ def _build_parser() -> argparse.ArgumentParser:
         default="profile-default",
         help=(
             "entry fill approximation; profile-default uses open-pullback for "
-            "rotation-hysteresis-v2 and next-bar-open otherwise"
+            "rotation-hysteresis-v2 and next-bar-open otherwise; worst-case "
+            "uses bar high for buys and bar low for sells"
         ),
     )
     backtest.add_argument(
