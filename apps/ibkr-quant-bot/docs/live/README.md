@@ -13,7 +13,6 @@ operations.
   - `scripts/start-live-strategy-reporter.zsh`
   - `scripts/stop-live-strategy-reporter.zsh`
   - topic root routing and summary format
-- [Live strategy review log](live-strategy-review-log.md)
 - [Live strategy audit - 2026-07-17](live-strategy-audit-2026-07-17.md)
 - Daily close workflow:
   - `scripts/close-live-strategy-reporter.zsh`

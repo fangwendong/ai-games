@@ -143,4 +143,3 @@ commit updates the documentation and code together:
 
 - [Backtest parameter tuning](backtest-parameter-tuning.md)
 - [Strategy baseline v2](../strategy/strategy-baseline-v2.md)
-- [Live strategy review log](../live/live-strategy-review-log.md)

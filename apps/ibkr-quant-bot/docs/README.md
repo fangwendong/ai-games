@@ -24,10 +24,6 @@ Start here after reading the repository `AGENTS.md` and the application
 - [Deterministic live strategy reporter](live-strategy-reporter.md): the
   one-minute reporter supervisor plus its start/stop wrappers, topic-routing
   requirements, and chat-summary contract.
-- [Live strategy review log](live/live-strategy-review-log.md): sanitized session
-  execution history, reconciliation, net PnL, and review notes.
-  When a late broker fill arrives, update the session row and the dated block
-  together in the same commit; broker executions are the source of truth.
 - [Live strategy audit - 2026-07-17](live/live-strategy-audit-2026-07-17.md):
   prioritized safety findings, fault-injection evidence, repair order, and
   acceptance criteria.
