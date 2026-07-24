@@ -42,6 +42,7 @@ from .runtime_lock import (
     acquire_runtime_lock,
     arm_runtime_lock_deadline,
 )
+from .trade_record import DEFAULT_TRADE_RECORD_PATH, append_trade_record
 from .strategy import (
     IntradayMomentumStrategy,
     MovingAverageStrategy,
@@ -186,6 +187,26 @@ def _build_parser() -> argparse.ArgumentParser:
         help="fallback summary used when no entry journal exists",
     )
     review_log.add_argument(
+        "--session-date",
+        default=None,
+        help="America/New_York session date to append (defaults to current trading date)",
+    )
+
+    trade_record = subparsers.add_parser(
+        "append-trade-record",
+        help="append the day's sanitized trade record into the shared historical ledger",
+    )
+    trade_record.add_argument(
+        "--state-dir",
+        default=".ibkr_bot_state/semiconductor_rotation_intraday",
+        help="strategy state directory containing the daily journal files",
+    )
+    trade_record.add_argument(
+        "--output-path",
+        default=str(DEFAULT_TRADE_RECORD_PATH),
+        help="shared local trade record ledger",
+    )
+    trade_record.add_argument(
         "--session-date",
         default=None,
         help="America/New_York session date to append (defaults to current trading date)",
@@ -2121,6 +2142,18 @@ def main(argv: list[str] | None = None) -> int:
             doc_path=doc_path,
             session_date=session_date,
             latest_summary_path=latest_summary_path,
+        )
+        print(result.message)
+        return 0
+
+    if args.command == "append-trade-record":
+        state_dir = Path(args.state_dir)
+        output_path = Path(args.output_path)
+        session_date = args.session_date or current_session_date()
+        result = append_trade_record(
+            state_dir=state_dir,
+            output_path=output_path,
+            session_date=session_date,
         )
         print(result.message)
         return 0

@@ -4,3 +4,4 @@ __pycache__/
 .ibkr_bot_state/
 .ibkr_bot_state*/
 .ibkr_bot_data/
+apps/ibkr-quant-bot/docs/live/live-strategy-review-log.md

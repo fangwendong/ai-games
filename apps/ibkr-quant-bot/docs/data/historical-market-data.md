@@ -48,6 +48,34 @@ the selected source, refuses to merge another source into that directory, and
 does not match the cache metadata. A cache without this metadata is treated as
 source-unknown and is not valid for a frozen-strategy comparison.
 
+## Local Trade Record Ledger
+
+Trade records are kept outside Git in the shared historical-data area so they
+stay co-located with the market-data cache but never enter a repository:
+
+```text
+/home/fwd/data/ibkr-quant-bot/historical/trade.json
+```
+
+Use the CLI helper after the daily journals settle:
+
+```bash
+cd /home/fwd/work/ai-games-wt-codex-live/apps/ibkr-quant-bot
+PYTHONPATH=src python -m ibkr_quant_bot.cli append-trade-record
+```
+
+The command appends the current New York session when that date is not already
+present in the ledger. It reads only the sanitized daily journals under
+`.ibkr_bot_state/semiconductor_rotation_intraday/` and writes the JSON file
+under the shared data directory.
+
+To inspect the file directly:
+
+```bash
+jq '.days[] | select(.date == "2026-07-23")' \
+  /home/fwd/data/ibkr-quant-bot/historical/trade.json
+```
+
 A hybrid validation uses ARCA bars for indicators and historical SMART prices
 as the fill proxy. This reproduces the signal/execution split but remains an
 approximation until timestamped SMART quote snapshots are archived. Report

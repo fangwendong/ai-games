@@ -3,3 +3,4 @@
 This directory contains shared cache and backtest calibration notes.
 
 - [Shared historical market data](historical-market-data.md)
+  - local trade record ledger path and refresh command
