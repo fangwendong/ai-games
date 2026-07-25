@@ -44,6 +44,7 @@ from ibkr_quant_bot.cli import (
     _quote_timing_fields,
     _record_daily_entry,
     _record_order_state,
+    _resolve_backtest_entry_fill_model,
     _run_live_context_cache,
     _run_live_quote_cache,
     _should_flatten,
@@ -586,11 +587,16 @@ class LiveDataGuardsTest(unittest.TestCase):
         strategy = _build_momentum_strategy(args, settings)
 
         report = _backtest_core_parameters_report(
-            args, settings, strategy, "open-pullback"
+            args,
+            settings,
+            strategy,
+            _resolve_backtest_entry_fill_model(
+                args.entry_fill_model, args.profile
+            ),
         )
 
         self.assertEqual("rotation-hysteresis-v2", report["profile"])
-        self.assertEqual("open-pullback", report["resolved_entry_fill_model"])
+        self.assertEqual("worst-case", report["resolved_entry_fill_model"])
         self.assertEqual("profile-default", report["requested_entry_fill_model"])
         self.assertEqual(4000, report["resolved_max_notional"])
         self.assertEqual(300, report["resolved_max_risk_per_trade"])
@@ -599,6 +605,18 @@ class LiveDataGuardsTest(unittest.TestCase):
         self.assertEqual(1, report["max_daily_entries"])
         self.assertEqual(4000, strategy.max_notional)
         self.assertEqual(300, strategy.max_risk_per_trade)
+
+    def test_backtest_profile_default_fill_mode_is_pessimistic(self) -> None:
+        self.assertEqual(
+            "worst-case",
+            _resolve_backtest_entry_fill_model(
+                "profile-default", ROTATION_HYSTERESIS_V2_VERSION
+            ),
+        )
+        self.assertEqual(
+            "next-bar-open",
+            _resolve_backtest_entry_fill_model("profile-default", "balanced"),
+        )
 
     def test_hysteresis_profile_is_default(self) -> None:
         args = _build_parser().parse_args(["intraday-momentum"])

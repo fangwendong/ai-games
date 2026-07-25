@@ -24,9 +24,9 @@ The current contract is:
 - `profile=rotation-hysteresis-v2`
 - `capital=10000`
 - `max_order_notional=10000`
-- `max_risk_per_trade=150`
+- `max_risk_per_trade=120`
 - `min_bars=30`
-- `entry_fill_model=profile-default` (resolved to `open-pullback` for v2)
+- `entry_fill_model=profile-default` (resolved to `worst-case` for v2 backtests)
 - `fill_bar_size=30 secs`
 - `fill_data_dir=/home/fwd/data/ibkr-quant-bot/historical/30-sec-rth`
 - `commission_per_order=1`
@@ -41,7 +41,8 @@ research variant and do not compare it directly against live execution.
 For the current v2 tuning path, use 30-second fill bars as the default
 execution proxy. Keep the 1-minute fill cache only for diagnostics and
 comparison runs. Use 5-minute bars for signal logic only.
-If you want a stress test, `--entry-fill-model worst-case` prices buys at the
+The default `profile-default` entry model is intentionally pessimistic and
+resolves to `worst-case` for the v2 backtest path, which prices buys at the
 bar high and sells at the bar low. Do not compare that mode directly against
 the live execution path; it is intentionally pessimistic.
 
@@ -210,8 +211,8 @@ Reject a change if it does any of the following:
 The recent rotation-hysteresis sweeps produced a few useful lessons:
 
 - `max_risk_per_trade` helped up to about `60` in the older tuning sample.
-  The current live-aligned v2 contract uses `300` to remove an artificial
-  sizing cap while keeping the resolved risk budget visible in the report.
+  The current live-aligned v2 contract uses `120` to keep the sizing cap
+  visible in the report while staying aligned with live execution.
 - `min_bars=30` was better than lower values in the recent sample.
 - loosening entry filters did not improve `net_profit / capital`; it mostly
   added noise.

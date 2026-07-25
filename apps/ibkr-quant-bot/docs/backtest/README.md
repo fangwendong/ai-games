@@ -6,3 +6,4 @@ monthly summary outputs.
 - [Backtest parameter tuning](backtest-parameter-tuning.md)
 - [Live backtest alignment — 2026-07-18](live-backtest-alignment-2026-07-18.md)
 - [Monthly backtest summary — 2026-07-19](monthly-backtest-summary-2026-07-19.md)
+- [Monthly backtest summary — 2026-07-25](monthly-backtest-summary-2026-07-25.md)

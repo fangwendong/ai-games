@@ -11,7 +11,7 @@ readable.
 - Use the same strategy profile as live: `rotation-hysteresis-v2`
 - Keep the market-data source fixed to `SMART`
 - Resolve the v2 entry model through `profile-default`
-  - `rotation-hysteresis-v2` resolves to `open-pullback`
+  - `rotation-hysteresis-v2` resolves to `worst-case` for backtests
 - Keep the live-style capital controls visible in the report:
   - `max_notional`
   - `max_risk_per_trade`
@@ -60,7 +60,7 @@ The command form was:
 
 ```bash
 IBKR_MAX_ORDER_NOTIONAL=10000 \
-IBKR_MAX_RISK_PER_TRADE=300 \
+IBKR_MAX_RISK_PER_TRADE=120 \
 IBKR_ENTRY_CASH_RESERVE_USD=10 \
 IBKR_LIVE_TRADABLE_CAPITAL_CACHE_MAX_AGE_SECONDS=90 \
 IBKR_MAX_DAILY_ENTRIES=1 \
@@ -130,7 +130,7 @@ commit updates the documentation and code together:
 - Symbols allowed by live risk checks: `SOXL,SOXS,QQQ`
 - Strategy instruments: `SOXL` long, `SOXS` short, `QQQ` benchmark
 - `IBKR_MAX_ORDER_NOTIONAL=10000`
-- `IBKR_MAX_RISK_PER_TRADE=300`
+- `IBKR_MAX_RISK_PER_TRADE=120`
 - `IBKR_LIVE_TRADABLE_CAPITAL_USD=10000`
 - `IBKR_ENTRY_CASH_RESERVE_USD=10`
 - `IBKR_MAX_DAILY_ENTRIES=1`

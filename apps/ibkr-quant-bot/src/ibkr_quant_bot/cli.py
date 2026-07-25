@@ -117,6 +117,16 @@ ENTRY_FILL_MODEL_CHOICES = [
 ]
 
 
+def _resolve_backtest_entry_fill_model(
+    requested_entry_fill_model: str, profile: str
+) -> str:
+    if requested_entry_fill_model != "profile-default":
+        return requested_entry_fill_model
+    if profile == ROTATION_HYSTERESIS_V2_VERSION:
+        return "worst-case"
+    return "next-bar-open"
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ibkr-bot")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -405,7 +415,7 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=ENTRY_FILL_MODEL_CHOICES,
         default="profile-default",
         help=(
-            "entry fill approximation; profile-default uses open-pullback for "
+            "entry fill approximation; profile-default uses worst-case for "
             "rotation-hysteresis-v2 and next-bar-open otherwise; worst-case "
             "uses bar high for buys and bar low for sells"
         ),
@@ -2956,15 +2966,11 @@ def main(argv: list[str] | None = None) -> int:
                 slippage_bps=args.slippage_bps,
                 spread_bps=args.spread_bps,
             )
-            entry_fill_model = args.entry_fill_model
+            entry_fill_model = _resolve_backtest_entry_fill_model(
+                args.entry_fill_model, args.profile
+            )
             fill_bar_size = args.fill_bar_size or args.bar_size
             fill_data_dir = args.fill_data_dir or args.data_dir
-            if entry_fill_model == "profile-default":
-                entry_fill_model = (
-                    "open-pullback"
-                    if args.profile == ROTATION_HYSTERESIS_V2_VERSION
-                    else "next-bar-open"
-                )
             core_parameters = _backtest_core_parameters_report(
                 args, settings, strategy, entry_fill_model
             )
