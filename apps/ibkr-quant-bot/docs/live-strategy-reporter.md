@@ -41,6 +41,20 @@ current root id in
 `.ibkr_bot_state/live-strategy-reporter/root-message-id.txt` so a later auto
 start can recover the same thread without manual re-entry.
 
+Before starting the reporter, verify three things:
+
+1. `BOTMUX_REPORT_ROOT_MESSAGE_ID` still points at the current topic root.
+2. The quote cache and context cache are healthy, and the context cache
+   already contains at least one completed 5-minute bar for `QQQ`, `SOXL`,
+   and `SOXS`.
+3. The next execution lands on a real `:03` send slot inside the regular
+   09:30-15:59 America/New_York window.
+
+If any of those checks fail, delay the reporter instead of starting it early.
+Starting too early can produce fail-closed summaries before the first complete
+bar is available, and those summaries should not be treated as a valid daily
+report.
+
 The runner always forces live market data and disables ARCA fallback. It does
 not override the live/readonly/dry-run/allow-live-trading switches from `.env`.
 It runs only from 09:30 through 15:59 America/New_York on weekdays. The broker
@@ -108,6 +122,16 @@ The loop still self-exits at or after the close. The explicit stop task is the
 fallback that keeps the tmux session from lingering when a prior command fails
 to act. The close wrapper is the preferred daily close path because it appends
 the sanitized review log first and then shuts the reporter down.
+
+## Failure Modes To Avoid
+
+- If a report does not appear in the expected topic, suspect a stale
+  `BOTMUX_REPORT_ROOT_MESSAGE_ID` first.
+- If the reporter is running but the first few runs fail closed, check whether
+  the context cache was started before the first completed 5-minute bar.
+- If the health monitor says the reporter is missing while the tmux session
+  and loop process are both alive, treat that as a monitor-logic issue until
+  the runbook checks are reconciled.
 
 ## Topic Routing Gotcha
 

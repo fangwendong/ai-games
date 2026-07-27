@@ -101,6 +101,20 @@ should kill it after the close.
 - Old one-time start/stop tasks may exist, expire, or be removed without an
   alert because they no longer control the deterministic reporter.
 
+When checking the reporter during the regular session, use the runbook
+contract instead of a single process-name test:
+
+- `ibkr-live-strategy-reporter` tmux must exist.
+- `run-live-strategy-report-loop.zsh` must be alive.
+- `latest-run.log` must keep refreshing with `runner_exit=0`.
+- a missing chat post is only actionable if the current run reached a real
+  `report_due=true` send slot and still failed to deliver to the expected
+  topic.
+
+This avoids the two common false positives seen during the July 2026 incident:
+starting the reporter before the first completed five-minute bar, and binding
+the reporter to an old topic root so the report lands in the wrong thread.
+
 Daily history refresh and the health monitor itself should remain enabled.
 One-time task IDs and dates must be updated when the next live session is
 created. Do not keep yesterday's completed start/stop tasks in the protection
