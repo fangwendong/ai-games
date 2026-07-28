@@ -3,8 +3,8 @@
 The live runner removes the language model from the execution path. A
 persistent supervisor runs the existing V2 command every ten seconds, parses
 its structured JSON blocks, and keeps the latest fixed Chinese summary. The
-`:03` execution sends that summary directly through `botmux send`, so chat
-reports remain once per minute.
+first completed execution in each ET minute sends that summary directly
+through `botmux send`, so chat reports remain once per minute.
 
 ## Runtime files
 
@@ -23,32 +23,38 @@ without bound and account/order representations are not persisted.
 
 ## Required environment
 
-The supervisor inherits the live checkout's `.env` and requires this
-additional non-secret variable:
+The supervisor inherits the live checkout's `.env` and requires these
+additional non-secret variables:
 
 ```text
+BOTMUX_REPORT_SESSION_ID=<botmux sender session used by the reporter>
 BOTMUX_REPORT_ROOT_MESSAGE_ID=<target Feishu topic root message ID>
 ```
 
-Important: `BOTMUX_REPORT_ROOT_MESSAGE_ID` must be the topic/thread root
-message's `messageId`, not a reply message id and not the nested `rootId`
-field from a child reply. When a report is routed to the wrong place, check
-`botmux history --scope chat` and use the root message's own `messageId` as the
-router target. Using a normal reply message id will create a dead-end thread
-target or fail to land where the operator expects. The default sender no
-longer requires a separate botmux session id. The start wrapper also keeps the
-current root id in
+The two values are one routing tuple and must not be updated independently.
+`BOTMUX_REPORT_SESSION_ID` pins the botmux sender context. The start wrapper
+copies it to `BOTMUX_SESSION_ID` inside the tmux supervisor so later sends do
+not inherit the session that happened to launch the wrapper.
+
+`BOTMUX_REPORT_ROOT_MESSAGE_ID` must be the topic/thread root message's
+`messageId`, not a reply message id and not the nested `rootId` field from a
+child reply. When a report is routed to the wrong place, inspect
+`botmux history --scope chat` using the configured report session and use the
+root message's own `messageId` as the router target. Using a normal reply
+message id will create a dead-end thread target or fail to land where the
+operator expects. The start wrapper also keeps the current root id in
 `.ibkr_bot_state/live-strategy-reporter/root-message-id.txt` so a later auto
 start can recover the same thread without manual re-entry.
 
 Before starting the reporter, verify three things:
 
-1. `BOTMUX_REPORT_ROOT_MESSAGE_ID` still points at the current topic root.
+1. `BOTMUX_REPORT_SESSION_ID` is the validated sender session and
+   `BOTMUX_REPORT_ROOT_MESSAGE_ID` points at the intended topic root.
 2. The quote cache and context cache are healthy, and the context cache
    already contains at least one completed 5-minute bar for `QQQ`, `SOXL`,
    and `SOXS`.
-3. The next execution lands on a real `:03` send slot inside the regular
-   09:30-15:59 America/New_York window.
+3. The next execution lands inside the regular 09:30-15:59
+   America/New_York window.
 
 If any of those checks fail, delay the reporter instead of starting it early.
 Starting too early can produce fail-closed summaries before the first complete
@@ -59,12 +65,11 @@ The runner always forces live market data and disables ARCA fallback. It does
 not override the live/readonly/dry-run/allow-live-trading switches from `.env`.
 It runs only from 09:30 through 15:59 America/New_York on weekdays. The broker
 calendar remains authoritative; a holiday or early-close result is suppressed.
-The supervisor runs at seconds `03/13/23/33/43/53` of each minute. The `:03`
-slot preserves the context cache's two-second completed-bar publication grace
-and is the only slot that sends a chat report. Other slots execute the strategy
-but only update the bounded local latest-summary/latest-run files. Runs are
-strictly serial: a slow execution skips a later wall-clock slot instead of
-overlapping another strategy process.
+The supervisor runs at seconds `03/13/23/33/43/53` of each minute. The first
+completed execution observed in each ET minute sends a chat report. Other slots
+execute the strategy but only update the bounded local latest-summary/latest-
+run files. Runs are strictly serial: a slow execution skips a later wall-clock
+slot instead of overlapping another strategy process.
 
 The supervisor also exits itself at or after `16:00 America/New_York` on a
 weekday, or immediately on a weekend. This is a deterministic fallback for a
@@ -90,6 +95,7 @@ already running. The stop wrapper is also idempotent and is safe to run after
 the loop has already exited itself at the close.
 
 ```bash
+BOTMUX_REPORT_SESSION_ID=<botmux session ID for target chat> \
 BOTMUX_REPORT_ROOT_MESSAGE_ID=<topic root message ID> \
 scripts/start-live-strategy-reporter.zsh
 
@@ -110,10 +116,11 @@ Recommended botmux schedule pair:
   `scripts/close-live-strategy-reporter.zsh` so the daily review log is
   appended before shutdown.
 
-If you need the topic destination to be explicit, set
-`BOTMUX_REPORT_ROOT_MESSAGE_ID` before starting the wrapper. The default
-sender path no longer requires a separate botmux session id; it sends
-directly to the root topic id.
+Set both `BOTMUX_REPORT_SESSION_ID` and `BOTMUX_REPORT_ROOT_MESSAGE_ID` before
+starting the wrapper. The session pins the botmux sender context and the root
+message selects the topic. Supplying only a new root while retaining an
+unvalidated session can send reports to the wrong place or make the topic
+appear silent.
 
 The root message id must be the topic root message's `messageId`. Do not use
 the `rootId` field from a reply, and do not point at a child message.
@@ -125,8 +132,8 @@ the sanitized review log first and then shuts the reporter down.
 
 ## Failure Modes To Avoid
 
-- If a report does not appear in the expected topic, suspect a stale
-  `BOTMUX_REPORT_ROOT_MESSAGE_ID` first.
+- If a report does not appear in the expected topic, verify the session/root
+  routing tuple in both `.env` and the running tmux process environment.
 - If the reporter is running but the first few runs fail closed, check whether
   the context cache was started before the first completed 5-minute bar.
 - If the health monitor says the reporter is missing while the tmux session
@@ -135,16 +142,36 @@ the sanitized review log first and then shuts the reporter down.
 
 ## Topic Routing Gotcha
 
-When starting the reporter for a new conversation, create the target topic
-first, then copy the topic root message's `messageId` shown by botmux as the
-router target. Do not reuse a visible reply message id from inside the thread,
+When starting the reporter for a new conversation, create the target chat and
+topic first. Do not reuse a visible reply message id from inside the thread,
 and do not use the child reply's `rootId` field as the destination. The
 correct flow is:
 
-1. create or identify the topic root message;
-2. copy its `messageId` for `BOTMUX_REPORT_ROOT_MESSAGE_ID`;
-3. restart the reporter loop; and
-4. verify the next summary arrives under that same thread.
+1. create or identify the target chat and topic root message;
+2. configure the botmux session for that chat as
+   `BOTMUX_REPORT_SESSION_ID`;
+3. copy the topic root's `messageId` as
+   `BOTMUX_REPORT_ROOT_MESSAGE_ID`;
+4. restart the reporter loop; and
+5. verify the next automatic summary arrives under that same thread.
+
+## Current Production Destination
+
+The live deployment is intentionally isolated from the operator's general
+group:
+
+- Feishu chat: `IBKR 实盘策略报告`
+- chat id: `oc_b6300eaeaeff7062ae60ff10a943a197`
+- botmux report session:
+  `b50a1dea-b972-4c98-8f90-d04f8fb464aa`
+- report topic root:
+  `om_x100b69b963a3bca0def99403d4d4d30`
+
+These identifiers are operational routing metadata, not secrets. Keep their
+active values in the ignored live `.env`; the checked-in values above are the
+recovery record. When moving the reporter again, update the session and root
+together, restart the supervisor, verify its process environment, and confirm
+an automatic report in the destination before declaring the move complete.
 
 ## Summary contract
 

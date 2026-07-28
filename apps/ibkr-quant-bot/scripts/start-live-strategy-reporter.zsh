@@ -25,11 +25,15 @@ root_message_id="${BOTMUX_REPORT_ROOT_MESSAGE_ID:-}"
 if [[ -z "$root_message_id" && -f "$state_dir/root-message-id.txt" ]]; then
   root_message_id="$(<"$state_dir/root-message-id.txt")"
 fi
+report_session_id="${BOTMUX_REPORT_SESSION_ID:-${BOTMUX_SESSION_ID:-}}"
 
 : ${root_message_id:?BOTMUX_REPORT_ROOT_MESSAGE_ID is required}
+: ${report_session_id:?BOTMUX_REPORT_SESSION_ID is required}
 print -r -- "$root_message_id" >"$state_dir/root-message-id.txt"
 
 tmux new-session -d -s "$session_name" \
+  -e "BOTMUX_SESSION_ID=$report_session_id" \
+  -e "BOTMUX_REPORT_SESSION_ID=$report_session_id" \
+  -e "BOTMUX_REPORT_ROOT_MESSAGE_ID=$root_message_id" \
   "cd '$app_dir' && \
-   export BOTMUX_REPORT_ROOT_MESSAGE_ID='$root_message_id' && \
    exec '$runner'"

@@ -7,6 +7,7 @@ app_dir=${script_dir:h}
 runner="$script_dir/run-live-strategy-report.zsh"
 state_dir="$app_dir/.ibkr_bot_state/live-strategy-reporter"
 mkdir -p "$state_dir"
+last_report_minute_file="$state_dir/last-report-minute.txt"
 
 while true; do
   # Deterministic normal-session shutdown. Do not depend solely on a botmux
@@ -36,13 +37,20 @@ while true; do
   sleep "$sleep_seconds"
 
   log_tmp="$state_dir/latest-run.log.tmp.$$"
-  if (( target_second == 3 )); then
-    # The :03 execution is also the once-per-minute chat report. Respect an
-    # inherited BOTMUX_REPORT_DRY_SEND for explicit safe validation.
+  current_report_minute=$(TZ=America/New_York date +%Y%m%d%H%M)
+  last_report_minute=""
+  if [[ -f "$last_report_minute_file" ]]; then
+    last_report_minute="$(<"$last_report_minute_file")"
+  fi
+  if [[ "$current_report_minute" != "$last_report_minute" ]]; then
+    # Send exactly one chat report per ET minute, on the first completed
+    # execution observed in that minute. This keeps the minute cadence stable
+    # even if the scheduler drifts away from the old :03-only slot.
     "$runner" >"$log_tmp" 2>&1
     report_due=true
+    print -r -- "$current_report_minute" >"$last_report_minute_file"
   else
-    # Execute the same live strategy every ten seconds without sending chat.
+    # Execute the same live strategy without re-sending chat in the same minute.
     BOTMUX_REPORT_DRY_SEND=true "$runner" >"$log_tmp" 2>&1
     report_due=false
   fi
@@ -50,6 +58,7 @@ while true; do
   print -r -- "strategy_interval_seconds=10" >>"$log_tmp"
   print -r -- "report_interval_seconds=60" >>"$log_tmp"
   print -r -- "scheduled_second=$target_second" >>"$log_tmp"
+  print -r -- "report_minute=$current_report_minute" >>"$log_tmp"
   print -r -- "report_due=$report_due" >>"$log_tmp"
   print -r -- "runner_exit=$runner_exit" >>"$log_tmp"
   mv -f "$log_tmp" "$state_dir/latest-run.log"

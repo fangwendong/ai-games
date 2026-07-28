@@ -40,7 +40,7 @@ botmux schedule list
 
 ## Safety Boundary
 
-The heartbeat must load the live checkout `.env` and then override it with:
+Every IBKR query must load the live checkout `.env` and then override it with:
 
 ```text
 IBKR_READONLY=true
@@ -49,8 +49,48 @@ IBKR_ALLOW_LIVE_TRADING=false
 IBKR_CLIENT_ID=87
 ```
 
-It may run only `python -m ibkr_quant_bot.cli heartbeat`. It must not run a
-strategy, read account state, or submit/modify/cancel orders.
+The monitor may run only these IBKR CLI commands:
+
+- `python -m ibkr_quant_bot.cli heartbeat`
+- `python -m ibkr_quant_bot.cli balance`
+- `python -m ibkr_quant_bot.cli positions`
+
+The latter two are required for the sanitized account snapshot. Raw command
+output may be parsed locally, but account IDs must never appear in the health
+report. The monitor must not run a strategy, request quotes/bars, or
+submit/modify/cancel orders.
+
+Do not infer account values from an earlier report. If either read-only query
+fails, report its fields as unavailable rather than copying the last known
+balance or converting missing position data to zero.
+
+## Account Value Semantics
+
+Use the following stable meanings:
+
+- `NetLiquidation` is the primary account-equity health value.
+- `TotalCashValue` and `AvailableFunds` are liquidity values, not total assets.
+- `GrossPositionValue` and the current position rows explain cash converted
+  into securities.
+- `FullInitMarginReq` is account margin usage. It is not the strategy cash
+  reserve.
+- `IBKR_ENTRY_CASH_RESERVE_USD` is the strategy cash reserve and must be
+  labelled separately.
+
+A cash decline is not an account-loss alert when it is reconciled by a new or
+larger position. For example, buying `quantity * average_cost` of SOXL normally
+reduces cash by approximately the same amount while leaving account equity
+represented by cash plus position value. Compare `NetLiquidation` to an
+equivalent `NetLiquidation` baseline; never compare current cash to a former
+cash-only baseline and call the difference unexplained.
+
+Position rules are equally strict:
+
+- report the current read-only API result on every run;
+- preserve fractional quantities;
+- report zero only when the positions query succeeded and returned no row for
+  that symbol; and
+- report unavailable when collection failed.
 
 Session cleanup is limited to entries explicitly reported as stopped,
 process-exited, and unrecoverable. Never delete an active or unknown session.
@@ -81,9 +121,10 @@ changes alone are not an alert; validate named current-stage protection instead.
 
 The deterministic runner replaces the old one-minute Codex schedule. Its
 supervisor is `ibkr-live-strategy-reporter` and remains alive across sessions.
-It executes at seconds `03/13/23/33/43/53`, sends chat only at `:03`, and gates
-execution to 09:30-16:00 America/New_York on weekdays. The broker calendar
-remains authoritative for holidays and early closes.
+It executes at seconds `03/13/23/33/43/53`, sends chat on the first completed
+execution in each ET minute, and gates execution to 09:30-16:00
+America/New_York on weekdays. The broker calendar remains authoritative for
+holidays and early closes.
 The reporter loop exits itself at normal close as a fallback if an external
 stop task is delivered but not acted on. A separate weekday start task should
 launch the tmux supervisor after the open, and a separate weekday stop task
@@ -146,7 +187,9 @@ Then include `核心概览` with IB account snapshot, botmux, resource, and
 cache/reporter status. End with
 `指标明细`, expanding:
 
-- balance snapshot and tracked positions;
+- NetLiquidation, TotalCashValue, AvailableFunds, GrossPositionValue, current
+  tracked positions, account margin usage, and the separately labelled
+  strategy cash reserve;
 - CPU/idle and load 1/5/15;
 - used/available memory and swap, reported in MB;
 - root and `/home` disk usage;
@@ -214,3 +257,6 @@ Expected state:
 | CPU briefly rises during the check | `mpstat`, botmux, or a scheduled command was active | Alert only at the documented threshold. |
 | Completed history worker remains online | Scheduled botmux session did not exit cleanly | Review separately; do not kill it from the health task. |
 | Legacy one-minute polling is paused | The deterministic reporter replaced it | Treat paused as the required state; do not resume it. |
+| Cash falls after an entry fill | Cash was converted into a security position | Reconcile cash with current positions and GrossPositionValue; judge account equity using NetLiquidation. |
+| Positions display zero during a known live holding | Stale state or a failed query was converted to zero | Run the read-only positions query every time; use unavailable on failure. |
+| "Reserved amount" is zero while strategy reserve is configured | Account margin and strategy reserve were conflated | Report FullInitMarginReq and IBKR_ENTRY_CASH_RESERVE_USD as separate fields. |
