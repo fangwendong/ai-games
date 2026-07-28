@@ -237,6 +237,46 @@ class IntradayMomentumStrategyTest(unittest.TestCase):
         self.assertTrue(decision.signal)
         self.assertEqual("BUY", decision.action)
 
+    def test_rotation_two_bar_momentum_veto_blocks_failed_breakout(self) -> None:
+        baseline = SemiconductorRotationStrategy(long_min_score=0.0)
+        guarded = SemiconductorRotationStrategy(
+            long_min_score=0.0,
+            entry_momentum_lookback_bars=2,
+        )
+        bars = make_bars(
+            [100 + i * 0.5 for i in range(37)] + [120.0, 118.0, 119.0]
+        )
+        benchmark = make_benchmark_bars([300 + i * 0.4 for i in range(60)])
+        quote = Quote(symbol="SOXL", bid=118.9, ask=119.0, last=119.0, close=119.0)
+
+        unguarded = baseline.decide(
+            "SOXL", quote, bars, benchmark_bars=benchmark
+        )
+        blocked = guarded.decide("SOXL", quote, bars, benchmark_bars=benchmark)
+
+        self.assertTrue(unguarded.signal)
+        self.assertFalse(blocked.signal)
+        self.assertEqual("HOLD", blocked.action)
+        self.assertAlmostEqual(-0.0083333333, blocked.meta["entry_momentum_return"])
+        self.assertFalse(blocked.meta["entry_momentum_gate_passed"])
+
+    def test_rotation_two_bar_momentum_veto_allows_positive_momentum(self) -> None:
+        strategy = SemiconductorRotationStrategy(
+            long_min_score=0.0,
+            entry_momentum_lookback_bars=2,
+        )
+        bars = make_bars([100 + i * 0.5 for i in range(40)])
+        benchmark = make_benchmark_bars([300 + i * 0.4 for i in range(60)])
+        quote = Quote(symbol="SOXL", bid=119.4, ask=119.5, last=119.5, close=119.5)
+
+        decision = strategy.decide(
+            "SOXL", quote, bars, benchmark_bars=benchmark
+        )
+
+        self.assertTrue(decision.signal)
+        self.assertTrue(decision.meta["entry_momentum_gate_passed"])
+        self.assertGreater(decision.meta["entry_momentum_return"], 0)
+
     def test_rotation_range_gate_blocks_entry_until_completed_range_passes(self) -> None:
         strategy = SemiconductorRotationStrategy(
             benchmark_min_intraday_range=0.0075,

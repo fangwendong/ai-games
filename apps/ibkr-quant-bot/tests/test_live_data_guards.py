@@ -14,6 +14,10 @@ from ibkr_quant_bot.cli import (
     NEW_YORK,
     ROTATION_HYSTERESIS_V2_PARAMETERS,
     ROTATION_HYSTERESIS_V2_VERSION,
+    ROTATION_HYSTERESIS_V3_PARAMETERS,
+    ROTATION_HYSTERESIS_V3_VERSION,
+    ROTATION_HYSTERESIS_V4_PARAMETERS,
+    ROTATION_HYSTERESIS_V4_VERSION,
     ROTATION_RANGE_GATED_V1_PARAMETERS,
     ROTATION_RANGE_GATED_V1_VERSION,
     _backtest_core_parameters_report,
@@ -655,6 +659,33 @@ class LiveDataGuardsTest(unittest.TestCase):
         self.assertEqual("rotation-hysteresis-v2", ROTATION_HYSTERESIS_V2_VERSION)
         for name, expected in ROTATION_HYSTERESIS_V2_PARAMETERS.items():
             self.assertEqual(expected, getattr(strategy, name), name)
+
+    def test_v3_and_v4_candidates_are_explicit_and_keep_v2_as_default(self) -> None:
+        default_args = _build_parser().parse_args(["intraday-momentum"])
+        v3 = _build_momentum_strategy(
+            _build_parser().parse_args(
+                ["intraday-momentum", "--profile", "rotation-hysteresis-v3"]
+            ),
+            Settings(),
+        )
+        v4 = _build_momentum_strategy(
+            _build_parser().parse_args(
+                ["intraday-momentum", "--profile", "rotation-hysteresis-v4"]
+            ),
+            Settings(),
+        )
+
+        self.assertEqual("rotation-hysteresis-v2", default_args.profile)
+        self.assertEqual("rotation-hysteresis-v3", ROTATION_HYSTERESIS_V3_VERSION)
+        self.assertEqual("rotation-hysteresis-v4", ROTATION_HYSTERESIS_V4_VERSION)
+        for name, expected in ROTATION_HYSTERESIS_V3_PARAMETERS.items():
+            self.assertEqual(expected, getattr(v3, name), name)
+        for name, expected in ROTATION_HYSTERESIS_V4_PARAMETERS.items():
+            self.assertEqual(expected, getattr(v4, name), name)
+        self.assertFalse(v3.use_exit_hysteresis)
+        self.assertEqual(0, v3.entry_momentum_lookback_bars)
+        self.assertFalse(v4.use_exit_hysteresis)
+        self.assertEqual(2, v4.entry_momentum_lookback_bars)
 
     def test_range_gated_candidate_is_isolated_from_v2(self) -> None:
         candidate = _build_momentum_strategy(

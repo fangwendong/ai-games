@@ -575,12 +575,15 @@ class SemiconductorRotationStrategy:
     profit_lock_drawdown_pct: float | None = None
     entry_fill_cutoff_et_minutes: int | None = None
     benchmark_min_intraday_range: float = 0.0
+    entry_momentum_lookback_bars: int = 0
     long_strategy: IntradayMomentumStrategy = field(init=False, repr=False)
     short_strategy: IntradayMomentumStrategy = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.benchmark_min_intraday_range < 0:
             raise ValueError("benchmark_min_intraday_range must be non-negative")
+        if self.entry_momentum_lookback_bars < 0:
+            raise ValueError("entry_momentum_lookback_bars must be non-negative")
         self.long_symbol = self.long_symbol.upper()
         self.short_symbol = self.short_symbol.upper()
         self.symbols = (self.long_symbol, self.short_symbol)
@@ -703,6 +706,60 @@ class SemiconductorRotationStrategy:
             reason=(
                 f"benchmark intraday range {benchmark_range:.4%} below "
                 f"minimum {threshold:.4%}"
+            ),
+            signal=False,
+            meta=meta,
+        )
+
+    def _apply_entry_momentum_gate(
+        self,
+        decision: StrategyDecision,
+        bars: list[Bar],
+    ) -> StrategyDecision:
+        lookback = self.entry_momentum_lookback_bars
+        if lookback <= 0 or not decision.signal or decision.action != "BUY":
+            return decision
+        if len(bars) <= lookback or bars[-lookback - 1].close <= 0:
+            return StrategyDecision(
+                symbol=decision.symbol,
+                action="HOLD",
+                quantity=0,
+                reference_price=decision.reference_price,
+                limit_price=None,
+                reason=f"need {lookback + 1} bars for entry momentum veto",
+                signal=False,
+                meta={
+                    **decision.meta,
+                    "entry_momentum_lookback_bars": lookback,
+                    "entry_momentum_gate_passed": False,
+                },
+            )
+        momentum = bars[-1].close / bars[-lookback - 1].close - 1.0
+        meta = {
+            **decision.meta,
+            "entry_momentum_lookback_bars": lookback,
+            "entry_momentum_return": momentum,
+            "entry_momentum_gate_passed": momentum > 0,
+        }
+        if momentum > 0:
+            return StrategyDecision(
+                symbol=decision.symbol,
+                action=decision.action,
+                quantity=decision.quantity,
+                reference_price=decision.reference_price,
+                limit_price=decision.limit_price,
+                reason=decision.reason,
+                signal=decision.signal,
+                meta=meta,
+            )
+        return StrategyDecision(
+            symbol=decision.symbol,
+            action="HOLD",
+            quantity=0,
+            reference_price=decision.reference_price,
+            limit_price=None,
+            reason=(
+                f"{lookback}-bar entry momentum {momentum:.4%} is not positive"
             ),
             signal=False,
             meta=meta,
@@ -863,11 +920,14 @@ class SemiconductorRotationStrategy:
         bullish = self._benchmark_bullish(benchmark_bars)
         if symbol == self.long_symbol:
             if bullish:
-                return self._apply_entry_range_gate(
-                    self.long_strategy.decide(
-                        symbol, quote, bars, benchmark_bars=benchmark_bars
+                return self._apply_entry_momentum_gate(
+                    self._apply_entry_range_gate(
+                        self.long_strategy.decide(
+                            symbol, quote, bars, benchmark_bars=benchmark_bars
+                        ),
+                        benchmark_bars,
                     ),
-                    benchmark_bars,
+                    bars,
                 )
             return StrategyDecision(
                 symbol=symbol,
@@ -885,11 +945,14 @@ class SemiconductorRotationStrategy:
             )
         if symbol == self.short_symbol:
             if not bullish:
-                return self._apply_entry_range_gate(
-                    self.short_strategy.decide(
-                        symbol, quote, bars, benchmark_bars=None
+                return self._apply_entry_momentum_gate(
+                    self._apply_entry_range_gate(
+                        self.short_strategy.decide(
+                            symbol, quote, bars, benchmark_bars=None
+                        ),
+                        benchmark_bars,
                     ),
-                    benchmark_bars,
+                    bars,
                 )
             return StrategyDecision(
                 symbol=symbol,

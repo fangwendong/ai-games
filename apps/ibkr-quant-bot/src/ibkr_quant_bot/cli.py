@@ -95,6 +95,16 @@ ROTATION_HYSTERESIS_V2_PARAMETERS: dict[str, object] = {
     "profit_lock_drawdown_pct": 0.006,
     "entry_fill_cutoff_et_minutes": 13 * 60 + 30,
 }
+ROTATION_HYSTERESIS_V3_VERSION = "rotation-hysteresis-v3"
+ROTATION_HYSTERESIS_V3_PARAMETERS: dict[str, object] = {
+    **ROTATION_HYSTERESIS_V2_PARAMETERS,
+    "use_exit_hysteresis": False,
+}
+ROTATION_HYSTERESIS_V4_VERSION = "rotation-hysteresis-v4"
+ROTATION_HYSTERESIS_V4_PARAMETERS: dict[str, object] = {
+    **ROTATION_HYSTERESIS_V3_PARAMETERS,
+    "entry_momentum_lookback_bars": 2,
+}
 ROTATION_RANGE_GATED_V1_VERSION = "rotation-range-gated-v1"
 ROTATION_RANGE_GATED_V1_PARAMETERS: dict[str, object] = {
     **ROTATION_HYSTERESIS_V2_PARAMETERS,
@@ -107,6 +117,8 @@ MOMENTUM_PROFILE_CHOICES = [
     "rotation-hysteresis",
     "rotation-hysteresis-v1",
     "rotation-hysteresis-v2",
+    "rotation-hysteresis-v3",
+    "rotation-hysteresis-v4",
     "rotation-range-gated-v1",
 ]
 ENTRY_FILL_MODEL_CHOICES = [
@@ -122,7 +134,11 @@ def _resolve_backtest_entry_fill_model(
 ) -> str:
     if requested_entry_fill_model != "profile-default":
         return requested_entry_fill_model
-    if profile == ROTATION_HYSTERESIS_V2_VERSION:
+    if profile in {
+        ROTATION_HYSTERESIS_V2_VERSION,
+        ROTATION_HYSTERESIS_V3_VERSION,
+        ROTATION_HYSTERESIS_V4_VERSION,
+    }:
         return "worst-case"
     return "next-bar-open"
 
@@ -1865,6 +1881,8 @@ def _build_momentum_strategy(args: argparse.Namespace, settings: Settings):
         "rotation-hysteresis",
         "rotation-hysteresis-v1",
         "rotation-hysteresis-v2",
+        "rotation-hysteresis-v3",
+        "rotation-hysteresis-v4",
         "rotation-range-gated-v1",
     }:
         hysteresis = profile != "rotation"
@@ -1877,6 +1895,10 @@ def _build_momentum_strategy(args: argparse.Namespace, settings: Settings):
                 )
             if profile == ROTATION_RANGE_GATED_V1_VERSION:
                 parameters = ROTATION_RANGE_GATED_V1_PARAMETERS
+            elif profile == ROTATION_HYSTERESIS_V4_VERSION:
+                parameters = ROTATION_HYSTERESIS_V4_PARAMETERS
+            elif profile == ROTATION_HYSTERESIS_V3_VERSION:
+                parameters = ROTATION_HYSTERESIS_V3_PARAMETERS
             elif profile == ROTATION_HYSTERESIS_V2_VERSION:
                 parameters = ROTATION_HYSTERESIS_V2_PARAMETERS
             else:
@@ -2939,11 +2961,7 @@ def main(argv: list[str] | None = None) -> int:
                             request,
                             filled_quantity=filled,
                             average_fill_price=average_fill_price,
-                            strategy_version=(
-                                ROTATION_HYSTERESIS_V2_VERSION
-                                if args.profile == ROTATION_HYSTERESIS_V2_VERSION
-                                else args.profile
-                            ),
+                            strategy_version=args.profile,
                             protective_stop_price=stop_price,
                             protective_take_price=take_price,
                         )
@@ -2993,6 +3011,7 @@ def main(argv: list[str] | None = None) -> int:
                     "profit_lock_drawdown_pct": strategy.profit_lock_drawdown_pct,
                     "entry_fill_cutoff_et_minutes": strategy.entry_fill_cutoff_et_minutes,
                     "benchmark_min_intraday_range": strategy.benchmark_min_intraday_range,
+                    "entry_momentum_lookback_bars": strategy.entry_momentum_lookback_bars,
                     "max_notional": strategy.max_notional,
                     "long": {
                         "stop_loss_pct": strategy.long_stop_loss_pct,
