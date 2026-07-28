@@ -60,9 +60,11 @@ Start here after reading the repository `AGENTS.md` and the application
   machine and validation limits.
 - [ORB stocks-in-play research](research/orb-stocks-in-play-research.md): isolated opening
   range breakout research and candidate-selection methodology.
+- [Bar-close parity correction - 2026-07-29](research/bar-close-parity-correction-2026-07-29.md):
+  five-minute signal-availability fix, corrected V2/V3/V4 results, intraday
+  replay, and bounded candidate rejection evidence.
 - [Recent-regime rotation optimization - 2026-07-29](research/recent-regime-optimization-2026-07-29.md):
-  reconstructed SOXL stop event, bounded V3/V4 candidates, chronological
-  comparisons, stress tests, and rollout decision.
+  superseded pre-parity investigation retained for audit history.
 
 ## Index Maintenance
 

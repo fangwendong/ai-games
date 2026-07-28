@@ -412,12 +412,87 @@ class BacktestCostTest(unittest.TestCase):
         )
 
         self.assertEqual(1, result.trade_count)
-        self.assertEqual(111.0, result.trades[0].gross_entry_price)
+        # The 09:30 signal bar is not available until 09:35. The first
+        # executable fill bar in this fixture begins at 09:36, so none of the
+        # 09:31-09:34 bars may be used even though they sort after 09:30.
+        self.assertEqual(115.0, result.trades[0].gross_entry_price)
         self.assertEqual(
-            (signal_start + timedelta(minutes=1)).replace(tzinfo=None),
+            (signal_start + timedelta(minutes=6)).replace(tzinfo=None),
             result.trades[0].entry_time,
         )
         self.assertEqual(102.0, result.trades[0].gross_exit_price)
+
+    def test_completed_signal_can_fill_at_matching_execution_bar_start(self) -> None:
+        class FirstCompletedBarStrategy:
+            symbols = ("SOXL",)
+            benchmark_symbol = "QQQ"
+            min_bars = 1
+
+            def decide(self, symbol, quote, bars, benchmark_bars=None):
+                signal = len(bars) == 1
+                return StrategyDecision(
+                    symbol=symbol,
+                    action="BUY" if signal else "HOLD",
+                    quantity=1 if signal else 0,
+                    reference_price=quote.reference_price,
+                    limit_price=None,
+                    reason="entry",
+                    signal=signal,
+                    meta={"score": 1.0},
+                )
+
+            def exit_decide(
+                self, symbol, quote, bars, quantity, average_cost, benchmark_bars=None
+            ):
+                return StrategyDecision(
+                    symbol=symbol,
+                    action="HOLD",
+                    quantity=0,
+                    reference_price=quote.reference_price,
+                    limit_price=None,
+                    reason="hold",
+                    signal=False,
+                    meta={},
+                )
+
+        start = datetime(2026, 7, 8, 9, 30, tzinfo=timezone.utc)
+        signal_bars = [
+            Bar(start, 100.0, 101.0, 99.0, 100.0, 1),
+            Bar(start + timedelta(minutes=5), 101.0, 102.0, 100.0, 101.0, 1),
+        ]
+        fill_bars = [
+            Bar(
+                start + timedelta(minutes=4, seconds=30),
+                999.0,
+                999.0,
+                999.0,
+                999.0,
+                1,
+            ),
+            Bar(
+                start + timedelta(minutes=5),
+                105.0,
+                106.0,
+                104.0,
+                105.0,
+                1,
+            ),
+        ]
+
+        result = run_intraday_momentum_backtest(
+            {"SOXL": signal_bars, "QQQ": signal_bars},
+            strategy=FirstCompletedBarStrategy(),
+            cost_model=BacktestCostModel(0, 0, 0),
+            fill_bars_by_symbol={"SOXL": fill_bars, "QQQ": fill_bars},
+            signal_bar_size="5 mins",
+        )
+
+        self.assertEqual(1, result.trade_count)
+        self.assertEqual(105.0, result.trades[0].gross_entry_price)
+        self.assertEqual(
+            (start + timedelta(minutes=5)).replace(tzinfo=None),
+            result.trades[0].entry_time,
+        )
 
     def test_stop_take_uses_close_based_strategy_exit_not_intrabar_high_low(
         self,

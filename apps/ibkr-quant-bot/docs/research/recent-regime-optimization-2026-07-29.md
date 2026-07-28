@@ -1,5 +1,12 @@
 # Recent-Regime Rotation Optimization - 2026-07-29
 
+> Superseded: the backtest results in this note used each IBKR five-minute
+> bar at its interval-start timestamp, before the bar could have completed.
+> This introduced five minutes of lookahead. Do not use the tables below for
+> rollout decisions. See
+> [Bar-close parity correction - 2026-07-29](bar-close-parity-correction-2026-07-29.md)
+> for corrected results and conclusions.
+
 This note evaluates narrow changes to `rotation-hysteresis-v2` after the
 2026-07-28 SOXL protective-stop exit. It is research, not the live contract.
 The running live checkout remains on the explicitly selected V2 profile until

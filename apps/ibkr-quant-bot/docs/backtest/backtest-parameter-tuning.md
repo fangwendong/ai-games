@@ -33,6 +33,8 @@ The current contract is:
 - `slippage_bps=1`
 - `spread_bps=1`
 - `bar_size=5 mins`
+- `signal_availability=bar-close` (an IBKR bar timestamp is the interval
+  start; its OHLC values are unavailable until one full bar duration later)
 - `market_data_exchange=SMART`
 
 If any of those drift, the run is not a strict live comparison. Label it as a
@@ -133,6 +135,8 @@ hard-code these dates.
 
 The default intraday backtest models the two live exit paths separately:
 
+- a five-minute signal bar stamped `11:55` becomes available at `12:00`; the
+  strategy must not consume its OHLC values at `11:55`
 - broker-side protective stop/take OCA orders may fill intrabar after the
   entry bar; stop gaps receive the worse opening price and take-profit gaps
   receive opening price improvement

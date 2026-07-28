@@ -1952,6 +1952,7 @@ def _backtest_core_parameters_report(
         "capital": args.capital,
         "duration": args.duration,
         "bar_size": args.bar_size,
+        "signal_availability": "bar-close",
         "resolved_entry_fill_model": entry_fill_model,
         "requested_entry_fill_model": requested_entry_fill_model,
         "requested_max_notional": args.max_notional,
@@ -3223,6 +3224,7 @@ def main(argv: list[str] | None = None) -> int:
                 holdout_days=args.holdout_days,
                 entry_fill_model=entry_fill_model,
                 fill_bars_by_symbol=fill_bars_by_symbol,
+                signal_bar_size=args.bar_size,
             )
             if isinstance(strategy, SemiconductorRotationStrategy):
                 stability_strategies = {
@@ -3267,6 +3269,7 @@ def main(argv: list[str] | None = None) -> int:
                 holdout_days=args.holdout_days,
                 entry_fill_model=entry_fill_model,
                 fill_bars_by_symbol=fill_bars_by_symbol,
+                signal_bar_size=args.bar_size,
             )
 
             def result_report(result):
