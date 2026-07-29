@@ -310,6 +310,115 @@ class IntradayMomentumStrategyTest(unittest.TestCase):
         self.assertEqual("BUY", allowed.action)
         self.assertTrue(allowed.meta["benchmark_range_gate_passed"])
 
+    def test_rotation_soxl_chop_gate_blocks_low_displacement_entry(self) -> None:
+        strategy = SemiconductorRotationStrategy(
+            long_min_score=0.0,
+            entry_chop_reference_symbol="SOXL",
+            entry_chop_observation_bars=30,
+            entry_chop_min_displacement_range_ratio=0.25,
+        )
+        bull_bars = make_bars([100 + i * 0.5 for i in range(40)])
+        benchmark = make_benchmark_bars([300 + i * 0.4 for i in range(60)])
+        choppy_reference = make_bars(
+            [100.0, 104.0] * 14 + [100.0, 100.0] + [105.0 + i for i in range(10)]
+        )
+        quote = Quote(symbol="SOXL", bid=119.8, ask=120.0, last=119.9, close=119.9)
+
+        blocked = strategy.decide(
+            "SOXL",
+            quote,
+            bull_bars,
+            benchmark_bars=benchmark,
+            entry_chop_reference_bars=choppy_reference,
+        )
+
+        self.assertFalse(blocked.signal)
+        self.assertEqual("HOLD", blocked.action)
+        self.assertEqual("SOXL", blocked.meta["entry_chop_reference_symbol"])
+        self.assertEqual(30, blocked.meta["entry_chop_reference_bar_count"])
+        self.assertFalse(blocked.meta["entry_chop_gate_passed"])
+        self.assertLess(
+            blocked.meta["entry_chop_displacement_range_ratio"], 0.25
+        )
+        self.assertIn("below minimum", blocked.reason)
+
+    def test_rotation_soxl_chop_gate_allows_directional_entry(self) -> None:
+        strategy = SemiconductorRotationStrategy(
+            long_min_score=0.0,
+            entry_chop_reference_symbol="SOXL",
+            entry_chop_observation_bars=30,
+            entry_chop_min_displacement_range_ratio=0.25,
+        )
+        bull_bars = make_bars([100 + i * 0.5 for i in range(40)])
+        benchmark = make_benchmark_bars([300 + i * 0.4 for i in range(60)])
+        directional_reference = make_bars([100 + i * 0.5 for i in range(40)])
+        quote = Quote(symbol="SOXL", bid=119.8, ask=120.0, last=119.9, close=119.9)
+
+        allowed = strategy.decide(
+            "SOXL",
+            quote,
+            bull_bars,
+            benchmark_bars=benchmark,
+            entry_chop_reference_bars=directional_reference,
+        )
+
+        self.assertTrue(allowed.signal)
+        self.assertEqual("BUY", allowed.action)
+        self.assertTrue(allowed.meta["entry_chop_gate_passed"])
+        self.assertGreaterEqual(
+            allowed.meta["entry_chop_displacement_range_ratio"], 0.25
+        )
+
+    def test_rotation_soxl_chop_gate_also_blocks_soxs_entry(self) -> None:
+        strategy = SemiconductorRotationStrategy(
+            short_min_score=0.0,
+            entry_chop_reference_symbol="SOXL",
+            entry_chop_observation_bars=30,
+            entry_chop_min_displacement_range_ratio=0.25,
+        )
+        short_bars = make_bars([100 + i * 0.5 for i in range(40)])
+        benchmark = make_bearish_bars([300 - i * 0.4 for i in range(60)])
+        choppy_reference = make_bars(
+            [100.0, 104.0] * 14 + [100.0, 100.0]
+        )
+        quote = Quote(symbol="SOXS", bid=119.8, ask=120.0, last=119.9, close=119.9)
+
+        blocked = strategy.decide(
+            "SOXS",
+            quote,
+            short_bars,
+            benchmark_bars=benchmark,
+            entry_chop_reference_bars=choppy_reference,
+        )
+
+        self.assertFalse(blocked.signal)
+        self.assertEqual("HOLD", blocked.action)
+        self.assertFalse(blocked.meta["entry_chop_gate_passed"])
+
+    def test_rotation_soxl_chop_gate_fails_closed_without_reference_bars(self) -> None:
+        strategy = SemiconductorRotationStrategy(
+            long_min_score=0.0,
+            entry_chop_reference_symbol="SOXL",
+            entry_chop_observation_bars=30,
+            entry_chop_min_displacement_range_ratio=0.25,
+        )
+        bull_bars = make_bars([100 + i * 0.5 for i in range(40)])
+        benchmark = make_benchmark_bars([300 + i * 0.4 for i in range(60)])
+        quote = Quote(symbol="SOXL", bid=119.8, ask=120.0, last=119.9, close=119.9)
+
+        blocked = strategy.decide(
+            "SOXL",
+            quote,
+            bull_bars,
+            benchmark_bars=benchmark,
+            entry_chop_reference_bars=None,
+        )
+
+        self.assertFalse(blocked.signal)
+        self.assertEqual("HOLD", blocked.action)
+        self.assertFalse(blocked.meta["entry_chop_gate_passed"])
+        self.assertIn("need 30 completed SOXL bars", blocked.reason)
+
     def test_rotation_strategy_buys_short_symbol_in_bear_regime(self) -> None:
         strategy = SemiconductorRotationStrategy()
         bearish_benchmark = make_bearish_bars([300 - i * 0.4 for i in range(60)])

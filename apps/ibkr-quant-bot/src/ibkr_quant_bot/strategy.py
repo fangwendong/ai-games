@@ -576,6 +576,9 @@ class SemiconductorRotationStrategy:
     entry_fill_cutoff_et_minutes: int | None = None
     benchmark_min_intraday_range: float = 0.0
     entry_momentum_lookback_bars: int = 0
+    entry_chop_reference_symbol: str | None = None
+    entry_chop_observation_bars: int = 30
+    entry_chop_min_displacement_range_ratio: float = 0.0
     long_strategy: IntradayMomentumStrategy = field(init=False, repr=False)
     short_strategy: IntradayMomentumStrategy = field(init=False, repr=False)
 
@@ -584,8 +587,16 @@ class SemiconductorRotationStrategy:
             raise ValueError("benchmark_min_intraday_range must be non-negative")
         if self.entry_momentum_lookback_bars < 0:
             raise ValueError("entry_momentum_lookback_bars must be non-negative")
+        if self.entry_chop_observation_bars <= 0:
+            raise ValueError("entry_chop_observation_bars must be positive")
+        if not 0 <= self.entry_chop_min_displacement_range_ratio <= 1:
+            raise ValueError(
+                "entry_chop_min_displacement_range_ratio must be between 0 and 1"
+            )
         self.long_symbol = self.long_symbol.upper()
         self.short_symbol = self.short_symbol.upper()
+        if self.entry_chop_reference_symbol is not None:
+            self.entry_chop_reference_symbol = self.entry_chop_reference_symbol.upper()
         self.symbols = (self.long_symbol, self.short_symbol)
         self.long_strategy = IntradayMomentumStrategy(
             symbols=(self.long_symbol,),
@@ -765,6 +776,94 @@ class SemiconductorRotationStrategy:
             meta=meta,
         )
 
+    def _apply_entry_chop_gate(
+        self,
+        decision: StrategyDecision,
+        reference_bars: list[Bar] | None,
+    ) -> StrategyDecision:
+        threshold = self.entry_chop_min_displacement_range_ratio
+        reference_symbol = self.entry_chop_reference_symbol
+        if threshold <= 0 or reference_symbol is None:
+            return decision
+
+        required = self.entry_chop_observation_bars
+        observed = list(reference_bars or [])[:required]
+        if len(observed) < required:
+            meta = {
+                **decision.meta,
+                "entry_chop_reference_symbol": reference_symbol,
+                "entry_chop_observation_bars": required,
+                "entry_chop_reference_bar_count": len(observed),
+                "entry_chop_min_displacement_range_ratio": threshold,
+                "entry_chop_gate_passed": False,
+            }
+            if not decision.signal or decision.action != "BUY":
+                return StrategyDecision(
+                    symbol=decision.symbol,
+                    action=decision.action,
+                    quantity=decision.quantity,
+                    reference_price=decision.reference_price,
+                    limit_price=decision.limit_price,
+                    reason=decision.reason,
+                    signal=decision.signal,
+                    meta=meta,
+                )
+            return StrategyDecision(
+                symbol=decision.symbol,
+                action="HOLD",
+                quantity=0,
+                reference_price=decision.reference_price,
+                limit_price=None,
+                reason=(
+                    f"need {required} completed {reference_symbol} bars "
+                    "for entry chop gate"
+                ),
+                signal=False,
+                meta=meta,
+            )
+
+        session_high = max(bar.high for bar in observed)
+        session_low = min(bar.low for bar in observed)
+        price_range = session_high - session_low
+        displacement = abs(observed[-1].close - observed[0].open)
+        ratio = displacement / price_range if price_range > 0 else 0.0
+        passed = price_range > 0 and ratio >= threshold
+        meta = {
+            **decision.meta,
+            "entry_chop_reference_symbol": reference_symbol,
+            "entry_chop_observation_bars": required,
+            "entry_chop_reference_bar_count": len(observed),
+            "entry_chop_displacement": displacement,
+            "entry_chop_range": price_range,
+            "entry_chop_displacement_range_ratio": ratio,
+            "entry_chop_min_displacement_range_ratio": threshold,
+            "entry_chop_gate_passed": passed,
+        }
+        if not decision.signal or decision.action != "BUY" or passed:
+            return StrategyDecision(
+                symbol=decision.symbol,
+                action=decision.action,
+                quantity=decision.quantity,
+                reference_price=decision.reference_price,
+                limit_price=decision.limit_price,
+                reason=decision.reason,
+                signal=decision.signal,
+                meta=meta,
+            )
+        return StrategyDecision(
+            symbol=decision.symbol,
+            action="HOLD",
+            quantity=0,
+            reference_price=decision.reference_price,
+            limit_price=None,
+            reason=(
+                f"{reference_symbol} opening displacement/range {ratio:.4%} "
+                f"below minimum {threshold:.4%}"
+            ),
+            signal=False,
+            meta=meta,
+        )
+
     def stop_loss_pct_for(self, symbol: str) -> float:
         symbol = symbol.upper()
         if symbol == self.long_symbol:
@@ -871,6 +970,7 @@ class SemiconductorRotationStrategy:
         quote: Quote,
         bars: list[Bar],
         benchmark_bars: list[Bar] | None = None,
+        entry_chop_reference_bars: list[Bar] | None = None,
     ) -> StrategyDecision:
         symbol = symbol.upper()
         if len(bars) < self.min_bars:
@@ -920,14 +1020,17 @@ class SemiconductorRotationStrategy:
         bullish = self._benchmark_bullish(benchmark_bars)
         if symbol == self.long_symbol:
             if bullish:
-                return self._apply_entry_momentum_gate(
-                    self._apply_entry_range_gate(
-                        self.long_strategy.decide(
-                            symbol, quote, bars, benchmark_bars=benchmark_bars
+                return self._apply_entry_chop_gate(
+                    self._apply_entry_momentum_gate(
+                        self._apply_entry_range_gate(
+                            self.long_strategy.decide(
+                                symbol, quote, bars, benchmark_bars=benchmark_bars
+                            ),
+                            benchmark_bars,
                         ),
-                        benchmark_bars,
+                        bars,
                     ),
-                    bars,
+                    entry_chop_reference_bars,
                 )
             return StrategyDecision(
                 symbol=symbol,
@@ -945,14 +1048,17 @@ class SemiconductorRotationStrategy:
             )
         if symbol == self.short_symbol:
             if not bullish:
-                return self._apply_entry_momentum_gate(
-                    self._apply_entry_range_gate(
-                        self.short_strategy.decide(
-                            symbol, quote, bars, benchmark_bars=None
+                return self._apply_entry_chop_gate(
+                    self._apply_entry_momentum_gate(
+                        self._apply_entry_range_gate(
+                            self.short_strategy.decide(
+                                symbol, quote, bars, benchmark_bars=None
+                            ),
+                            benchmark_bars,
                         ),
-                        benchmark_bars,
+                        bars,
                     ),
-                    bars,
+                    entry_chop_reference_bars,
                 )
             return StrategyDecision(
                 symbol=symbol,

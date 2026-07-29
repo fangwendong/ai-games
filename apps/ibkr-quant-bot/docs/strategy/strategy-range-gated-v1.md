@@ -26,8 +26,8 @@ PYTHONPATH=src python -m ibkr_quant_bot.cli backtest-momentum \
   --profile rotation-range-gated-v1
 ```
 
-The application default and current live profile remain
-`rotation-hysteresis-v2`.
+The application default and current live profile is
+`rotation-hysteresis-v3-soxl-gate25`; V2 remains an explicit rollback profile.
 
 ## Research Evidence
 

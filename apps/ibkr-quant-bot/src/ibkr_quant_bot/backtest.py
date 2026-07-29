@@ -367,9 +367,22 @@ def _select_signal(
             if benchmark_bars is not None
             else None
         )
-        decision = strategy.decide(
-            symbol, quote, prefix, benchmark_bars=benchmark_prefix
+        entry_chop_reference_symbol = getattr(
+            strategy, "entry_chop_reference_symbol", None
         )
+        entry_chop_reference_bars = (
+            _prefix_available_at(
+                daily_bars_by_symbol.get(entry_chop_reference_symbol, []),
+                current_time,
+                availability_delay,
+            )
+            if entry_chop_reference_symbol
+            else None
+        )
+        decide_kwargs = {"benchmark_bars": benchmark_prefix}
+        if "entry_chop_reference_bars" in signature(strategy.decide).parameters:
+            decide_kwargs["entry_chop_reference_bars"] = entry_chop_reference_bars
+        decision = strategy.decide(symbol, quote, prefix, **decide_kwargs)
         if decision.signal and decision.quantity > 0:
             candidates.append(
                 (

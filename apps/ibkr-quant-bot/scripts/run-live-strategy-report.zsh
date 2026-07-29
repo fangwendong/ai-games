@@ -40,7 +40,7 @@ started_at_ms=$(date +%s%3N)
 
 set +e
 PYTHONPATH=src timeout 70s python -m ibkr_quant_bot.cli intraday-momentum \
-  --profile rotation-hysteresis-v2 >"$raw_output" 2>&1
+  --profile rotation-hysteresis-v3-soxl-gate25 >"$raw_output" 2>&1
 strategy_exit_code=$?
 set -e
 ended_at_ms=$(date +%s%3N)

@@ -1,7 +1,8 @@
 # Deterministic Live Strategy Runner And Reporter
 
 The live runner removes the language model from the execution path. A
-persistent supervisor runs the existing V2 command every ten seconds, parses
+persistent supervisor runs the explicit
+`rotation-hysteresis-v3-soxl-gate25` command every ten seconds, parses
 its structured JSON blocks, and keeps the latest fixed Chinese summary. The
 first completed execution in each ET minute sends that summary directly
 through `botmux send`, so chat reports remain once per minute.

@@ -15,6 +15,8 @@ from ibkr_quant_bot.cli import (
     ROTATION_HYSTERESIS_V2_PARAMETERS,
     ROTATION_HYSTERESIS_V2_VERSION,
     ROTATION_HYSTERESIS_V3_PARAMETERS,
+    ROTATION_HYSTERESIS_V3_SOXL_GATE25_PARAMETERS,
+    ROTATION_HYSTERESIS_V3_SOXL_GATE25_VERSION,
     ROTATION_HYSTERESIS_V3_VERSION,
     ROTATION_HYSTERESIS_V4_PARAMETERS,
     ROTATION_HYSTERESIS_V4_VERSION,
@@ -478,8 +480,26 @@ class LiveDataGuardsTest(unittest.TestCase):
             market_time="2026-07-16T14:00:00+00:00",
             observed_at="2026-07-16T14:00:00.500000+00:00",
         )
+        bars = [
+            Bar(
+                time=now - timedelta(minutes=5),
+                open=710.0,
+                high=712.5,
+                low=709.5,
+                close=712.45,
+                volume=1000,
+            )
+        ]
+        strategy = _build_momentum_strategy(
+            _build_parser().parse_args(
+                ["intraday-momentum", "--profile", "rotation-hysteresis-v2"]
+            ),
+            Settings(),
+        )
 
-        summary = _benchmark_quote_summary("QQQ", quote, "SMART", now)
+        summary = _benchmark_quote_summary(
+            "QQQ", quote, bars, strategy, "SMART", now
+        )
 
         self.assertEqual("benchmark", summary["role"])
         self.assertEqual("QQQ", summary["symbol"])
@@ -622,18 +642,20 @@ class LiveDataGuardsTest(unittest.TestCase):
             _resolve_backtest_entry_fill_model("profile-default", "balanced"),
         )
 
-    def test_hysteresis_profile_is_default(self) -> None:
+    def test_v3_soxl_gate25_profile_is_default(self) -> None:
         args = _build_parser().parse_args(["intraday-momentum"])
 
         strategy = _build_momentum_strategy(args, Settings())
 
-        self.assertTrue(strategy.use_exit_hysteresis)
+        self.assertFalse(strategy.use_exit_hysteresis)
         self.assertEqual(3, strategy.exit_confirm_bars)
         self.assertEqual(3, strategy.benchmark_exit_confirm_bars)
         self.assertEqual(0.0375, strategy.long_take_profit_pct)
         self.assertEqual(0.03, strategy.profit_lock_activation_pct)
         self.assertEqual(0.006, strategy.profit_lock_drawdown_pct)
         self.assertEqual(13 * 60 + 30, strategy.entry_fill_cutoff_et_minutes)
+        self.assertEqual("SOXL", strategy.entry_chop_reference_symbol)
+        self.assertEqual(0.25, strategy.entry_chop_min_displacement_range_ratio)
 
     def test_frozen_hysteresis_profile_matches_versioned_baseline(self) -> None:
         args = _build_parser().parse_args(
@@ -660,11 +682,21 @@ class LiveDataGuardsTest(unittest.TestCase):
         for name, expected in ROTATION_HYSTERESIS_V2_PARAMETERS.items():
             self.assertEqual(expected, getattr(strategy, name), name)
 
-    def test_v3_and_v4_candidates_are_explicit_and_keep_v2_as_default(self) -> None:
+    def test_v3_gate25_is_explicit_and_is_the_live_default(self) -> None:
         default_args = _build_parser().parse_args(["intraday-momentum"])
         v3 = _build_momentum_strategy(
             _build_parser().parse_args(
                 ["intraday-momentum", "--profile", "rotation-hysteresis-v3"]
+            ),
+            Settings(),
+        )
+        v3_gate25 = _build_momentum_strategy(
+            _build_parser().parse_args(
+                [
+                    "intraday-momentum",
+                    "--profile",
+                    "rotation-hysteresis-v3-soxl-gate25",
+                ]
             ),
             Settings(),
         )
@@ -675,17 +707,30 @@ class LiveDataGuardsTest(unittest.TestCase):
             Settings(),
         )
 
-        self.assertEqual("rotation-hysteresis-v2", default_args.profile)
+        self.assertEqual(
+            "rotation-hysteresis-v3-soxl-gate25", default_args.profile
+        )
         self.assertEqual("rotation-hysteresis-v3", ROTATION_HYSTERESIS_V3_VERSION)
+        self.assertEqual(
+            "rotation-hysteresis-v3-soxl-gate25",
+            ROTATION_HYSTERESIS_V3_SOXL_GATE25_VERSION,
+        )
         self.assertEqual("rotation-hysteresis-v4", ROTATION_HYSTERESIS_V4_VERSION)
         for name, expected in ROTATION_HYSTERESIS_V3_PARAMETERS.items():
             self.assertEqual(expected, getattr(v3, name), name)
         for name, expected in ROTATION_HYSTERESIS_V4_PARAMETERS.items():
             self.assertEqual(expected, getattr(v4, name), name)
+        for name, expected in ROTATION_HYSTERESIS_V3_SOXL_GATE25_PARAMETERS.items():
+            self.assertEqual(expected, getattr(v3_gate25, name), name)
         self.assertFalse(v3.use_exit_hysteresis)
         self.assertEqual(0, v3.entry_momentum_lookback_bars)
         self.assertFalse(v4.use_exit_hysteresis)
         self.assertEqual(2, v4.entry_momentum_lookback_bars)
+        self.assertEqual("SOXL", v3_gate25.entry_chop_reference_symbol)
+        self.assertEqual(30, v3_gate25.entry_chop_observation_bars)
+        self.assertEqual(
+            0.25, v3_gate25.entry_chop_min_displacement_range_ratio
+        )
 
     def test_range_gated_candidate_is_isolated_from_v2(self) -> None:
         candidate = _build_momentum_strategy(
@@ -1257,14 +1302,16 @@ class LiveDataGuardsTest(unittest.TestCase):
         self.assertEqual(1, strategy.benchmark_exit_confirm_bars)
         self.assertEqual(0.035, strategy.long_take_profit_pct)
 
-    def test_backtest_uses_hysteresis_profile_by_default(self) -> None:
+    def test_backtest_uses_v3_soxl_gate25_profile_by_default(self) -> None:
         args = _build_parser().parse_args(["backtest-momentum"])
 
         strategy = _build_momentum_strategy(args, Settings())
 
-        self.assertTrue(strategy.use_exit_hysteresis)
+        self.assertFalse(strategy.use_exit_hysteresis)
         self.assertEqual(0.0375, strategy.long_take_profit_pct)
         self.assertEqual(0.03, strategy.profit_lock_activation_pct)
+        self.assertEqual("SOXL", strategy.entry_chop_reference_symbol)
+        self.assertEqual(0.25, strategy.entry_chop_min_displacement_range_ratio)
 
     def test_backtest_capital_defaults_to_live_budget(self) -> None:
         args = _build_parser().parse_args(["backtest-momentum"])

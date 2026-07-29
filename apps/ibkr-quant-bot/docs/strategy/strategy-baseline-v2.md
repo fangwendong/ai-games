@@ -1,6 +1,7 @@
 # Live Strategy Baseline V2
 
-`rotation-hysteresis-v2` is the live profile adopted on 2026-07-14. It keeps
+`rotation-hysteresis-v2` is the frozen rollback profile adopted on 2026-07-14
+and superseded for live execution on 2026-07-29. It keeps
 the `rotation-hysteresis-v1` sizing, protective orders, and technical exits,
 adds one close-based profit-lock exit, and bounds the daily entry window.
 

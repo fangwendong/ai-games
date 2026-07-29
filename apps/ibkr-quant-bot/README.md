@@ -206,7 +206,7 @@ value is explicitly marked as a fallback and uses the fixed live tradable
 capital minus the same cash reserve (9990 USD with the default 10000 USD cap).
 
 Run the scanner and exit manager with the current default
-`rotation-hysteresis-v2` profile:
+`rotation-hysteresis-v3-soxl-gate25` profile:
 
 ```bash
 ibkr-bot intraday-momentum

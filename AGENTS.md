@@ -121,10 +121,11 @@ Safety rules for the bot:
 
 Recent strategy facts worth knowing:
 
-- The current live profile is `rotation-hysteresis`, a semiconductor rotation
-  between `SOXL` and `SOXS` with `QQQ` as the regime benchmark.
-- The legacy `rotation` profile remains available with `--profile rotation`
-  as an explicit rollback path.
+- The current live profile is `rotation-hysteresis-v3-soxl-gate25`, a
+  semiconductor rotation between `SOXL` and `SOXS` with `QQQ` as the regime
+  benchmark and an entry-only SOXL chop veto.
+- The frozen `rotation-hysteresis-v2`, `rotation-hysteresis-v3`, and legacy
+  `rotation` profiles remain explicit rollback paths.
 - Live strategy uses fresh 5-minute bars and live quote checks.
 - The live-aligned v2 risk budget is `max_risk_per_trade=120`; backtest and
   live reports should print the resolved value so the execution contract is

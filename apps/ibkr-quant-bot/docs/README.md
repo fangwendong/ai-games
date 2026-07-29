@@ -41,7 +41,10 @@ Start here after reading the repository `AGENTS.md` and the application
   conclusions.
 - [Monthly backtest summary — 2026-07-19](backtest/monthly-backtest-summary-2026-07-19.md):
   one-year and two-year chronological backtests with monthly net-return tables.
-- [Strategy baseline v2](strategy/strategy-baseline-v2.md): current live strategy
+- [Strategy baseline V3 with SOXL chop gate](strategy/strategy-baseline-v3-soxl-gate25.md):
+  current live profile, causal 30-bar entry veto, rollback paths, and validation
+  contract.
+- [Strategy baseline v2](strategy/strategy-baseline-v2.md): frozen rollback
   contract, parameters, entry/exit behavior, and operational invariants.
 - [Strategy baseline v1](strategy/strategy-baseline-v1.md): frozen rollback baseline and
   comparison reference.

@@ -52,7 +52,7 @@ from .strategy import (
 
 NEW_YORK = ZoneInfo("America/New_York")
 LIVE_BAR_PUBLICATION_GRACE_SECONDS = 2.0
-DEFAULT_MOMENTUM_PROFILE = "rotation-hysteresis-v2"
+DEFAULT_MOMENTUM_PROFILE = "rotation-hysteresis-v3-soxl-gate25"
 INTRADAY_MOMENTUM_RUNTIME_TIMEOUT_SECONDS = 60.0
 INTRADAY_MOMENTUM_REMOTE_REQUEST_TIMEOUT_SECONDS = 3.0
 FROZEN_ROTATION_HYSTERESIS_VERSION = "rotation-hysteresis-v1"
@@ -100,6 +100,15 @@ ROTATION_HYSTERESIS_V3_PARAMETERS: dict[str, object] = {
     **ROTATION_HYSTERESIS_V2_PARAMETERS,
     "use_exit_hysteresis": False,
 }
+ROTATION_HYSTERESIS_V3_SOXL_GATE25_VERSION = (
+    "rotation-hysteresis-v3-soxl-gate25"
+)
+ROTATION_HYSTERESIS_V3_SOXL_GATE25_PARAMETERS: dict[str, object] = {
+    **ROTATION_HYSTERESIS_V3_PARAMETERS,
+    "entry_chop_reference_symbol": "SOXL",
+    "entry_chop_observation_bars": 30,
+    "entry_chop_min_displacement_range_ratio": 0.25,
+}
 ROTATION_HYSTERESIS_V4_VERSION = "rotation-hysteresis-v4"
 ROTATION_HYSTERESIS_V4_PARAMETERS: dict[str, object] = {
     **ROTATION_HYSTERESIS_V3_PARAMETERS,
@@ -118,6 +127,7 @@ MOMENTUM_PROFILE_CHOICES = [
     "rotation-hysteresis-v1",
     "rotation-hysteresis-v2",
     "rotation-hysteresis-v3",
+    "rotation-hysteresis-v3-soxl-gate25",
     "rotation-hysteresis-v4",
     "rotation-range-gated-v1",
 ]
@@ -137,6 +147,7 @@ def _resolve_backtest_entry_fill_model(
     if profile in {
         ROTATION_HYSTERESIS_V2_VERSION,
         ROTATION_HYSTERESIS_V3_VERSION,
+        ROTATION_HYSTERESIS_V3_SOXL_GATE25_VERSION,
         ROTATION_HYSTERESIS_V4_VERSION,
     }:
         return "worst-case"
@@ -283,7 +294,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--profile",
         choices=MOMENTUM_PROFILE_CHOICES,
         default=DEFAULT_MOMENTUM_PROFILE,
-        help="strategy preset; rotation-hysteresis-v2 is the current live profile",
+        help=(
+            "strategy preset; rotation-hysteresis-v3-soxl-gate25 "
+            "is the current live profile"
+        ),
     )
     momentum.add_argument(
         "--benchmark-symbol",
@@ -386,7 +400,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--profile",
         choices=MOMENTUM_PROFILE_CHOICES,
         default=DEFAULT_MOMENTUM_PROFILE,
-        help="strategy preset; rotation-hysteresis-v2 is the current live profile",
+        help=(
+            "strategy preset; rotation-hysteresis-v3-soxl-gate25 "
+            "is the current live profile"
+        ),
     )
     backtest.add_argument(
         "--benchmark-symbol",
@@ -432,7 +449,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default="profile-default",
         help=(
             "entry fill approximation; profile-default uses worst-case for "
-            "rotation-hysteresis-v2 and next-bar-open otherwise; worst-case "
+            "versioned live rotation profiles and next-bar-open otherwise; worst-case "
             "uses bar high for buys and bar low for sells"
         ),
     )
@@ -1882,6 +1899,7 @@ def _build_momentum_strategy(args: argparse.Namespace, settings: Settings):
         "rotation-hysteresis-v1",
         "rotation-hysteresis-v2",
         "rotation-hysteresis-v3",
+        "rotation-hysteresis-v3-soxl-gate25",
         "rotation-hysteresis-v4",
         "rotation-range-gated-v1",
     }:
@@ -1895,6 +1913,8 @@ def _build_momentum_strategy(args: argparse.Namespace, settings: Settings):
                 )
             if profile == ROTATION_RANGE_GATED_V1_VERSION:
                 parameters = ROTATION_RANGE_GATED_V1_PARAMETERS
+            elif profile == ROTATION_HYSTERESIS_V3_SOXL_GATE25_VERSION:
+                parameters = ROTATION_HYSTERESIS_V3_SOXL_GATE25_PARAMETERS
             elif profile == ROTATION_HYSTERESIS_V4_VERSION:
                 parameters = ROTATION_HYSTERESIS_V4_PARAMETERS
             elif profile == ROTATION_HYSTERESIS_V3_VERSION:
@@ -2550,9 +2570,12 @@ def main(argv: list[str] | None = None) -> int:
                                 if lock_decision.signal:
                                     decision = lock_decision
                 else:
-                    decision = strategy.decide(
-                        symbol, quote, bars, benchmark_bars=benchmark_bars
-                    )
+                    decide_kwargs = {"benchmark_bars": benchmark_bars}
+                    if isinstance(strategy, SemiconductorRotationStrategy):
+                        decide_kwargs["entry_chop_reference_bars"] = strategy_bars.get(
+                            strategy.entry_chop_reference_symbol or ""
+                        )
+                    decision = strategy.decide(symbol, quote, bars, **decide_kwargs)
 
                 decisions[symbol] = decision
                 bar_count = len(bars)
@@ -2847,11 +2870,16 @@ def main(argv: list[str] | None = None) -> int:
                 buy_candidates, key=lambda item: float(item.meta.get("score", 0.0))
             )
             strategy = replace(strategy, max_notional=capital_limit_usd)
+            decide_kwargs = {"benchmark_bars": benchmark_bars}
+            if isinstance(strategy, SemiconductorRotationStrategy):
+                decide_kwargs["entry_chop_reference_bars"] = strategy_bars.get(
+                    strategy.entry_chop_reference_symbol or ""
+                )
             decision = strategy.decide(
                 decision.symbol,
                 strategy_quotes[decision.symbol],
                 strategy_bars[decision.symbol],
-                benchmark_bars=benchmark_bars,
+                **decide_kwargs,
             )
             if not decision.signal or decision.action != "BUY":
                 raise BrokerError(
@@ -3013,6 +3041,11 @@ def main(argv: list[str] | None = None) -> int:
                     "entry_fill_cutoff_et_minutes": strategy.entry_fill_cutoff_et_minutes,
                     "benchmark_min_intraday_range": strategy.benchmark_min_intraday_range,
                     "entry_momentum_lookback_bars": strategy.entry_momentum_lookback_bars,
+                    "entry_chop_reference_symbol": strategy.entry_chop_reference_symbol,
+                    "entry_chop_observation_bars": strategy.entry_chop_observation_bars,
+                    "entry_chop_min_displacement_range_ratio": (
+                        strategy.entry_chop_min_displacement_range_ratio
+                    ),
                     "max_notional": strategy.max_notional,
                     "long": {
                         "stop_loss_pct": strategy.long_stop_loss_pct,
