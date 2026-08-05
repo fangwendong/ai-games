@@ -1,7 +1,7 @@
 # Strategy Candidate V5
 
-`rotation-hysteresis-v5` is an isolated V2-derived candidate. It does not
-replace the current default profile or change the live runner.
+`rotation-hysteresis-v5` is the promoted live profile. It is derived from V2
+and remains available as an explicit, versioned strategy contract.
 
 ## Frozen Changes From V2
 
@@ -37,7 +37,7 @@ Four fixed-parameter walk-forward OOS slices were positive for V5, with a
 mean return of `5.47%`. The final 20-session holdout returned `8.89%`, versus
 `8.04%` for V2. These are inspected research results, not proof of a durable
 edge. The large sensitivity between five-minute and 30-second fill resolution
-requires further one-year and shadow validation before live promotion.
+requires continued one-year and live review-log monitoring after promotion.
 
 ## Usage
 

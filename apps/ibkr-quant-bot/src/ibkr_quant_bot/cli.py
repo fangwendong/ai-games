@@ -52,7 +52,7 @@ from .strategy import (
 
 NEW_YORK = ZoneInfo("America/New_York")
 LIVE_BAR_PUBLICATION_GRACE_SECONDS = 2.0
-DEFAULT_MOMENTUM_PROFILE = "rotation-hysteresis-v3-soxl-gate25"
+DEFAULT_MOMENTUM_PROFILE = "rotation-hysteresis-v5"
 INTRADAY_MOMENTUM_RUNTIME_TIMEOUT_SECONDS = 60.0
 INTRADAY_MOMENTUM_REMOTE_REQUEST_TIMEOUT_SECONDS = 3.0
 FROZEN_ROTATION_HYSTERESIS_VERSION = "rotation-hysteresis-v1"
@@ -306,7 +306,7 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=MOMENTUM_PROFILE_CHOICES,
         default=DEFAULT_MOMENTUM_PROFILE,
         help=(
-            "strategy preset; rotation-hysteresis-v3-soxl-gate25 "
+            "strategy preset; rotation-hysteresis-v5 "
             "is the current live profile"
         ),
     )
@@ -412,7 +412,7 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=MOMENTUM_PROFILE_CHOICES,
         default=DEFAULT_MOMENTUM_PROFILE,
         help=(
-            "strategy preset; rotation-hysteresis-v3-soxl-gate25 "
+            "strategy preset; rotation-hysteresis-v5 "
             "is the current live profile"
         ),
     )

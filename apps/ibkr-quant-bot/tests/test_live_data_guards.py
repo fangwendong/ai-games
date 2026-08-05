@@ -650,20 +650,23 @@ class LiveDataGuardsTest(unittest.TestCase):
             _resolve_backtest_entry_fill_model("profile-default", "balanced"),
         )
 
-    def test_v3_soxl_gate25_profile_is_default(self) -> None:
+    def test_v5_profile_is_default(self) -> None:
         args = _build_parser().parse_args(["intraday-momentum"])
 
         strategy = _build_momentum_strategy(args, Settings())
 
-        self.assertFalse(strategy.use_exit_hysteresis)
+        self.assertTrue(strategy.use_exit_hysteresis)
         self.assertEqual(3, strategy.exit_confirm_bars)
         self.assertEqual(3, strategy.benchmark_exit_confirm_bars)
         self.assertEqual(0.0375, strategy.long_take_profit_pct)
-        self.assertEqual(0.03, strategy.profit_lock_activation_pct)
-        self.assertEqual(0.006, strategy.profit_lock_drawdown_pct)
+        self.assertEqual(0.015, strategy.profit_lock_activation_pct)
+        self.assertEqual(0.005, strategy.profit_lock_drawdown_pct)
         self.assertEqual(13 * 60 + 30, strategy.entry_fill_cutoff_et_minutes)
-        self.assertEqual("SOXL", strategy.entry_chop_reference_symbol)
-        self.assertEqual(0.25, strategy.entry_chop_min_displacement_range_ratio)
+        self.assertIsNone(strategy.entry_chop_reference_symbol)
+        self.assertEqual(0.0, strategy.entry_chop_min_displacement_range_ratio)
+        self.assertEqual(0.35, strategy.entry_min_displacement_range_ratio)
+        self.assertEqual(0.10, strategy.entry_scale_down_return_threshold)
+        self.assertEqual(0.5, strategy.entry_scale_down_multiplier)
 
     def test_frozen_hysteresis_profile_matches_versioned_baseline(self) -> None:
         args = _build_parser().parse_args(
@@ -690,7 +693,7 @@ class LiveDataGuardsTest(unittest.TestCase):
         for name, expected in ROTATION_HYSTERESIS_V2_PARAMETERS.items():
             self.assertEqual(expected, getattr(strategy, name), name)
 
-    def test_v3_gate25_is_explicit_and_is_the_live_default(self) -> None:
+    def test_v3_gate25_is_explicit_and_v5_is_the_live_default(self) -> None:
         default_args = _build_parser().parse_args(["intraday-momentum"])
         v3 = _build_momentum_strategy(
             _build_parser().parse_args(
@@ -715,9 +718,7 @@ class LiveDataGuardsTest(unittest.TestCase):
             Settings(),
         )
 
-        self.assertEqual(
-            "rotation-hysteresis-v3-soxl-gate25", default_args.profile
-        )
+        self.assertEqual("rotation-hysteresis-v5", default_args.profile)
         self.assertEqual("rotation-hysteresis-v3", ROTATION_HYSTERESIS_V3_VERSION)
         self.assertEqual(
             "rotation-hysteresis-v3-soxl-gate25",
@@ -740,7 +741,7 @@ class LiveDataGuardsTest(unittest.TestCase):
             0.25, v3_gate25.entry_chop_min_displacement_range_ratio
         )
 
-    def test_v5_profile_is_explicit_and_preserves_current_default(self) -> None:
+    def test_v5_profile_is_explicit_and_is_current_default(self) -> None:
         default_args = _build_parser().parse_args(["intraday-momentum"])
         strategy = _build_momentum_strategy(
             _build_parser().parse_args(
@@ -749,7 +750,7 @@ class LiveDataGuardsTest(unittest.TestCase):
             Settings(),
         )
 
-        self.assertEqual("rotation-hysteresis-v3-soxl-gate25", default_args.profile)
+        self.assertEqual("rotation-hysteresis-v5", default_args.profile)
         self.assertEqual("rotation-hysteresis-v5", ROTATION_HYSTERESIS_V5_VERSION)
         for name, expected in ROTATION_HYSTERESIS_V5_PARAMETERS.items():
             self.assertEqual(expected, getattr(strategy, name), name)
@@ -1324,16 +1325,17 @@ class LiveDataGuardsTest(unittest.TestCase):
         self.assertEqual(1, strategy.benchmark_exit_confirm_bars)
         self.assertEqual(0.035, strategy.long_take_profit_pct)
 
-    def test_backtest_uses_v3_soxl_gate25_profile_by_default(self) -> None:
+    def test_backtest_uses_v5_profile_by_default(self) -> None:
         args = _build_parser().parse_args(["backtest-momentum"])
 
         strategy = _build_momentum_strategy(args, Settings())
 
-        self.assertFalse(strategy.use_exit_hysteresis)
+        self.assertTrue(strategy.use_exit_hysteresis)
         self.assertEqual(0.0375, strategy.long_take_profit_pct)
-        self.assertEqual(0.03, strategy.profit_lock_activation_pct)
-        self.assertEqual("SOXL", strategy.entry_chop_reference_symbol)
-        self.assertEqual(0.25, strategy.entry_chop_min_displacement_range_ratio)
+        self.assertEqual(0.015, strategy.profit_lock_activation_pct)
+        self.assertIsNone(strategy.entry_chop_reference_symbol)
+        self.assertEqual(0.0, strategy.entry_chop_min_displacement_range_ratio)
+        self.assertEqual(0.35, strategy.entry_min_displacement_range_ratio)
 
     def test_backtest_capital_defaults_to_live_budget(self) -> None:
         args = _build_parser().parse_args(["backtest-momentum"])
