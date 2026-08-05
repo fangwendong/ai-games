@@ -419,6 +419,56 @@ class IntradayMomentumStrategyTest(unittest.TestCase):
         self.assertFalse(blocked.meta["entry_chop_gate_passed"])
         self.assertIn("need 30 completed SOXL bars", blocked.reason)
 
+    def test_rotation_v5_displacement_gate_blocks_choppy_entry(self) -> None:
+        strategy = SemiconductorRotationStrategy(
+            long_min_score=0.0,
+            entry_min_displacement_range_ratio=0.35,
+        )
+        bars = make_bars([100 + i * 0.5 for i in range(40)])
+        bars[0] = Bar(
+            time=bars[0].time,
+            open=bars[0].open,
+            high=170.0,
+            low=80.0,
+            close=bars[0].close,
+            volume=bars[0].volume,
+        )
+        benchmark = make_benchmark_bars([300 + i * 0.4 for i in range(60)])
+        quote = Quote(symbol="SOXL", bid=119.4, ask=119.5, last=119.5, close=119.5)
+
+        decision = strategy.decide(
+            "SOXL", quote, bars, benchmark_bars=benchmark
+        )
+
+        self.assertFalse(decision.signal)
+        self.assertEqual("HOLD", decision.action)
+        self.assertFalse(decision.meta["entry_displacement_gate_passed"])
+        self.assertLess(decision.meta["entry_displacement_range_ratio"], 0.35)
+
+    def test_rotation_v5_scales_extended_entry_quantity(self) -> None:
+        baseline = SemiconductorRotationStrategy(long_min_score=0.0)
+        strategy = SemiconductorRotationStrategy(
+            long_min_score=0.0,
+            entry_min_displacement_range_ratio=0.35,
+            entry_scale_down_return_threshold=0.10,
+            entry_scale_down_multiplier=0.50,
+        )
+        bars = make_bars([100 + i * 0.5 for i in range(40)])
+        benchmark = make_benchmark_bars([300 + i * 0.4 for i in range(60)])
+        quote = Quote(symbol="SOXL", bid=119.4, ask=119.5, last=119.5, close=119.5)
+
+        unscaled = baseline.decide(
+            "SOXL", quote, bars, benchmark_bars=benchmark
+        )
+        scaled = strategy.decide(
+            "SOXL", quote, bars, benchmark_bars=benchmark
+        )
+
+        self.assertTrue(scaled.signal)
+        self.assertEqual(max(1, int(unscaled.quantity * 0.5)), scaled.quantity)
+        self.assertTrue(scaled.meta["entry_scale_down_applied"])
+        self.assertTrue(scaled.meta["entry_displacement_gate_passed"])
+
     def test_rotation_strategy_buys_short_symbol_in_bear_regime(self) -> None:
         strategy = SemiconductorRotationStrategy()
         bearish_benchmark = make_bearish_bars([300 - i * 0.4 for i in range(60)])

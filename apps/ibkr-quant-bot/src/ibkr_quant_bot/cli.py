@@ -114,6 +114,15 @@ ROTATION_HYSTERESIS_V4_PARAMETERS: dict[str, object] = {
     **ROTATION_HYSTERESIS_V3_PARAMETERS,
     "entry_momentum_lookback_bars": 2,
 }
+ROTATION_HYSTERESIS_V5_VERSION = "rotation-hysteresis-v5"
+ROTATION_HYSTERESIS_V5_PARAMETERS: dict[str, object] = {
+    **ROTATION_HYSTERESIS_V2_PARAMETERS,
+    "profit_lock_activation_pct": 0.015,
+    "profit_lock_drawdown_pct": 0.005,
+    "entry_min_displacement_range_ratio": 0.35,
+    "entry_scale_down_return_threshold": 0.10,
+    "entry_scale_down_multiplier": 0.5,
+}
 ROTATION_RANGE_GATED_V1_VERSION = "rotation-range-gated-v1"
 ROTATION_RANGE_GATED_V1_PARAMETERS: dict[str, object] = {
     **ROTATION_HYSTERESIS_V2_PARAMETERS,
@@ -129,6 +138,7 @@ MOMENTUM_PROFILE_CHOICES = [
     "rotation-hysteresis-v3",
     "rotation-hysteresis-v3-soxl-gate25",
     "rotation-hysteresis-v4",
+    "rotation-hysteresis-v5",
     "rotation-range-gated-v1",
 ]
 ENTRY_FILL_MODEL_CHOICES = [
@@ -149,6 +159,7 @@ def _resolve_backtest_entry_fill_model(
         ROTATION_HYSTERESIS_V3_VERSION,
         ROTATION_HYSTERESIS_V3_SOXL_GATE25_VERSION,
         ROTATION_HYSTERESIS_V4_VERSION,
+        ROTATION_HYSTERESIS_V5_VERSION,
     }:
         return "worst-case"
     return "next-bar-open"
@@ -1901,6 +1912,7 @@ def _build_momentum_strategy(args: argparse.Namespace, settings: Settings):
         "rotation-hysteresis-v3",
         "rotation-hysteresis-v3-soxl-gate25",
         "rotation-hysteresis-v4",
+        "rotation-hysteresis-v5",
         "rotation-range-gated-v1",
     }:
         hysteresis = profile != "rotation"
@@ -1917,6 +1929,8 @@ def _build_momentum_strategy(args: argparse.Namespace, settings: Settings):
                 parameters = ROTATION_HYSTERESIS_V3_SOXL_GATE25_PARAMETERS
             elif profile == ROTATION_HYSTERESIS_V4_VERSION:
                 parameters = ROTATION_HYSTERESIS_V4_PARAMETERS
+            elif profile == ROTATION_HYSTERESIS_V5_VERSION:
+                parameters = ROTATION_HYSTERESIS_V5_PARAMETERS
             elif profile == ROTATION_HYSTERESIS_V3_VERSION:
                 parameters = ROTATION_HYSTERESIS_V3_PARAMETERS
             elif profile == ROTATION_HYSTERESIS_V2_VERSION:
@@ -3046,6 +3060,13 @@ def main(argv: list[str] | None = None) -> int:
                     "entry_chop_min_displacement_range_ratio": (
                         strategy.entry_chop_min_displacement_range_ratio
                     ),
+                    "entry_min_displacement_range_ratio": (
+                        strategy.entry_min_displacement_range_ratio
+                    ),
+                    "entry_scale_down_return_threshold": (
+                        strategy.entry_scale_down_return_threshold
+                    ),
+                    "entry_scale_down_multiplier": strategy.entry_scale_down_multiplier,
                     "max_notional": strategy.max_notional,
                     "long": {
                         "stop_loss_pct": strategy.long_stop_loss_pct,

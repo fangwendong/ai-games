@@ -2,6 +2,7 @@
 
 This directory contains the frozen strategy contracts and rollback baselines.
 
+- [Strategy candidate v5](strategy-candidate-v5.md)
 - [Strategy baseline V3 with SOXL chop gate](strategy-baseline-v3-soxl-gate25.md)
 - [Strategy baseline v2](strategy-baseline-v2.md)
 - [Strategy baseline v1](strategy-baseline-v1.md)

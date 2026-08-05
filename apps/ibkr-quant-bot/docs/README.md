@@ -44,6 +44,8 @@ Start here after reading the repository `AGENTS.md` and the application
 - [Strategy baseline V3 with SOXL chop gate](strategy/strategy-baseline-v3-soxl-gate25.md):
   current live profile, causal 30-bar entry veto, rollback paths, and validation
   contract.
+- [Strategy candidate v5](strategy/strategy-candidate-v5.md): isolated V2-derived
+  chop filter, earlier profit lock, and extended-entry size reduction.
 - [Strategy baseline v2](strategy/strategy-baseline-v2.md): frozen rollback
   contract, parameters, entry/exit behavior, and operational invariants.
 - [Strategy baseline v1](strategy/strategy-baseline-v1.md): frozen rollback baseline and

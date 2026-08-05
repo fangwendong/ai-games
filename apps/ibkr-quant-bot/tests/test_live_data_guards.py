@@ -20,6 +20,8 @@ from ibkr_quant_bot.cli import (
     ROTATION_HYSTERESIS_V3_VERSION,
     ROTATION_HYSTERESIS_V4_PARAMETERS,
     ROTATION_HYSTERESIS_V4_VERSION,
+    ROTATION_HYSTERESIS_V5_PARAMETERS,
+    ROTATION_HYSTERESIS_V5_VERSION,
     ROTATION_RANGE_GATED_V1_PARAMETERS,
     ROTATION_RANGE_GATED_V1_VERSION,
     _backtest_core_parameters_report,
@@ -638,6 +640,12 @@ class LiveDataGuardsTest(unittest.TestCase):
             ),
         )
         self.assertEqual(
+            "worst-case",
+            _resolve_backtest_entry_fill_model(
+                "profile-default", ROTATION_HYSTERESIS_V5_VERSION
+            ),
+        )
+        self.assertEqual(
             "next-bar-open",
             _resolve_backtest_entry_fill_model("profile-default", "balanced"),
         )
@@ -731,6 +739,20 @@ class LiveDataGuardsTest(unittest.TestCase):
         self.assertEqual(
             0.25, v3_gate25.entry_chop_min_displacement_range_ratio
         )
+
+    def test_v5_profile_is_explicit_and_preserves_current_default(self) -> None:
+        default_args = _build_parser().parse_args(["intraday-momentum"])
+        strategy = _build_momentum_strategy(
+            _build_parser().parse_args(
+                ["intraday-momentum", "--profile", "rotation-hysteresis-v5"]
+            ),
+            Settings(),
+        )
+
+        self.assertEqual("rotation-hysteresis-v3-soxl-gate25", default_args.profile)
+        self.assertEqual("rotation-hysteresis-v5", ROTATION_HYSTERESIS_V5_VERSION)
+        for name, expected in ROTATION_HYSTERESIS_V5_PARAMETERS.items():
+            self.assertEqual(expected, getattr(strategy, name), name)
 
     def test_range_gated_candidate_is_isolated_from_v2(self) -> None:
         candidate = _build_momentum_strategy(

@@ -579,6 +579,9 @@ class SemiconductorRotationStrategy:
     entry_chop_reference_symbol: str | None = None
     entry_chop_observation_bars: int = 30
     entry_chop_min_displacement_range_ratio: float = 0.0
+    entry_min_displacement_range_ratio: float = 0.0
+    entry_scale_down_return_threshold: float | None = None
+    entry_scale_down_multiplier: float = 1.0
     long_strategy: IntradayMomentumStrategy = field(init=False, repr=False)
     short_strategy: IntradayMomentumStrategy = field(init=False, repr=False)
 
@@ -593,6 +596,17 @@ class SemiconductorRotationStrategy:
             raise ValueError(
                 "entry_chop_min_displacement_range_ratio must be between 0 and 1"
             )
+        if not 0 <= self.entry_min_displacement_range_ratio <= 1:
+            raise ValueError(
+                "entry_min_displacement_range_ratio must be between 0 and 1"
+            )
+        if (
+            self.entry_scale_down_return_threshold is not None
+            and self.entry_scale_down_return_threshold <= 0
+        ):
+            raise ValueError("entry_scale_down_return_threshold must be positive")
+        if not 0 < self.entry_scale_down_multiplier <= 1:
+            raise ValueError("entry_scale_down_multiplier must be in (0, 1]")
         self.long_symbol = self.long_symbol.upper()
         self.short_symbol = self.short_symbol.upper()
         if self.entry_chop_reference_symbol is not None:
@@ -864,6 +878,100 @@ class SemiconductorRotationStrategy:
             meta=meta,
         )
 
+    def _apply_entry_quality_controls(
+        self,
+        decision: StrategyDecision,
+        bars: list[Bar],
+    ) -> StrategyDecision:
+        ratio_threshold = self.entry_min_displacement_range_ratio
+        scale_threshold = self.entry_scale_down_return_threshold
+        if ratio_threshold <= 0 and scale_threshold is None:
+            return decision
+
+        session_open = bars[0].open
+        session_high = max(bar.high for bar in bars)
+        session_low = min(bar.low for bar in bars)
+        price_range = session_high - session_low
+        displacement = abs(bars[-1].close - session_open)
+        displacement_ratio = displacement / price_range if price_range > 0 else 0.0
+        session_return = (
+            bars[-1].close / session_open - 1 if session_open > 0 else 0.0
+        )
+        gate_passed = ratio_threshold <= 0 or (
+            price_range > 0 and displacement_ratio >= ratio_threshold
+        )
+        meta = {
+            **decision.meta,
+            "entry_session_return": session_return,
+            "entry_displacement_range_ratio": displacement_ratio,
+            "entry_min_displacement_range_ratio": ratio_threshold,
+            "entry_displacement_gate_passed": gate_passed,
+            "entry_scale_down_return_threshold": scale_threshold,
+            "entry_scale_down_multiplier": self.entry_scale_down_multiplier,
+            "entry_scale_down_applied": False,
+        }
+        if not decision.signal or decision.action != "BUY":
+            return StrategyDecision(
+                symbol=decision.symbol,
+                action=decision.action,
+                quantity=decision.quantity,
+                reference_price=decision.reference_price,
+                limit_price=decision.limit_price,
+                reason=decision.reason,
+                signal=decision.signal,
+                meta=meta,
+            )
+        if not gate_passed:
+            return StrategyDecision(
+                symbol=decision.symbol,
+                action="HOLD",
+                quantity=0,
+                reference_price=decision.reference_price,
+                limit_price=None,
+                reason=(
+                    "entry displacement/range "
+                    f"{displacement_ratio:.4%} below minimum {ratio_threshold:.4%}"
+                ),
+                signal=False,
+                meta=meta,
+            )
+        if scale_threshold is None or session_return <= scale_threshold:
+            return StrategyDecision(
+                symbol=decision.symbol,
+                action=decision.action,
+                quantity=decision.quantity,
+                reference_price=decision.reference_price,
+                limit_price=decision.limit_price,
+                reason=decision.reason,
+                signal=decision.signal,
+                meta=meta,
+            )
+
+        scaled_quantity = max(
+            1, int(decision.quantity * self.entry_scale_down_multiplier)
+        )
+        meta.update(
+            {
+                "entry_scale_down_applied": True,
+                "entry_unscaled_quantity": decision.quantity,
+                "entry_scaled_quantity": scaled_quantity,
+            }
+        )
+        return StrategyDecision(
+            symbol=decision.symbol,
+            action=decision.action,
+            quantity=scaled_quantity,
+            reference_price=decision.reference_price,
+            limit_price=decision.limit_price,
+            reason=(
+                f"{decision.reason}; quantity scaled by "
+                f"{self.entry_scale_down_multiplier:.2f} after "
+                f"{session_return:.2%} session move"
+            ),
+            signal=decision.signal,
+            meta=meta,
+        )
+
     def stop_loss_pct_for(self, symbol: str) -> float:
         symbol = symbol.upper()
         if symbol == self.long_symbol:
@@ -1020,17 +1128,20 @@ class SemiconductorRotationStrategy:
         bullish = self._benchmark_bullish(benchmark_bars)
         if symbol == self.long_symbol:
             if bullish:
-                return self._apply_entry_chop_gate(
-                    self._apply_entry_momentum_gate(
-                        self._apply_entry_range_gate(
-                            self.long_strategy.decide(
-                                symbol, quote, bars, benchmark_bars=benchmark_bars
+                return self._apply_entry_quality_controls(
+                    self._apply_entry_chop_gate(
+                        self._apply_entry_momentum_gate(
+                            self._apply_entry_range_gate(
+                                self.long_strategy.decide(
+                                    symbol, quote, bars, benchmark_bars=benchmark_bars
+                                ),
+                                benchmark_bars,
                             ),
-                            benchmark_bars,
+                            bars,
                         ),
-                        bars,
+                        entry_chop_reference_bars,
                     ),
-                    entry_chop_reference_bars,
+                    bars,
                 )
             return StrategyDecision(
                 symbol=symbol,
@@ -1048,17 +1159,20 @@ class SemiconductorRotationStrategy:
             )
         if symbol == self.short_symbol:
             if not bullish:
-                return self._apply_entry_chop_gate(
-                    self._apply_entry_momentum_gate(
-                        self._apply_entry_range_gate(
-                            self.short_strategy.decide(
-                                symbol, quote, bars, benchmark_bars=None
+                return self._apply_entry_quality_controls(
+                    self._apply_entry_chop_gate(
+                        self._apply_entry_momentum_gate(
+                            self._apply_entry_range_gate(
+                                self.short_strategy.decide(
+                                    symbol, quote, bars, benchmark_bars=None
+                                ),
+                                benchmark_bars,
                             ),
-                            benchmark_bars,
+                            bars,
                         ),
-                        bars,
+                        entry_chop_reference_bars,
                     ),
-                    entry_chop_reference_bars,
+                    bars,
                 )
             return StrategyDecision(
                 symbol=symbol,
