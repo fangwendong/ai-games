@@ -27,6 +27,11 @@ from .historical_cache import (
 )
 from .history_refresh import schedule_lookback_days, validate_recent_cached_sessions
 from .live_review_log import append_review_log, current_session_date
+from .manual_control import (
+    load_manual_strategy_pauses,
+    pause_manual_strategy_symbol,
+    resume_manual_strategy_symbol,
+)
 from .models import Bar, MarketSession, Quote, StrategyDecision, TradeRequest
 from .market_context_cache import (
     MarketContextCacheError,
@@ -51,6 +56,7 @@ from .strategy import (
 )
 
 NEW_YORK = ZoneInfo("America/New_York")
+MANUAL_CONTROL_STRATEGY_SYMBOLS = frozenset({"SOXL", "SOXS"})
 LIVE_BAR_PUBLICATION_GRACE_SECONDS = 2.0
 DEFAULT_MOMENTUM_PROFILE = "rotation-hysteresis-v5"
 INTRADAY_MOMENTUM_RUNTIME_TIMEOUT_SECONDS = 60.0
@@ -265,6 +271,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "balance", help="show cash, net liquidation, buying power, margin, and PnL"
     )
     subparsers.add_parser("positions", help="show open positions")
+
+    strategy_control = subparsers.add_parser(
+        "strategy-control",
+        help="inspect, pause, or resume strategy automation for manual trading",
+    )
+    strategy_control.add_argument("action", choices=["status", "pause", "resume"])
+    strategy_control.add_argument("symbol", nargs="?", choices=["SOXL", "SOXS"])
+    strategy_control.add_argument("--reason", default="manual operator control")
 
     order = subparsers.add_parser(
         "order", help="validate and optionally submit an order"
@@ -542,10 +556,124 @@ def _submit_or_print(
     if settings.readonly or settings.dry_run:
         print("dry-run: order not submitted")
         return
+    order_ref = str(request.order_ref or "")
+    paused_symbols = set(load_manual_strategy_pauses(settings))
+    if (
+        settings.is_live
+        and order_ref.startswith("momentum-")
+        and paused_symbols & MANUAL_CONTROL_STRATEGY_SYMBOLS
+    ):
+        print(
+            "manual strategy pause became active during this run; "
+            "strategy order not submitted"
+        )
+        return
+    if (
+        settings.is_live
+        and request.symbol.upper() in MANUAL_CONTROL_STRATEGY_SYMBOLS
+        and not order_ref.startswith("momentum-")
+    ):
+        pause_manual_strategy_symbol(
+            settings,
+            request.symbol,
+            reason=f"manual {request.action.upper()} order submitted",
+            order_ref=order_ref or None,
+        )
+        print(
+            "manual strategy pause activated before order submission: "
+            f"{request.symbol.upper()}"
+        )
     trade = broker.place_order(request)
     print(trade)
     _record_order_state(settings, request, trade)
     return trade
+
+
+def _strategy_owned_position_symbols(
+    settings: Settings, now: datetime
+) -> set[str]:
+    entries = _load_entry_state(settings, now).get("entries", [])
+    if not isinstance(entries, list):
+        return set()
+    owned: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        symbol = str(entry.get("symbol", "")).upper()
+        order_ref = str(entry.get("order_ref", "") or "")
+        strategy_version = str(entry.get("strategy_version", "") or "")
+        if (
+            symbol in MANUAL_CONTROL_STRATEGY_SYMBOLS
+            and order_ref.startswith("momentum-")
+            and "forced" not in strategy_version.lower()
+        ):
+            owned.add(symbol)
+    return owned
+
+
+def _activate_detected_manual_pauses(
+    broker: IbkrBroker,
+    settings: Settings,
+    strategy: IntradayMomentumStrategy | SemiconductorRotationStrategy,
+    current_positions: dict[str, dict[str, str]],
+    now: datetime,
+) -> dict[str, dict[str, object]]:
+    if not settings.is_live:
+        return {}
+    strategy_symbols = {
+        symbol.upper() for symbol in strategy.symbols
+    } & MANUAL_CONTROL_STRATEGY_SYMBOLS
+    owned_positions = _strategy_owned_position_symbols(settings, now)
+    for symbol in sorted(set(current_positions) & strategy_symbols):
+        if symbol not in owned_positions:
+            pause_manual_strategy_symbol(
+                settings,
+                symbol,
+                reason="position exists without a strategy-owned entry record",
+                now=now,
+            )
+    for trade in broker.active_trades():
+        symbol = broker._trade_symbol(trade)
+        if symbol not in strategy_symbols:
+            continue
+        order = getattr(trade, "order", None)
+        order_ref = str(getattr(order, "orderRef", "") or "")
+        if not order_ref.startswith("momentum-"):
+            pause_manual_strategy_symbol(
+                settings,
+                symbol,
+                reason="active non-strategy order detected",
+                order_ref=order_ref or None,
+                now=now,
+            )
+    return load_manual_strategy_pauses(settings)
+
+
+def _manual_pause_payload(
+    pauses: dict[str, dict[str, object]],
+    current_positions: dict[str, dict[str, str]],
+) -> dict[str, object]:
+    return {
+        "manual_strategy_pause": {
+            "active": True,
+            "symbols": sorted(pauses),
+            "reason": "manual order or position requires explicit operator resume",
+            "current_positions": [
+                {
+                    "symbol": symbol,
+                    "quantity": int(float(row["position"])),
+                }
+                for symbol, row in sorted(current_positions.items())
+            ],
+        }
+    }
+
+
+def _manual_rotation_pause_active(settings: Settings) -> bool:
+    return settings.is_live and bool(
+        set(load_manual_strategy_pauses(settings))
+        & MANUAL_CONTROL_STRATEGY_SYMBOLS
+    )
 
 
 def _trade_filled_quantity(trade) -> float:
@@ -1685,6 +1813,8 @@ def _ensure_protective_oca(
     now: datetime,
     protective_prices: tuple[float, float] | None = None,
 ) -> str:
+    if _manual_rotation_pause_active(settings):
+        return "manual_pause"
     quantity = int(float(position_row["position"]))
     average_cost = float(position_row["avgCost"])
     order_ref_prefix = f"momentum-{now.date()}-{symbol}-protect"
@@ -2213,6 +2343,34 @@ def main(argv: list[str] | None = None) -> int:
         print(result.message)
         return 0
 
+    if args.command == "strategy-control":
+        if args.action in {"pause", "resume"} and not args.symbol:
+            raise BrokerError("strategy-control pause/resume requires SYMBOL")
+        if args.action == "pause":
+            pauses = pause_manual_strategy_symbol(
+                settings,
+                args.symbol,
+                reason=args.reason,
+            )
+        elif args.action == "resume":
+            pauses = resume_manual_strategy_symbol(settings, args.symbol)
+        else:
+            pauses = load_manual_strategy_pauses(settings)
+        print(
+            json.dumps(
+                {
+                    "manual_strategy_pause": {
+                        "active": bool(pauses),
+                        "symbols": sorted(pauses),
+                        "details": pauses,
+                    }
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+
     if args.command == "append-trade-record":
         state_dir = Path(args.state_dir)
         output_path = Path(args.output_path)
@@ -2482,6 +2640,32 @@ def main(argv: list[str] | None = None) -> int:
                     sort_keys=True,
                 )
             )
+            current_positions = _parse_position_rows(
+                broker.positions(), strategy.symbols
+            )
+            _validate_strategy_positions(current_positions)
+            manual_pauses = _activate_detected_manual_pauses(
+                broker,
+                settings,
+                strategy,
+                current_positions,
+                now,
+            )
+            if set(manual_pauses) & {
+                symbol.upper() for symbol in strategy.symbols
+            }:
+                print(
+                    json.dumps(
+                        _manual_pause_payload(manual_pauses, current_positions),
+                        indent=2,
+                        sort_keys=True,
+                    )
+                )
+                print(
+                    "manual strategy pause active: "
+                    f"{','.join(sorted(manual_pauses))}; no strategy orders"
+                )
+                return 0
             _cancel_orphaned_strategy_entry_orders(
                 broker, settings, strategy, now
             )
@@ -2532,6 +2716,29 @@ def main(argv: list[str] | None = None) -> int:
                 broker.positions(), strategy.symbols
             )
             _validate_strategy_positions(current_positions)
+            manual_pauses = _activate_detected_manual_pauses(
+                broker,
+                settings,
+                strategy,
+                current_positions,
+                now,
+            )
+            if set(manual_pauses) & {
+                symbol.upper() for symbol in strategy.symbols
+            }:
+                print(
+                    json.dumps(
+                        _manual_pause_payload(manual_pauses, current_positions),
+                        indent=2,
+                        sort_keys=True,
+                    )
+                )
+                print(
+                    "manual strategy pause active: "
+                    f"{','.join(sorted(manual_pauses))}; detected after "
+                    "market-data refresh; no strategy orders"
+                )
+                return 0
             scan_rows: list[dict[str, object]] = []
             decisions: dict[str, object] = {}
             price_scale_discontinuities: set[str] = set()

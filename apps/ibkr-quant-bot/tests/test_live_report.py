@@ -69,6 +69,24 @@ class LiveReportTest(unittest.TestCase):
         self.assertIn("策略失败关闭", report)
         self.assertNotIn("U123", report)
 
+    def test_reports_manual_takeover_as_strategy_pause(self) -> None:
+        output = """{"tradable_capital":{"cash_reserve_usd":10.0,"source":"configured_cap","status":"configured","usable_cash":4000.0}}
+{"manual_strategy_pause":{"active":true,"symbols":["SOXS"],"reason":"manual order or position requires explicit operator resume","current_positions":[{"symbol":"SOXS","quantity":100}]}}
+manual strategy pause active: SOXS; no strategy orders
+"""
+        report = format_live_report(
+            output,
+            exit_code=0,
+            started_at_ms=1_752_765_600_000,
+            ended_at_ms=1_752_765_600_731,
+        )
+        self.assertIn("🟡 V2 实盘轮询", report)
+        self.assertIn("人工接管中：SOXS", report)
+        self.assertIn("V5 不会执行入场、退场或尾盘清仓", report)
+        self.assertIn("本轮结论：策略已暂停｜人工订单或持仓已接管", report)
+        self.assertIn("当前持仓：SOXS 100股", report)
+        self.assertIn("不会：人工接管，策略已暂停", report)
+
 
 if __name__ == "__main__":
     unittest.main()

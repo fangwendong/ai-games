@@ -76,6 +76,8 @@ def _execution_blocker(output: str, exit_code: int) -> tuple[str, str]:
         return "卖出部分成交", "仍需关注剩余持仓"
     if "daily entry limit reached:" in output:
         return "不下单", "今日入场次数已达上限"
+    if "manual strategy pause active:" in output:
+        return "策略已暂停", "人工订单或持仓已接管"
     if "position already aligned: no new entry" in output:
         return "不新开仓", "已有持仓，等待保护单或退场条件"
     if "no signal: no order" in output:
@@ -164,6 +166,7 @@ def format_live_report(
     decisions: list[dict[str, Any]] = []
     scan_rows: list[dict[str, Any]] = []
     session_trade_status: dict[str, Any] = {}
+    manual_strategy_pause: dict[str, Any] = {}
     for item in values:
         if isinstance(item, dict) and isinstance(item.get("tradable_capital"), dict):
             capital = item["tradable_capital"]
@@ -177,6 +180,10 @@ def format_live_report(
                 decisions = [
                     row for row in item["core_decisions"] if isinstance(row, dict)
                 ]
+        elif isinstance(item, dict) and isinstance(
+            item.get("manual_strategy_pause"), dict
+        ):
+            manual_strategy_pause = item["manual_strategy_pause"]
         elif isinstance(item, dict) and isinstance(item.get("core_decisions"), list):
             decisions = [row for row in item["core_decisions"] if isinstance(row, dict)]
         elif isinstance(item, list) and item and all(isinstance(row, dict) for row in item):
@@ -189,7 +196,13 @@ def format_live_report(
 
     ended = datetime.fromtimestamp(ended_at_ms / 1000, tz=timezone.utc)
     elapsed_ms = max(0, ended_at_ms - started_at_ms)
-    status_icon = "🟢" if exit_code == 0 else "🔴"
+    status_icon = (
+        "🔴"
+        if exit_code != 0
+        else "🟡"
+        if manual_strategy_pause.get("active")
+        else "🟢"
+    )
     entry_count = int(session_trade_status.get("daily_entry_count", 0) or 0)
     max_entries = int(session_trade_status.get("max_daily_entries", 0) or 0)
     entry_rows = [
@@ -205,6 +218,12 @@ def format_live_report(
         for row in session_trade_status.get("current_positions", [])
         if isinstance(row, dict)
     ]
+    if not position_rows and manual_strategy_pause:
+        position_rows = [
+            row
+            for row in manual_strategy_pause.get("current_positions", [])
+            if isinstance(row, dict)
+        ]
     positions = {
         str(row.get("symbol", "")).upper(): int(float(row.get("quantity", 0) or 0))
         for row in position_rows
@@ -216,7 +235,15 @@ def format_live_report(
     )
     entry_limit_reached = max_entries > 0 and entry_count >= max_entries
     execution_action, execution_reason = _execution_blocker(output, exit_code)
-    if positions:
+    if manual_strategy_pause.get("active"):
+        paused_symbols = "、".join(
+            str(symbol) for symbol in manual_strategy_pause.get("symbols", [])
+        )
+        headline = (
+            f"🟡 人工接管中：{paused_symbols or '策略标的'}；"
+            "V5 不会执行入场、退场或尾盘清仓"
+        )
+    elif positions:
         position_text = "、".join(
             f"{symbol} {quantity}股" for symbol, quantity in positions.items()
         )
@@ -255,13 +282,19 @@ def format_live_report(
         signal_text = f"{action} / {'是' if signal else '否'}" if signal is not None else "不可用"
         if exit_code != 0:
             future_order = "不会：策略失败关闭"
+        elif manual_strategy_pause.get("active"):
+            future_order = "不会：人工接管，策略已暂停"
         elif holding:
             future_order = "会：止盈/止损/退场卖出"
         elif entry_limit_reached:
             future_order = f"不会：入场额度 {entry_count}/{max_entries}"
         else:
             future_order = "可能：满足条件后买入"
-        reason = _short_reason(row.get("reason"))
+        reason = (
+            "人工订单或持仓触发持久化暂停，需显式恢复"
+            if manual_strategy_pause.get("active")
+            else _short_reason(row.get("reason"))
+        )
         lines.append(
             f"{marker.split()[0]} {symbol}｜{_value(row.get('latest_trade_price'))}｜"
             f"{marker.partition(' ')[2]}｜{current_status}"

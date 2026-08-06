@@ -212,6 +212,28 @@ Run the scanner and exit manager with the current default
 ibkr-bot intraday-momentum
 ```
 
+#### Manual trading takeover
+
+Manual orders in `SOXL` or `SOXS` must not share control with the rotation
+strategy. Before a live manual order is submitted through `ibkr-bot order`, the
+CLI atomically records a persistent manual-strategy pause. The live rotation
+command also activates that pause when it detects an active non-strategy order
+or a position without a strategy-owned entry record. Because SOXL and SOXS are
+one coupled, mutually exclusive rotation strategy, a pause for either symbol
+blocks all V5 entry, exit, protective-order, and end-of-day-flatten actions.
+It does not expire merely because the manual position becomes flat.
+
+Inspect or explicitly change the state with:
+
+```bash
+ibkr-bot strategy-control status
+ibkr-bot strategy-control pause SOXS --reason "manual operator order"
+ibkr-bot strategy-control resume SOXS
+```
+
+Only resume after confirming that the manual position and all related manual
+orders are resolved. A dry-run order never creates the pause.
+
 In live trading mode, the intraday scanners refuse delayed market data:
 
 - The scanner reads the current regular/liquid session from IBKR contract
