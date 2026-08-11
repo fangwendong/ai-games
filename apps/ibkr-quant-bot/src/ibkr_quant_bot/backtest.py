@@ -173,6 +173,8 @@ def _bar_size_seconds(bar_size: str) -> int:
         value = int(parts[0])
     except ValueError as exc:
         raise ValueError(f"unsupported bar size: {bar_size}") from exc
+    if value <= 0:
+        raise ValueError(f"bar size must be positive: {bar_size}")
     unit = parts[1]
     if unit.startswith("sec"):
         return value
@@ -291,6 +293,7 @@ def validate_historical_bar_coverage(
 
 
 def _available_time(bar: Bar, availability_delay: timedelta) -> datetime:
+    """Return when a start-timestamped historical bar is safe to consume."""
     return _time_key(bar.time) + availability_delay
 
 

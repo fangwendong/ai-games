@@ -63,6 +63,13 @@ def make_benchmark_bars(start_price: float = 300.0) -> list[Bar]:
 
 
 class BacktestCostTest(unittest.TestCase):
+    def test_rejects_non_positive_bar_size_before_coverage_checks(self) -> None:
+        with self.assertRaisesRegex(ValueError, "bar size must be positive"):
+            validate_historical_bar_coverage(
+                {"SOXL": [Bar(datetime(2026, 8, 10), 1, 1, 1, 1, 1)]},
+                bar_size="0 mins",
+            )
+
     def test_historical_preflight_accepts_two_complete_aligned_sessions(self) -> None:
         start = datetime(2026, 7, 10, 13, 30, tzinfo=timezone.utc)
         bars_by_symbol = {}
